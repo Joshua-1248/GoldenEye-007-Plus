@@ -75,6 +75,17 @@ The project follows several standing rules:
 4. **Backport selectively.** Perfect Dark or related-engine code is used only when the function/algorithm is genuinely equivalent or clearly appropriate for GoldenEye.
 5. **Separate game bugs from emulator/plugin bugs.** Reproduce and document the distinction before altering game code.
 
+## Historical releases and preservation
+
+The repository includes a preservation record for the project's earlier modded revisions, R21 release-candidate lineage, and current R22 development checkpoints:
+
+- [`RELEASE_INDEX.md`](RELEASE_INDEX.md) — preservation matrix showing which revisions are preserved, reconstructable, documented, or still missing;
+- [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md) — chronological history of changes and enhancements across the project;
+- [`PRESERVATION_STATUS.md`](PRESERVATION_STATUS.md) — recovery priorities, archival policy, and integrity requirements for historical artifacts;
+- [`GITHUB_RELEASE_TEMPLATE.md`](GITHUB_RELEASE_TEMPLATE.md) — standard format for documenting future and reconstructed GitHub releases.
+
+Historical revisions are not silently rewritten when later testing changes a diagnosis. Corrections are recorded separately so the original development history and the later confirmed explanation are both preserved.
+
 ## Documentation
 
 See these files before redistributing or contributing:
