@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(     plastique,                         0,       GUNSTATS(plastique), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_5B_PLASTIQUE_LF),  28.0,   0.0, 1062.0,  80.0, 90.0, getStringID(LGUN, GUN_STR_5B_PLASTIQUE_LF), getStringID(LGUN, GUN_STR_B7_PLASTIQUE_LF), 0.0, -16.0, 739.0)

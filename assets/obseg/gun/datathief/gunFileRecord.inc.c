@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(          datathief,  1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_2D_DATATHIEF_LF),  16.0,   0.0,  474.0,  80.0, 0.0, getStringID(LGUN, GUN_STR_2D_DATATHIEF_LF), getStringID(LGUN, GUN_STR_99_DATATHIEF_LF), 0.0, -6.0, 350.0)

@@ -1,0 +1,45 @@
+# setup
+
+# Combine both lists
+ALL_SETUP_NAMES := $(SETUPNAMELIST) $(MPSETUPNAMELIST)
+
+# Compose full setup names (with U prefix and Z suffix)
+SETUP_NAMES := $(foreach name,$(ALL_SETUP_NAMES),U$(name)Z)
+
+# Pattern rules for building .rz files from .bin files
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.rz: $(OBSEG_DIR)/setup/$(COUNTRYCODE)/%.bin
+	$(RZ_COMP) $< $@
+
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.rz: $(OBSEG_DIR)/setup/%.bin
+	$(RZ_COMP) $< $@
+
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.rz: $(BUILD_DIR)/$(OBSEG_DIR)/setup/%.bin
+	$(RZ_COMP) $< $@
+
+# Build .bin from .elf
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.bin: $(BUILD_DIR)/$(OBSEG_DIR)/setup/%.elf
+	$(OBJCOPY) $< $@ -O binary
+
+# Build .elf from .o
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.elf: $(BUILD_DIR)/$(OBSEG_DIR)/setup/%.o
+	$(LD) -T assets/obseg/setup/Usetup.ld -o $@ $<
+
+# Build .o from .c (country-specific and generic)
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.o: $(OBSEG_DIR)/setup/$(COUNTRYCODE)/%.c
+	$(CC) -c $(CFLAGS) -o $@ -O2 $<
+
+$(BUILD_DIR)/$(OBSEG_DIR)/setup/%.o: $(OBSEG_DIR)/setup/%.c
+	$(ConvertAIPRINT) $< | $(CC) -c $(CFLAGS) tools/include-stdin.c -o $@ $(OPTIMIZATION)
+
+# Generate all file targets
+SETUP_O_FILES := $(foreach name,$(SETUP_NAMES),$(BUILD_DIR)/$(OBSEG_DIR)/setup/$(name).o)
+SETUP_BIN_FILES := $(foreach name,$(SETUP_NAMES),$(BUILD_DIR)/$(OBSEG_DIR)/setup/$(name).bin)
+SETUP_ELF_FILES := $(foreach name,$(SETUP_NAMES),$(BUILD_DIR)/$(OBSEG_DIR)/setup/$(name).elf)
+SETUP_RZ_FILES := $(foreach name,$(SETUP_NAMES),$(BUILD_DIR)/$(OBSEG_DIR)/setup/$(name).rz)
+
+SETUP_BUILD_FILES := $(SETUP_O_FILES) $(SETUP_BIN_FILES) $(SETUP_ELF_FILES) $(SETUP_RZ_FILES)
+
+# Default target
+all: $(SETUP_RZ_FILES)
+
+.PHONY: all

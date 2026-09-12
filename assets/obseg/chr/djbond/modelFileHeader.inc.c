@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(djbond, 0, &SKELETON(guard), 0, 7, 0x15, 1285.0543, 0, 0xD)

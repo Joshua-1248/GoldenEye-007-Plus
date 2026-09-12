@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(trevguard, 0, &SKELETON(guard), 0, 7, 0x15, 1260.4969, 0, 0x12)

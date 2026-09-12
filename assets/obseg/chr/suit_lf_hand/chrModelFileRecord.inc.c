@@ -1,0 +1,1 @@
+{&suit_lf_hand_header, "Csuit_lf_handZ", 0.1, 1.0, 0x01, 0x00, 0x00, 0x00},

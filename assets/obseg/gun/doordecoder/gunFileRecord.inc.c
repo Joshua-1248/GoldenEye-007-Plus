@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(   doordecoder,                      TRUE,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_30_DOORDECODER_LF),  12.0,   0.0,  364.0,  90.0, 90.0, getStringID(LGUN, GUN_STR_30_DOORDECODER_LF), getStringID(LGUN, GUN_STR_9C_DOORDECODER_LF), 0.0, -6.0, 199.0)

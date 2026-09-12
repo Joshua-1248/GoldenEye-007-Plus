@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(fattechwoman, 0, &SKELETON(guard), 0, 7, 0x15, 1149.4025, 0, 0xC)

@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(          wppk,                         0,            GUNSTATS(wppk), getStringID(LGUN, GUN_STR_57_WALTHERPPK2_LF), getStringID(LGUN, GUN_STR_01___ISSUE_LF),  20.0,  97.0,  579.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_56_WALTHERPPK_LF), getStringID(LGUN, GUN_STR_BA_PPK_LF), 94.0,   2.0, 356.0)

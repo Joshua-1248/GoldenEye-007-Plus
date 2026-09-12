@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(        bugdetector,  1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_1D_BUGDETECTOR_LF),   0.0,   0.0, 1000.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_1D_BUGDETECTOR_LF), getStringID(LGUN, GUN_STR_8D_BUGDETECTOR_LF), 0.0, 0.0, 1000.0)

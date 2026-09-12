@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+argv=("$@")
+# GNU ld's '-r -b binary INPUT -o OUTPUT' is used to wrap raw assets.
+for ((i=0; i<${#argv[@]}; i++)); do
+  if [[ "${argv[i]}" == "-b" && $((i+1)) -lt ${#argv[@]} && "${argv[i+1]}" == "binary" ]]; then
+    input=""; output=""
+    for ((j=0; j<${#argv[@]}; j++)); do
+      if [[ "${argv[j]}" == "-o" && $((j+1)) -lt ${#argv[@]} ]]; then output="${argv[j+1]}"; fi
+    done
+    for ((j=i+2; j<${#argv[@]}; j++)); do
+      case "${argv[j]}" in
+        -o) ((++j)) ;;
+        -*) ;;
+        *) input="${argv[j]}"; break ;;
+      esac
+    done
+    if [[ -z "$input" || -z "$output" ]]; then
+      echo "llvm-mips-ld: could not parse -b binary invocation" >&2
+      exit 2
+    fi
+    exec llvm-objcopy -I binary -O elf32-bigmips "$input" "$output"
+  fi
+done
+
+filtered=()
+script=""
+tmp_script=""
+for ((i=0; i<${#argv[@]}; i++)); do
+  a="${argv[i]}"
+  case "$a" in
+    --no-warn-mismatch) ;;
+    -T)
+      ((++i))
+      script="${argv[i]}"
+      ;;
+    -T*) script="${a#-T}" ;;
+    *) filtered+=("$a") ;;
+  esac
+done
+
+if [[ -n "$script" ]]; then
+  tmp_script="$(mktemp --suffix=.ld)"
+  trap 'rm -f "$tmp_script"' EXIT
+  python3 - "$script" "$tmp_script" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1]).read_text()
+# GNU MIPS ld fills alignment holes inside executable output sections with
+# zero bytes. LLD deliberately uses its MIPS trap/padding word (0x04170001),
+# which changes an otherwise matching ROM. Force the retail/GNU fill policy
+# for the two multi-object executable sections in GoldenEye's final link.
+import re
+for secname in ('code', 'game', 'csegment'):
+    pattern = r'(\.' + secname + r'\b[^\{]*\{)'
+    src = re.sub(pattern, r'\1\n      FILL(0);', src, count=1)
+# LLD creates the two reserved MIPS GOT words even for these fully static,
+# non-PIC fixed-layout images. GNU MIPS ld does not leave that orphan section
+# in this build. All optimized objects are audited for GOT relocations, so the
+# fallback explicitly discards the orphan to retain the original layout.
+if '*(.got)' not in src and '* (.got)' not in src:
+    marker = '/DISCARD/'
+    pos = src.find(marker)
+    if pos < 0:
+        raise SystemExit(f'llvm-mips-ld: linker script has no /DISCARD/: {sys.argv[1]}')
+    brace = src.find('{', pos)
+    src = src[:brace+1] + '\n      * (.got);\n      * (.got.*);' + src[brace+1:]
+Path(sys.argv[2]).write_text(src)
+PY
+  # GNU ld treats explicit filename(section) references in a linker script as
+  # input files. LLD applies those selectors only to files already present on
+  # the command line, so supply the same unique objects explicitly.
+  mapfile -t script_inputs < <(python3 - "$tmp_script" <<'PY2'
+import re, sys
+from pathlib import Path
+s = Path(sys.argv[1]).read_text()
+seen = set()
+for p in re.findall(r'(?m)(?:^|[;{\s])((?:build|assets)/[^\s();]+\.o)\s*\(', s):
+    if p not in seen:
+        seen.add(p)
+        print(p)
+PY2
+  )
+  # IDO 5.3 emits ELF32/O32 code but predates EF_MIPS_ABI_O32 and leaves
+  # that header bit clear. LLD interprets a clear ABI field as N64 and rejects
+  # it when mixed with modern O32 objects. Normalize only generated build inputs
+  # for this LLVM fallback; this changes e_flags metadata, never section bytes.
+  python3 - "${script_inputs[@]}" <<'PY3'
+from pathlib import Path
+import sys
+EF_MIPS_ABI_O32 = 0x00001000
+patched = 0
+for name in sys.argv[1:]:
+    p = Path(name)
+    b = bytearray(p.read_bytes())
+    if len(b) < 0x28 or b[:4] != b'\x7fELF' or b[4] != 1 or b[5] != 2:
+        continue
+    if int.from_bytes(b[18:20], 'big') != 8:  # EM_MIPS
+        continue
+    flags = int.from_bytes(b[0x24:0x28], 'big')
+    if not flags & EF_MIPS_ABI_O32:
+        b[0x24:0x28] = (flags | EF_MIPS_ABI_O32).to_bytes(4, 'big')
+        p.write_bytes(b)
+        patched += 1
+if patched:
+    print(f"llvm-mips-ld: normalized {patched} legacy ELF32 MIPS object(s) to O32 metadata", file=sys.stderr)
+PY3
+  filtered=(-T "$tmp_script" "${filtered[@]}" "${script_inputs[@]}")
+fi
+
+if [[ "$script" == assets/* ]]; then
+  filtered=(-e 0 "${filtered[@]}")
+fi
+
+exec ld.lld --no-check-sections "${filtered[@]}"

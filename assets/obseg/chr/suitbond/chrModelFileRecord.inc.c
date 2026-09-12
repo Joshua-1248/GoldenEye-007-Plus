@@ -1,0 +1,1 @@
+{&suitbond_header, "CsuitbondZ", 1.0, 1.058, 0x1, 0x00, 0x00, 0x00},

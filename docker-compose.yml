@@ -1,0 +1,10 @@
+services:
+    ge007:
+        restart: unless-stopped
+        build:
+            context: ./
+            dockerfile: ./Dockerfile
+        volumes:
+            - ./:/home/dev/project
+        hostname: ge007
+        tty: true

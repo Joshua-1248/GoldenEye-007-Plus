@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(         taser,                         0,           GUNSTATS(taser), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_6F_TASER_LF), 107.0,  49.0,  568.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_6F_TASER_LF), getStringID(LGUN, GUN_STR_C9_TASER_LF), 64.0, 80.0, 333.0)

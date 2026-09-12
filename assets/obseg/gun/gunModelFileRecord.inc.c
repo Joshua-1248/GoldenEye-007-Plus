@@ -1,0 +1,91 @@
+GunModelFileRecord gitem_structs[] = {
+    {                       NULL,                NULL, TRUE,                      NULL,           0x9883,           0x9811,   0.0,   0.0, 1000.0,   0.0, 0.0,           0x9811,           0x9811, 10.0,  10.0, 1000.0},
+	#include <assets/obseg/gun/fist/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/knife/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/throwknife/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/wppk/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/wppksil/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/tt33/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/skorpion/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/ak47/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/uzi/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/mp5k/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/mp5ksil/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/spectre/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/m16/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/fnp90/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/shotgun/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/autoshot/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/sniperrifle/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/ruger/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/goldengun/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/silverwppk/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/goldwppk/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/laser/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/watchlaser/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/grenadelaunch/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/rocketlaunch/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/grenade/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/timedmine/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/proximitymine/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/remotemine/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/trigger/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/taser/gunFileRecord.inc.c>
+{                       NULL,                   NULL, 0,            GUNSTATS(tank), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_6E_TANK_LF),  20.0,  97.0,  579.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_6E_TANK_LF), getStringID(LGUN, GUN_STR_C8_TANK_LF), 94.0, 2.0, 356.0},
+	#include <assets/obseg/gun/bombcase/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/plastique/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/flarepistol/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/pitongun/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/bungee/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/doordecoder/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/bombdefuser/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/camera/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/lockexploder/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/doorexploder/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/briefcase/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/weaponcase/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/safecrackercase/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/keyanalysercase/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/bug/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/microcamera/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/bugdetector/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/explosivefloppy/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/polarizedglasses/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/darkglasses/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/creditcard/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/gaskeyring/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/datathief/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/watchidentifier/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/watchcommunicator/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/watchgeigercounter/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/watchmagnetrepel/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/watchmagnetattract/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/goldeneyekey/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/blackbox/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/circuitboard/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/clipboard/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/stafflist/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/dossierred/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/plans/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/spyfile/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/blueprints/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/map/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/audiotape/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/videotape/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/dattape/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/spooltape/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/microfilm/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/microcode/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/lectre/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/money/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/goldbar/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/heroin/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/keycard/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/keyyale/gunFileRecord.inc.c>
+	#include <assets/obseg/gun/keybolt/gunFileRecord.inc.c>
+    SUIT_LFRECORD(suit_lf_hand, 0, GUNSTATS(Csuit_lf_handz), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_6D_SUIT_LF_HAND_LF),   0.0,   0.0, 1000.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_83_LF), 10.0, 10.0, 1000.0)
+	#include <assets/obseg/gun/joypad/gunFileRecord.inc.c>
+	{         NULL              ,                   NULL, 0, GUNSTATS(null1), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_54_NULL_LF),   0.0,   0.0, 1000.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_83_LF), 10.0, 10.0, 1000.0},
+	{         NULL              ,                   NULL, 0, GUNSTATS(null2), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_54_NULL_LF),   0.0,   0.0, 1000.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_83_LF), 10.0, 10.0, 1000.0},
+	{         NULL              ,                   NULL, 0, GUNSTATS(token), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_73_TOKEN_LF),  12.0,   0.0,  528.0,  80.0, 0.0, getStringID(LGUN, GUN_STR_73_TOKEN_LF), getStringID(LGUN, GUN_STR_CC_TOKEN_LF), 0.0, -4.0, 310.0}
+};

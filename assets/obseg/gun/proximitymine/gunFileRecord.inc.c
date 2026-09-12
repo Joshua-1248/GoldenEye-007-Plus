@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( proximitymine,                         0,   GUNSTATS(proximitymine), getStringID(LGUN, GUN_STR_02___MINE_LF), getStringID(LGUN, GUN_STR_0D_PROXIMITY_LF),   8.0,   0.0,  364.0,  90.0, 0.0, getStringID(LGUN, GUN_STR_5D_PROXIMITYMINE_LF), getStringID(LGUN, GUN_STR_BB_PROXIMIYTYMINE_LF), 0.0, -3.0, 179.0)

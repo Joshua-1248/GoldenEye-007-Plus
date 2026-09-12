@@ -1,0 +1,19 @@
+enum LMPWEAPONSE_STRINGS
+{
+    MPWEAPON_STR_00_SLAPPERSONLY, // "Slappers only!",
+    MPWEAPON_STR_01_PISTOLS, // "Pistols",
+    MPWEAPON_STR_02_AUTOMATICS, // "Automatics",
+    MPWEAPON_STR_03_POWERWEAPONS, // "Power Weapons",
+    MPWEAPON_STR_04_SNIPERRIFLES, // "Sniper Rifles",
+    MPWEAPON_STR_05_GRENADES, // "Grenades",
+    MPWEAPON_STR_06_REMOTEMINES, // "Remote Mines",
+    MPWEAPON_STR_07_GRENADELAUNCHERS, // "Grenade Launchers",
+    MPWEAPON_STR_08_TIMEDMINES, // "Timed Mines",
+    MPWEAPON_STR_09_PROXIMITYMINES, // "Proximity Mines",
+    MPWEAPON_STR_0A_ROCKETS, // "Rockets",
+    MPWEAPON_STR_0B_LASERS, // "Lasers",
+    MPWEAPON_STR_0C_GOLDENGUN, // "Golden Gun",
+    MPWEAPON_STR_0D_THROWINGKNIVES, // "Throwing Knives",
+    MPWEAPON_STR_0E, // 0,
+    MPWEAPON_STR_0F // 0
+};

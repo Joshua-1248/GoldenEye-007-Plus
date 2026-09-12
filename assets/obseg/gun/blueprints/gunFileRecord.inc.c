@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( blueprints, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_18_BLUEPRINTS_LF),  18.0,   0.0,  579.0, 350.0, 90.0, getStringID(LGUN, GUN_STR_18_BLUEPRINTS_LF), getStringID(LGUN, GUN_STR_88_BLUEPRINTS_LF), 0.0, -8.0, 364.0)

@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(   watchmagnetrepel,  1,                      NULL, getStringID(LGUN, GUN_STR_7F_WATCH_LF), getStringID(LGUN, GUN_STR_4B_MAGNETREPEL_LF),  82.0,   0.0, 2857.0,   0.0, 90.0, getStringID(LGUN, GUN_STR_7D_WATCHMAGNETREPEL_LF), getStringID(LGUN, GUN_STR_D4_WATCHMAGNETICREPEL_LF), 0.0, -40.0, 1383.0)

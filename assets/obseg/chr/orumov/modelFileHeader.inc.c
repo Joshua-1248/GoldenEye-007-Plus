@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(orumov, 0, &SKELETON(guard), 0, 7, 0x14, 1347.004, 0, 0x15)

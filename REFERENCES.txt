@@ -1,0 +1,143 @@
+GOLDENEYE 007 PLUS — REFERENCES AND PROVENANCE
+==============================================
+
+This file records important technical references used by GoldenEye 007 Plus.
+It is intended to make provenance visible and to discourage unattributed
+copying or accidental loss of historical context.
+
+1. GOLDENEYE 007 DECOMPILATION
+------------------------------
+Repository:
+  https://gitlab.com/kholdfuzion/goldeneye_src
+
+Role:
+  Primary source baseline for GoldenEye 007 (Nintendo 64) behavior and engine
+  reconstruction. Used to distinguish original retail behavior from GoldenEye
+  007 Plus changes and regressions.
+
+The supplied upstream README documents matching retail ROM outputs and notes
+that a prior copy of the game is required to extract assets that are not
+included in the source repository.
+
+2. RETAIL GOLDENEYE 007 (NTSC-U)
+--------------------------------
+Reference ROM used during development:
+  GoldenEye 007 (U) [!].z64
+
+Role:
+  Behavioral and binary reference for unmodified retail GoldenEye.
+
+The ROM is NOT part of the public source distribution and must not be
+redistributed with this project.
+
+3. GOLDENEYE 007 PLUS R21/R22 BASELINES
+---------------------------------------
+R21 Final was the known-good baseline entering R22 development.
+
+R22 adds and consolidates further work including Disable Knockback, Disable
+Noise Dithering, expanded Special Options integration, and SP Watch Special
+Options scrolling.
+
+Cumulative addenda in the repository document exact release/build history and
+should be kept with archival source snapshots.
+
+4. PERFECT DARK DECOMPILATION
+-----------------------------
+Supplied repository:
+  Perfect Dark decompilation (Ryan Dwyer / project contributors)
+
+Public project reference:
+  https://github.com/n64decomp/perfect_dark
+
+Role:
+  Same-lineage engine reference for algorithms, multiplayer/co-op behavior,
+  AI, menu systems, rendering behavior and naming. Backports are made only
+  where code/functionality is genuinely equivalent or clearly appropriate.
+
+License:
+  MIT License, Copyright (c) 2022 Ryan Dwyer.
+  See LICENSES_AND_NOTICES.txt and the upstream Perfect Dark LICENSE file.
+
+5. GOLDFINGER 64 / SUBDRAG
+--------------------------
+Role:
+  Community modding/research reference for GoldenEye engine behavior, assets,
+  level/model structures and historical modding techniques.
+
+When specific code or assets are used in the future, record the exact source,
+version and license/permission in this file before release.
+
+6. GOLDENEYE SETUP EDITOR
+-------------------------
+Role:
+  GoldenEye/Perfect Dark modding ecosystem reference and interoperability
+  target. GoldenEye 007 Plus development may compare formats/workflows with
+  Setup Editor while retaining standalone project architecture.
+
+7. GOLDENEYE XBLA PROTOTYPES
+----------------------------
+Role:
+  Reverse-engineering/reference material for symbols, function matching,
+  behavior comparison, debug information and engine-lineage analysis.
+
+Prototype-derived information should be treated as research provenance; do
+not assume that prototype content is freely redistributable.
+
+8. TIMESPLITTERS ENGINE-LINEAGE RESEARCH
+----------------------------------------
+Role:
+  Later Free Radical / Rare-lineage material can provide names and algorithmic
+  clues when the same function or technique can be demonstrated across the
+  lineage. Platform/compiler differences do not by themselves invalidate a
+  match, but unrelated descendant code should not be forced into GoldenEye.
+
+9. PROJECT64
+------------
+Project:
+  https://www.pj64-emu.com/
+
+Role:
+  Primary emulator test environment used during current GoldenEye 007 Plus
+  development.
+
+10. GLIDEN64
+------------
+Project:
+  https://github.com/gonetz/GLideN64
+
+Role:
+  Graphics plugin used for testing.
+
+Important project-specific compatibility finding:
+  Enable "Force depth buffer clear" when regression-testing the current
+  GoldenEye 007 Plus split-screen builds. An intermittent black-world issue
+  was traced to graphics-plugin state rather than the GoldenEye source.
+
+11. NINTENDO 64 / LIBULTRA MATERIAL
+-----------------------------------
+The source tree includes/reconstructs N64 runtime interfaces and build-era
+material required by the upstream decompilation. Ownership and licensing of
+such material are not superseded by GoldenEye 007 Plus documentation.
+
+12. THIRD-PARTY BUILD TOOLS
+---------------------------
+The repository contains build/recompilation/conversion tools with their own
+licenses and authors. Preserve the notices stored in their directories.
+
+Known example in the supplied tree:
+  tools/ido5.3_recomp/rabbitizer/LICENSE
+
+13. PROVENANCE RULE FOR FUTURE CONTRIBUTIONS
+--------------------------------------------
+For any future external code, algorithm, asset format research, documentation,
+script, library or tool incorporated into GoldenEye 007 Plus, record:
+
+- project/source name;
+- author(s) or organization when known;
+- exact URL/repository;
+- version/commit/date where practical;
+- license or permission basis;
+- whether material was copied, adapted, or used only as behavioral research;
+- which GoldenEye 007 Plus files were affected.
+
+Do not erase existing provenance when refactoring.

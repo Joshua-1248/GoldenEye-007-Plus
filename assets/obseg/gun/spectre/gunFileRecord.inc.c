@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(       spectre,                         0,         GUNSTATS(spectre), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_58_SPECTRE_LF),  -4.0, 144.0, 1128.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_58_SPECTRE_LF), getStringID(LGUN, GUN_STR_B4_SPECTRE_LF), 146.0, -18.0, 801.0)

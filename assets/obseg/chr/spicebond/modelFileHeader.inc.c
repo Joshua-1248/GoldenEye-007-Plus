@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(spicebond, 0, &SKELETON(guard), 0, 7, 0x15, 1208.6448, 0, 0x11)

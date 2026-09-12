@@ -1,0 +1,1 @@
+{&natalya_header, "CnatalyaZ", 1.0, 0.96609998, 0x0, 0x1, 0x00, 0x00},

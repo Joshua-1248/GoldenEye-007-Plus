@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(     goldengun,                         0,       GUNSTATS(goldengun), getStringID(LGUN, GUN_STR_3B_GOLDEN_LF), getStringID(LGUN, GUN_STR_05__GUN_LF),  29.0, 146.0,  629.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_39_GOLDENGUN_LF), getStringID(LGUN, GUN_STR_A3_GOLDENGUN_LF), 144.0, 18.0, 464.0)

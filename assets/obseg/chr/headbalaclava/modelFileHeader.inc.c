@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(headbalaclava, 0, NULL, 0, 2, 1, 212.62949, 0, 2)

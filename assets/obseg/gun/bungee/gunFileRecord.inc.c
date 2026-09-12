@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(        bungee,                      TRUE,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_1F_BUNGEE_LF),   0.0,   0.0, 1000.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_1F_BUNGEE_LF), getStringID(LGUN, GUN_STR_8F_BUNGEE_LF), 0.0, 0.0, 1000.0)

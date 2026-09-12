@@ -1,0 +1,55 @@
+# prop
+
+# Pattern rules for building .rz files from .bin files
+$(BUILD_DIR)/$(OBSEG_DIR)/prop/%.rz: $(BUILD_DIR)/$(OBSEG_DIR)/prop/%.bin
+	$(RZ_COMP) $< $@
+
+# Build .bin from .elf
+$(BUILD_DIR)/$(OBSEG_DIR)/prop/%.bin: $(BUILD_DIR)/$(OBSEG_DIR)/prop/%.elf
+	$(OBJCOPY) $< $@ -O binary
+
+# Build .elf from Model.o (and Switches.o if it exists)
+# The pattern P%Z.elf extracts the prop name from the target
+$(BUILD_DIR)/$(OBSEG_DIR)/prop/P%Z.elf: $(BUILD_DIR)/$(OBSEG_DIR)/prop/%/Model.o
+	@mkdir -p $(@D)
+	@if [ -f $(BUILD_DIR)/$(OBSEG_DIR)/prop/$*/Switches.o ]; then \
+		$(LD) -T assets/obseg/prop/Pname.ld -o $@ $(BUILD_DIR)/$(OBSEG_DIR)/prop/$*/Switches.o $(BUILD_DIR)/$(OBSEG_DIR)/prop/$*/Model.o; \
+	else \
+		$(LD) -T assets/obseg/prop/Pname.ld -o $@ $(BUILD_DIR)/$(OBSEG_DIR)/prop/$*/Model.o; \
+	fi
+
+# Build Model.o from Model.c
+# If Model.c doesn't exist but PnameZ.bin does, convert it first
+$(BUILD_DIR)/$(OBSEG_DIR)/prop/%/Model.o: $(OBSEG_DIR)/prop/%/Model.c
+	@mkdir -p $(@D)
+	$(CC) -c $(CFLAGS) -Wab,-r4300_mul -non_shared -G 0 -Xcpluscomm -O2 -mips2 \
+		-woff 609,649,712,807,838 -DTARGET_N64 -I$(IRIX_ROOT)/usr/include \
+		-Iinclude -Isrc -I. -o $@ $<
+
+# Generate Model.c from binary if needed
+$(OBSEG_DIR)/prop/%/Model.c:
+	@if [ -f $(OBSEG_DIR)/prop/P$*Z.bin ]; then \
+		echo "Converting P$*Z.bin to Model.c..."; \
+		python3 scripts/generate_prop_model_c.py --cleanup $* || exit 1; \
+	else \
+		echo "Error: Neither $(OBSEG_DIR)/prop/$*/Model.c nor $(OBSEG_DIR)/prop/P$*Z.bin exists"; \
+		exit 1; \
+	fi
+
+# Build Switches.o from Switches.c (if it exists)
+$(BUILD_DIR)/$(OBSEG_DIR)/prop/%/Switches.o: $(OBSEG_DIR)/prop/%/Switches.c
+	@mkdir -p $(@D)
+	$(CC) -c $(CFLAGS) -Wab,-r4300_mul -non_shared -G 0 -Xcpluscomm -O2 -mips2 \
+		-woff 609,649,712,807,838 -DTARGET_N64 -I$(IRIX_ROOT)/usr/include \
+		-Iinclude -Isrc -I. -o $@ $<
+
+# Build PROP_RZ_NAMES from PROPNAMELIST
+PROP_RZ_NAMES = $(foreach prop,$(PROPNAMELIST),P$(prop)Z)
+
+# Use PROP_RZ_NAMES to generate the list of .rz files
+PROP_RZ_FILES = $(addprefix $(BUILD_DIR)/$(OBSEG_DIR)/prop/, $(addsuffix .rz, $(PROP_RZ_NAMES)))
+
+# Default target
+all: $(PROP_RZ_FILES)
+
+.PHONY: all

@@ -1,0 +1,10 @@
+//D:80033764
+WeaponStats joypad_stats = {
+	1.0, 0.0, 0.0, 0.0, 3.0, 3.0, 8.5, AMMO_NONE, 0, 0xFF, 0x00, 1, 0, 0, NULL, 1.0, 0.0, 0.0, SCALEVAL1, 0.89999998, 1.0, 0xFF, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 4.0, 0.0, 
+    WEAPONSTATBITFLAG_CLICKY | 
+    WEAPONSTATBITFLAG_ONLY_1_HANDED
+
+
+
+
+};

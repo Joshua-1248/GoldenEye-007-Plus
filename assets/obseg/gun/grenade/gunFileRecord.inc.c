@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(       grenade,                         0,         GUNSTATS(grenade), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_3D_GRENADE_LF), 180.0,   0.0, 2745.0,   0.0, 90.0, getStringID(LGUN, GUN_STR_3E_HANDGRENADE_LF), getStringID(LGUN, GUN_STR_A6_GRENADE_LF), 0.0, 48.0, 1468.0)

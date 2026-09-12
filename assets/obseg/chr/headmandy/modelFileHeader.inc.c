@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(headmandy, 0, NULL, 0, 2, 1, 196.83067, 0, 3)

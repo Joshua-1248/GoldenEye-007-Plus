@@ -1,0 +1,81 @@
+GOLDENEYE 007 PLUS — CREDITS
+=============================
+
+GoldenEye 007 Plus exists because of the work of many original developers,
+decompilation researchers, preservationists, reverse engineers, emulator and
+tool authors, testers, and community contributors.
+
+ORIGINAL GOLDENEYE 007
+----------------------
+Original game: GoldenEye 007 for Nintendo 64.
+
+Respect and credit are due to the original Rare development team and to the
+publishers, licensors, artists, designers, programmers, composers, voice and
+performance contributors, QA staff, and everyone else credited in the retail
+game.
+
+GoldenEye / James Bond-related intellectual property, characters, trademarks,
+and commercial game content belong to their respective rights holders,
+including the applicable Nintendo, Rare, MGM and EON entities and other
+rightsholders.
+
+GOLDENEYE 007 DECOMPILATION
+---------------------------
+GoldenEye 007 Plus is built on the GoldenEye 007 decompilation project and its
+community contributors.
+
+Primary upstream reference supplied for this project:
+  https://gitlab.com/kholdfuzion/goldeneye_src
+
+The decompilation project's matching/reconstruction work is fundamental to
+this project. Preserve its authorship history and upstream documentation.
+
+PERFECT DARK DECOMPILATION
+--------------------------
+Perfect Dark decompilation project and contributors.
+
+Ryan Dwyer is credited in the supplied Perfect Dark repository's MIT license:
+  Copyright (c) 2022 Ryan Dwyer
+
+Perfect Dark is used as an engine-lineage research and selective backport
+reference. GoldenEye 007 Plus does not treat Perfect Dark as a wholesale
+replacement for GoldenEye behavior.
+
+GOLDENEYE 007 PLUS PROJECT
+--------------------------
+Design, integration, optimization, testing, menu/UI work, co-op expansion,
+multiplayer expansion, gameplay options, debugging, preservation decisions,
+and cumulative project direction: GoldenEye 007 Plus project contributors.
+
+Development/research assistance has included OpenAI ChatGPT for source
+analysis, implementation assistance, build troubleshooting, documentation,
+and comparative research.
+
+COMMUNITY / RESEARCH REFERENCES
+-------------------------------
+Additional community work that has informed research or future compatibility
+planning includes, where applicable:
+
+- Goldfinger 64 / SubDrag community research and tooling;
+- GoldenEye Setup Editor ecosystem and related GoldenEye/Perfect Dark modding
+  research;
+- GoldenEye XBLA prototype research used for function/name/behavior comparison;
+- TimeSplitters lineage research where symbols or algorithms provide useful
+  provenance clues;
+- Project64 and GLideN64 for emulator testing and regression investigation.
+
+THIRD-PARTY TOOLS
+-----------------
+All third-party tools retain their original authorship and licenses. See the
+license/README files located with those tools and LICENSES_AND_NOTICES.txt.
+
+SPECIAL THANKS
+--------------
+Thanks to the GoldenEye and Perfect Dark preservation/modding communities and
+to everyone who documents hardware behavior, tests edge cases, maintains old
+toolchains, preserves prototypes, and makes this kind of historical software
+research possible.
+
+If you contribute code or research to GoldenEye 007 Plus, add yourself (or the
+name you wish to be credited under) in a future update rather than removing
+existing attribution.

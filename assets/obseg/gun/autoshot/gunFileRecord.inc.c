@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(      autoshot,                         0,        GUNSTATS(autoshot), getStringID(LGUN, GUN_STR_16_AUTOMATIC_LF), getStringID(LGUN, GUN_STR_0C_SHOTGUN_LF),  73.0, 285.0, 1224.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_15_AUTOMATICSHOTGUN_LF), getStringID(LGUN, GUN_STR_86_AUTOSHOTGUN_LF), 284.0, 4.0, 980.0)

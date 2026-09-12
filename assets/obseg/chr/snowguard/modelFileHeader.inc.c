@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(snowguard, 0, &SKELETON(guard), 0, 7, 0x14, 1261.1731, 0, 0x11)

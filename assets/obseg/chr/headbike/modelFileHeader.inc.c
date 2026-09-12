@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(headbike, 0, NULL, 0, 2, 1, 219.82707, 0, 6)

@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( clipboard, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_22_CLIPBOARD_LF),  40.0,   0.0, 1151.0,  80.0, 90.0, getStringID(LGUN, GUN_STR_22_CLIPBOARD_LF), getStringID(LGUN, GUN_STR_92_CLIPBOARD_LF), 0.0, -20.0, 580.0)

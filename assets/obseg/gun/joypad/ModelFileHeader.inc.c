@@ -1,0 +1,2 @@
+//D:800XXXXX
+MODELFILEHEADER(joypad, 0, &SKELETON(g_weapon), 0, 0xE, 0xD, 523.96826, 0, 4)

@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(       wppksil,                         0,         GUNSTATS(wppksil), getStringID(LGUN, GUN_STR_03__PPK_LF), getStringID(LGUN, GUN_STR_10_SILENCED_LF),  26.0, 162.0,  668.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_55_PPKSILENSED_LF), getStringID(LGUN, GUN_STR_B9_SILENCEDPPK_LF), 169.0,  5.0, 535.0)

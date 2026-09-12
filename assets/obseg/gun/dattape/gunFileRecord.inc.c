@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( dattape, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_2C_DATTAPE_LF),  14.0,   0.0,  387.0,  90.0, 90.0, getStringID(LGUN, GUN_STR_2C_DATTAPE_LF), getStringID(LGUN, GUN_STR_98_DATTAPE_LF), 0.0, 0.0, 238.0)

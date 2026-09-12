@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( keybolt, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_19_BOLTKEY_LF),  78.0,   0.0, 3518.0,  80.0, 90.0, getStringID(LGUN, GUN_STR_19_BOLTKEY_LF), getStringID(LGUN, GUN_STR_89_BOLTKEY_LF), 0.0, -12.0, 2582.0)

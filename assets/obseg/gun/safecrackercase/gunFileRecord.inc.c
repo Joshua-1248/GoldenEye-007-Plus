@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(    safecrackercase,                        1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_63_SAFECRACKER_LF),  16.0,   0.0,  568.0,   0.0, 90.0, getStringID(LGUN, GUN_STR_62_SAFECRACKERCASE_LF), getStringID(LGUN, GUN_STR_C0_SAFECRACKER_LF), 0.0, -8.0, 323.0)

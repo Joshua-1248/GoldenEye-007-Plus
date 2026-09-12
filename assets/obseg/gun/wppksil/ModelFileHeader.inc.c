@@ -1,0 +1,2 @@
+//D:800XXXXX
+MODELFILEHEADER(wppksil, 0, &SKELETON(standard_gun), 0, 0x24, 6, 438.66476, 0, 0xC)

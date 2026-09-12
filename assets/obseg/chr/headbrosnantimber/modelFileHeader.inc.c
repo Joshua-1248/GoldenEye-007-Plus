@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(headbrosnantimber, 0, NULL, 0, 2, 1, 179.28358, 0, 4)

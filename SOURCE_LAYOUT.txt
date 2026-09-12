@@ -1,0 +1,31 @@
+GOLDENEYE 007 PLUS — CLEAN SOURCE LAYOUT
+========================================
+
+This repository intentionally contains only the current project source,
+required build/toolchain material, and public release documentation.
+
+Kept:
+- assets/   Current build-time asset source/definitions required by the project
+- bin/      Upstream build support binaries/scripts tracked by the source tree
+- include/  Headers
+- ld/       Linker inputs
+- rsp/      RSP source
+- scripts/  Extraction/build/audit/generation scripts
+- src/      GoldenEye 007 Plus game/runtime source
+- tools/    Upstream/project build tools and their own license notices
+- Makefile and linker/hash/image-list inputs
+- build_geplus.sh
+- README / licensing / credits / references / upstream README
+
+Intentionally removed from this GitHub-ready source package:
+- historical R3-R21 addenda and status notes
+- RC/test matrices and build logs
+- old release/hash summaries
+- superseded patch files
+- temporary source-file copies from development
+- old build_r13.sh through build_r21.sh scripts
+- packaging/debug manifests
+- stale GitHub CI workflows tied to upstream/private secrets
+- generated ROMs and retail baserom files
+
+No retail ROM is included.

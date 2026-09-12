@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import re, sys
+
+ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else '.')
+
+def read(rel):
+    return (ROOT / rel).read_text(errors='replace')
+
+def func_body(text, name):
+    m = re.search(r'\b(?:void|s32|u32|bool|Gfx\s*\*)\s+' + re.escape(name) + r'\s*\([^)]*\)\s*\{', text)
+    if not m:
+        return ''
+    i = m.end()-1
+    depth = 0
+    for j in range(i, len(text)):
+        c = text[j]
+        if c == '{': depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0:
+                return text[m.start():j+1]
+    return ''
+
+files = {p: read(p) for p in [
+    'src/rom_header.s','src/game/bg.c','src/game/bondinv.c','src/game/bondview2.c','src/game/chr.c',
+    'src/game/chrprop.c','src/game/file2.c','src/game/front.c','src/game/lv.c',
+    'src/game/mpmenu.c','src/game/objective_status.c','src/game/options.c',
+    'src/game/options.h','src/game/propobj.c','src/game/gunfire.c','src/game/spectrum.c',
+    'src/game/file2.h','build_r21.sh','Makefile','scripts/patch_r21_front_textids.py',
+    'assets/obseg/prop/sev_door3/Model.c','assets/obseg/prop/sev_door3_wind/Model.c',
+    'assets/obseg/prop/sev_door4_wind/Model.c','assets/obseg/prop/sev_door_v1/Model.c'
+]}
+
+checks=[]
+def check(name, ok, detail=''):
+    checks.append((name,bool(ok),detail))
+
+def has(f, *needles):
+    s=files[f]
+    return all(n in s for n in needles)
+
+check('R21 ROM revision is 0x15', '0x15' in files['src/rom_header.s'])
+check('B+Z queued mission-item path exists', has('src/game/bondinv.c','g_MissionItemQueueValid','bondinvProcessMissionItemQueue','gunRequestHandWeaponChange'))
+check('B+Z queue is ticked after gun update', 'bondinvProcessMissionItemQueue();' in files['src/game/bondview2.c'])
+check('Shared Co-Op mission item registries exist', has('src/game/bondinv.c','g_CoopSharedProps','g_CoopSharedItems','bondinvShareCoopItem','bondinvShareCoopProp'))
+check('Shared mission items restore during inventory reinit', has('src/game/bondinv.c','g_CoopSharedPropCount','bondinvAddPropToInv(g_CoopSharedProps[i])','bondinvAddInvItem(i)'))
+check('Mission pickups feed the shared registry', has('src/game/propobj.c','bondinvShareCoopItem','bondinvShareCoopProp'))
+check('Objective status is broadcast to each Co-Op player HUD', has('src/game/objective_status.c','getPlayerCount()','set_cur_player(player)','hudmsgBottomShow(&buffer)'))
+check('Per-viewport mission timer is suppressed in Co-Op', has('src/game/bondview2.c','getPlayerCount() == 1 || get_scenario() != SCENARIO_COOP','countdownTimerRender(gdl)'))
+check('One full-screen Co-Op timer render exists', has('src/game/lv.c','getPlayerCount() > 1 && get_scenario() == SCENARIO_COOP','countdownTimerRender(DL)'))
+check('Timer coordinates use physical screen center', has('src/game/propobj.c','xpos = viGetX() / 2','ypos = viGetY() / 2'))
+check('Split-screen top dialogue uses compact Bank Gothic path', has('src/game/bondview2.c','msgchars = ptrFontBankGothicChars','msgfont = ptrFontBankGothic','msg.x + msg.textwidth + 1'))
+check('Pickup HUD uses tighter split-screen text spacing', 'setTextSpacingInverted(3)' in files['src/game/bondview2.c'])
+body=func_body(files['src/game/mpmenu.c'],'mpStartCoopGameOver')
+check('Dedicated Co-Op GAME OVER path exists', bool(body))
+check('Co-Op GAME OVER does not calculate competitive awards', bool(body) and 'mpCalculateAwards' not in body)
+check('Permanent-explosion terminal waits for full death sequence', has('src/game/lv.c','redbloodfinished','deathanimfinished','colourfadetimemax60 < 0.0f','fullydead == getPlayerCount()'))
+check('Permanent-explosion terminal stops level music and enters Co-Op GAME OVER', has('src/game/lv.c','musicTrack1Stop();','mission_failed_or_aborted = TRUE;','mpStartCoopGameOver();'))
+check('AI references are cleared after completed player death lifecycle', has('src/game/lv.c','chrCoopClearRefsToPlayer(i)','redbloodfinished','deathanimfinished'))
+check('Individual Co-Op death guards global Bond KIA', has('src/game/bondview2.c','gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP','g_isBondKIA = 1;'))
+check('Escort ownership implementation is present', has('src/game/chr.c','SCENARIO_COOP') and has('src/game/chrprop.c','SCENARIO_COOP'))
+check('Co-Op report snapshot is captured before stage cleanup', files['src/game/lv.c'].find('frontStoreCoopMissionReportStats();') < files['src/game/lv.c'].find('cleanupGuardData();'))
+check('Persistent Co-Op mission report data exists', has('src/game/front.c','g_CoopMissionReport','frontStoreCoopMissionReportStats','frontHasCoopMissionReport'))
+check('Live Co-Op watch uses Objectives/Pause on MENU_SCORES', has('src/game/mpmenu.c','Deaths << Kills << Objectives/Pause << Exit','mpwatchUseCoopPauseCarousel','text = "OBJECTIVES"','text = "A: PAUSE"','text = "A: UNPAUSE"'))
+check('Co-Op labels are KILLS and DEATHS without player prefix', has('src/game/mpmenu.c','if (mpwatchIsCampaignCoop())','text = "DEATHS"'))
+check('Competitive Score/Rank rendering is excluded from live Co-Op score card', has('src/game/mpmenu.c','g_CurrentPlayer->mpmenumode == MENU_SCORES','&& !mpwatchIsCampaignCoop()'))
+check('Scenario display mapping places Co-Op immediately after Normal', has('src/game/front.c','return SCENARIO_COOP') and has('src/game/front.c','SCENARIO_NORMAL','SCENARIO_COOP'))
+check('Co-Op player count clamps to at least 2', has('src/game/front.c','scenario == SCENARIO_COOP && numplayers < 2','numplayers = 2'))
+check('Extra MP Characters frontend gate uses real toggle state', has('src/game/front.c','g_CheatActivated[CHEAT_EXTRA_MP_CHARS]'))
+check('Multiplayer Settings hub exists', has('src/game/front.c','MENU_MP_SETTINGS','"Settings"','"Player Options"'))
+check('No Radar [Multi] is exposed in Settings and hidden from Cheats', has('src/game/front.c','cheatGetMenuTextPointer(CHEAT_NO_RADAR_MP)','case CHEAT_NO_RADAR_MP:') and 'i != CHEAT_NO_RADAR_MP' in files['src/game/front.c'])
+check('No Reload is inserted directly after Infinite Ammo on Cheat Page 1', has('src/game/front.c','if (i == CHEAT_INFINITE_AMMO)','arrayUnlockedCheats[totalunlockedcheats++] = CHEAT_NO_RELOAD'))
+check('Per-player option bitfield covers requested seven options', has('src/game/options.h','MP_PLAYEROPT_LOOK','MP_PLAYEROPT_AUTOAIM','MP_PLAYEROPT_AIMCONTROL','MP_PLAYEROPT_SIGHT','MP_PLAYEROPT_LOOKAHEAD','MP_PLAYEROPT_AMMO','MP_PLAYEROPT_HEADROLL'))
+check('Head Roll defaults On for all multiplayer players', has('src/game/options.c','MP_PLAYEROPT_DEFAULT','g_MpPlayerOptions[MAX_PLAYER_COUNT]'))
+check('Per-player gameplay getters read g_MpPlayerOptions', files['src/game/options.c'].count('g_MpPlayerOptions[player_num]') >= 7)
+check('Head Roll application is gated by per-player setting', 'cur_player_get_headroll_setting()' in files['src/game/bondview2.c'])
+check('Four aspect ratios and generalized factor path exist', has('src/game/options.c','7.0f / 4.0f','8.0f / 3.0f','get_screen_ratio_factor'))
+check('R21 EEPROM migration marker/options support is present', has('src/game/file2.c','OPTION_R21_MIGRATED','OPTION_HEADROLL','OPTION_CROSSHAIR'))
+check('Build wrapper verifies NTSC-U base ROM SHA-1', has('build_r21.sh','abe01e4aeb033b6c0836819f549c791b26cfde83','baserom.u.z64'))
+check('Build wrapper preserves Silver/Gold PP7 third-person model sources', has('build_r21.sh','chrsilverwppk/Model.c','chrgoldwppk/Model.c','force_extract_u'))
+check('Compressed-slot hard guard remains present', 'CDATA_MAX_SIZE=72704' in (ROOT/'tools/data_compress.sh').read_text(errors='replace'))
+check('R21 post-link Settings text-ID hotfix is wired into mod build', has('Makefile','python3 scripts/patch_r21_front_textids.py $@') and has('scripts/patch_r21_front_textids.py','0x9c73 / 0x9c74','Multiplayer Settings No Radar On/Off','Player Options Head Roll On/Off'))
+check('Settings text-ID hotfix requires unique exact signatures', has('scripts/patch_r21_front_textids.py','hits = find_all(data, old)','if len(hits) != 1','expected exactly one R21 signature'))
+check('RC3 fixed-slot crash guards cover inventory/score/pickup paths', has('scripts/patch_r21_front_textids.py','Inventory forward prop-only ring wrap guard','Inventory backward prop-only ring wrap guard','Co-Op pause invalid-score-scenario guard','3/4P weapon pickup string initialization'))
+check('Player Options fixed-slot row alignment patch remains present', 'Player Options label/value row alignment' in files['scripts/patch_r21_front_textids.py'])
+check('Co-Op Objectives/Pause header keeps full LMPMENU text bank', has('src/game/mpmenu.c','(g_pausedFlag ? MPMENU_STR_18_PAUSED : MPMENU_STR_19_PAUSE)'))
+conditional_stringids = []
+for rel, text in files.items():
+    if rel.endswith('.c'):
+        for m in re.finditer(r'getStringID\s*\((.*?)\)', text, re.S):
+            if '?' in m.group(1):
+                conditional_stringids.append((rel, m.group(0)))
+check('No unguarded conditional getStringID calls remain', len(conditional_stringids) == 2 and any(rel == 'src/game/mpmenu.c' and '(g_pausedFlag ?' in call for rel, call in conditional_stringids) and any(rel == 'src/game/front.c' and 'CHEAT_NO_RADAR_MP' in call for rel, call in conditional_stringids) and 'Multiplayer Settings No Radar On/Off' in files['scripts/patch_r21_front_textids.py'])
+check('Options Page 2 exposes all five requested settings', has('src/game/front.c','Head Roll','Endless Death Cam','Real-Time Collapse','Disable Hitstun','Damage Flash') or has('src/game/spectrum.c','Head Roll','Endless Death Cam','Real-Time Collapse','Disable Hitstun','Damage Flash'))
+check('Extended option defaults are Head Roll/Damage Flash On and death/hitstun options Off', has('src/game/file2.h','DEFAULT_MOD_OPTIONS2','MODOPT2_MIGRATED | MODOPT2_DAMAGE_FLASH') and 'OPTION_HEADROLL' in files['src/game/file2.h'])
+check('Endless Death Cam loops solo death replay without incrementing finite replay count', has('src/game/bondview2.c','MODOPT2_ENDLESS_DEATHCAM','bondviewSetCameraMode(CAMERAMODE_DEATH_CAM_SP)'))
+check('Real-Time Collapse uses full head animation speed', has('src/game/bondview2.c','MODOPT2_REALTIME_COLLAPSE','bheadSetSpeed','1.0f : 0.5f'))
+check('Real-Time Collapse waits for death music before fade/death cam', has('src/game/bondview2.c','MODOPT2_REALTIME_COLLAPSE','alCSPGetState(g_musicXTrack1SeqPlayer) != AL_PLAYING','currentPlayerAdjustFade'))
+check('Disable Hitstun leaves single-player trigger input active', has('src/game/bondview2.c','MODOPT2_DISABLE_HITSTUN','moveData.triggerOn = 0'))
+check('Damage Flash gates only the damage fade-colour application', has('src/game/bondview2.c','MODOPT2_DAMAGE_FLASH','currentPlayerSetFadeColour'))
+check('Persistent non-manual crosshair is smaller while manual Aim keeps retail size', has('src/game/gunfire.c','g_CurrentPlayer->insightaimmode ? 16.0f : 10.0f'))
+check('Options labels were relocated out of compressed C data', 'g_ModOptionsLabels' not in files['src/game/front.c'] and has('src/game/spectrum.c','frontModGetOptionLabel','static u32 text[6]'))
+check('PD-style room allocation GC is called for cached room reloads', has('src/game/bg.c','bgModGarbageCollectRoomsForLoad(allocsize)','cur_room_totalsize > 0'))
+check('Room GC protects visible, neighbour and script-pinned rooms', has('src/game/spectrum.c','model_bin_loaded > oldestage','!room->room_rendered','!room->room_neighbor_to_rendered','!room->field_35','delete_room_data(oldestroom)'))
+check('Severnaya arrow decal disables mipmapping on all affected door variants', all('TEXTURETYPE_TILE, 0, 0, IMAGE_1242' in files[f] for f in ['assets/obseg/prop/sev_door3/Model.c','assets/obseg/prop/sev_door3_wind/Model.c','assets/obseg/prop/sev_door4_wind/Model.c','assets/obseg/prop/sev_door_v1/Model.c']))
+check('Build wrapper preserves all four custom Severnaya door sources', has('build_r21.sh','sev_door3/Model.c','sev_door3_wind/Model.c','sev_door4_wind/Model.c','sev_door_v1/Model.c'))
+
+passed=sum(ok for _,ok,_ in checks)
+failed=len(checks)-passed
+print('GoldenEye R21 static regression audit')
+print('====================================')
+for name,ok,detail in checks:
+    print(('[PASS] ' if ok else '[FAIL] ')+name+((' — '+detail) if detail else ''))
+print(f'\nResult: {passed}/{len(checks)} checks passed; {failed} failed.')
+print('\nKnown non-static validation items:')
+print('[WARN] Project64/N64 runtime matrix is not executable in this Linux build container; emulator testing remains required.')
+print('[INFO] Co-Op Health intentionally remains locked/greyed so all players start with equal normal health.')
+print('[WARN] R20 community source included scripts/test_fastpaths.sh but omitted scripts/tests/fastpath_equivalence.c; that equivalence wrapper cannot be honestly executed from the supplied baseline.')
+sys.exit(1 if failed else 0)

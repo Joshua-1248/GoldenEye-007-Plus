@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(baronsamedi, 0, &SKELETON(guard), 0, 7, 0x15, 1292.5995, 0, 0x19)

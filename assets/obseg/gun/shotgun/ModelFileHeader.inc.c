@@ -1,0 +1,2 @@
+//D:800XXXXX
+MODELFILEHEADER(shotgun, 0, &SKELETON(standard_gun), 0, 0x1C, 4, 919.33038, 0, 0xD)

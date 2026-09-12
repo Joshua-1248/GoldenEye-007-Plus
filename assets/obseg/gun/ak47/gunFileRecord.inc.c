@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(          ak47,                         0,            GUNSTATS(ak47), getStringID(LGUN, GUN_STR_08_AK47_LF), getStringID(LGUN, GUN_STR_68_SOVIET_LF), -29.0, 307.0, 1410.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_42_AK47_LF), getStringID(LGUN, GUN_STR_AB_AK47_LF), 304.0, -31.0, 1020.0)

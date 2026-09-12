@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(headkarl, 0, NULL, 0, 2, 1, 218.15375, 0, 6)

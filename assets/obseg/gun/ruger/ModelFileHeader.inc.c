@@ -1,0 +1,2 @@
+//D:800XXXXX
+MODELFILEHEADER(ruger, 0, &SKELETON(gun_revolver), 0, 0x24, 6, 553.44312, 0, 0xE)

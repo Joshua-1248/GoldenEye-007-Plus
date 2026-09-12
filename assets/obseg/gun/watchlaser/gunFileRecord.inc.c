@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(    watchlaser,                         0,      GUNSTATS(watchlaser), getStringID(LGUN, GUN_STR_7F_WATCH_LF), getStringID(LGUN, GUN_STR_47_LASER_LF),  82.0,   0.0, 2857.0,   0.0, 90.0, getStringID(LGUN, GUN_STR_7B_WATCHLASER_LF), getStringID(LGUN, GUN_STR_D2_WATCHLASER_LF), 0.0, -40.0, 1383.0)

@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( circuitboard, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_21_CIRCUITBOARD_LF),  20.0,   0.0,  568.0,  80.0, 0.0, getStringID(LGUN, GUN_STR_21_CIRCUITBOARD_LF), getStringID(LGUN, GUN_STR_91_CIRCUITBOARD_LF), 0.0, 0.0, 394.0)

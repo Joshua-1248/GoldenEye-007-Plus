@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(snowbond, 0, &SKELETON(guard), 0, 7, 0x15, 1299.1359, 0, 0xE)

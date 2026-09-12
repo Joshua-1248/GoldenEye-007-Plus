@@ -1,0 +1,1 @@
+{&orumov_header, "CorumovZ", 1.0, 1.0778, 0x1, 0x01, 0x00, 0x00},

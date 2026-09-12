@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(         ruger,                         0,           GUNSTATS(ruger), getStringID(LGUN, GUN_STR_26_ROUGER_LF), getStringID(LGUN, GUN_STR_4C_MAGNUM_LF),  47.0, 184.0,  769.0,   0.0, 0.0, getStringID(LGUN, GUN_STR_25_ROUGERMAGNUM_LF), getStringID(LGUN, GUN_STR_93_ROUGERMAGNUM_LF), 182.0, 36.0, 604.0)

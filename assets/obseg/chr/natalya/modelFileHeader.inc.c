@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(natalya, 0, &SKELETON(guard), 0, 7, 0x15, 1226.1493, 0, 0x10)

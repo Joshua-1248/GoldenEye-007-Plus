@@ -1,0 +1,2 @@
+//D:800XXXXX
+MODELFILEHEADER(autoshot, 0, &SKELETON(standard_gun), 0, 0x24, 4, 840.15125, 0, 0x10)

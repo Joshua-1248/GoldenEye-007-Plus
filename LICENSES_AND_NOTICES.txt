@@ -1,0 +1,97 @@
+GOLDENEYE 007 PLUS — LICENSING AND NOTICES
+===========================================
+
+IMPORTANT: THIS REPOSITORY DOES NOT HAVE A SINGLE BLANKET LICENSE THAT CAN
+OVERRIDE THE RIGHTS ATTACHED TO ITS DIFFERENT COMPONENTS.
+
+1. GOLDENEYE 007 AND PROPRIETARY GAME CONTENT
+---------------------------------------------
+GoldenEye 007 and its original game code, audiovisual material, characters,
+trademarks, ROM data, and other proprietary content remain the property of
+their respective rights holders.
+
+This project does not grant permission to distribute Nintendo 64 retail ROMs,
+commercial game assets, or other copyrighted material for which you do not
+hold redistribution rights.
+
+Where the upstream GoldenEye decompilation expects a retail ROM to extract
+assets, users must provide their own legally obtained copy.
+
+The supplied GoldenEye decompilation archive did not contain a top-level
+open-source license granting blanket redistribution/relicensing rights over
+all GoldenEye-derived material. Accordingly, nothing in this file should be
+read as creating such a license.
+
+2. GOLDENEYE 007 PLUS MODIFICATIONS
+-----------------------------------
+Unless a source file or directory states otherwise, GoldenEye 007 Plus-specific
+changes are provided for study, preservation, interoperability, and community
+modification purposes. No permission is implied for proprietary GoldenEye
+content beyond what applicable law or the relevant rights holder allows.
+
+If this project is later placed under an explicit license for independently
+written GoldenEye 007 Plus code, that license should be added separately and
+must not be represented as licensing Nintendo/Rare/MGM/EON-owned material.
+
+3. PERFECT DARK DECOMPILATION MATERIAL
+--------------------------------------
+Some GoldenEye 007 Plus research and selective backport work references the
+Perfect Dark decompilation. The supplied Perfect Dark decompilation includes
+the following MIT license notice, which must be preserved for copied or
+substantial MIT-licensed portions:
+
+MIT License
+
+Copyright (c) 2022 Ryan Dwyer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+4. THIRD-PARTY TOOLS AND LIBRARIES
+----------------------------------
+The repository contains and/or invokes third-party tools and libraries. Their
+licenses remain controlling for those components. Preserve license and notice
+files in their original directories.
+
+For example, the included IDO recompilation tooling contains Rabbitizer with
+its own LICENSE file. Do not remove or replace third-party notices when
+redistributing this repository.
+
+5. NO WARRANTY
+--------------
+To the maximum extent permitted by applicable law, GoldenEye 007 Plus project
+material is provided without warranty of any kind. Use it at your own risk.
+
+6. TRADEMARKS / AFFILIATION
+---------------------------
+GoldenEye 007, James Bond, Nintendo 64, Rare, Nintendo, MGM, EON Productions,
+and all other referenced names and marks belong to their respective owners.
+This community project is not affiliated with or endorsed by those parties.
+
+7. REDISTRIBUTION CHECKLIST
+---------------------------
+Before publishing a fork or release:
+
+- Do not include retail ROM files.
+- Do not strip upstream copyright/license notices.
+- Preserve the Perfect Dark MIT notice when MIT-licensed code is copied or
+  substantially incorporated.
+- Preserve third-party tool/library license files.
+- Keep CREDITS.txt and REFERENCES.txt with the source when practical.
+- Clearly identify your own modifications instead of presenting them as
+  upstream work.

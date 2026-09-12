@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+argv=("$@")
+llvm-objcopy "${argv[@]}"
+
+# LLVM's MIPS assembler represents `.word symbol_in_other_section - base` as
+# R_MIPS_PC32. LLD's interpretation differs from GNU MIPS ld for GoldenEye's
+# music table, whose entries must be offsets from number_music_samples. When
+# producing the final raw ROM binary, reconstruct those 63 words from the final
+# linked ELF symbols. This is a fallback-toolchain compatibility repair only;
+# GNU binutils builds never run this wrapper.
+if [[ ${#argv[@]} -ge 2 ]]; then
+    input="${argv[0]}"
+    output="${argv[1]}"
+    is_binary=0
+    for ((i=2; i<${#argv[@]}; i++)); do
+        if [[ "${argv[i]}" == "-O" && $((i+1)) -lt ${#argv[@]} && "${argv[i+1]}" == "binary" ]]; then
+            is_binary=1
+            break
+        fi
+    done
+
+    if [[ $is_binary -eq 1 && "$input" == *.elf && "$output" == *.bin \
+          && -f assets/music/music.s ]]; then
+        python3 - "$input" "$output" assets/music/music.s <<'PY'
+from pathlib import Path
+import re, struct, subprocess, sys
+
+elf, out, music_src = map(Path, sys.argv[1:4])
+# Only patch the final game ELF, identified by the required table symbols.
+symtext = subprocess.check_output(['readelf', '-Ws', str(elf)], text=True)
+symbols = {}
+for line in symtext.splitlines():
+    parts = line.split()
+    if len(parts) >= 8 and re.fullmatch(r'[0-9a-fA-F]+', parts[1]):
+        symbols[parts[-1]] = int(parts[1], 16)
+
+if 'number_music_samples' not in symbols or 'table_music_data' not in symbols:
+    raise SystemExit(0)
+
+src = music_src.read_text()
+m = re.search(r'table_music_data:\s*(.*?)\s*table_music_data_end:', src, re.S)
+if not m:
+    raise SystemExit('llvm-mips-objcopy: could not parse music table source')
+names = re.findall(r'^\s*music_table_entry\s+(\w+)\s*$', m.group(1), re.M)
+if not names:
+    raise SystemExit('llvm-mips-objcopy: no music table entries found')
+
+base = symbols['number_music_samples']
+table = symbols['table_music_data']
+data = bytearray(out.read_bytes())
+for i, name in enumerate(names):
+    if name not in symbols:
+        raise SystemExit(f'llvm-mips-objcopy: missing final symbol {name}')
+    pos = table + i * 8
+    value = (symbols[name] - base) & 0xffffffff
+    if pos + 4 > len(data):
+        raise SystemExit('llvm-mips-objcopy: music table lies outside raw binary')
+    data[pos:pos+4] = struct.pack('>I', value)
+out.write_bytes(data)
+print(f'llvm-mips-objcopy: repaired {len(names)} GNU-style music offset relocation(s)', file=sys.stderr)
+PY
+    fi
+fi

@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(bluewoman, 0, &SKELETON(guard), 0, 7, 0x15, 1148.2167, 0, 0xD)

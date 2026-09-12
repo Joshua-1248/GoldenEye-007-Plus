@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(    explosivefloppy,  1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_33_GUIDANCEDATA_LF),  12.0,   0.0,  336.0,   0.0, 90.0, getStringID(LGUN, GUN_STR_33_GUIDANCEDATA_LF), getStringID(LGUN, GUN_STR_9E_GUIDANCEDATA_LF), 0.0, -4.0, 176.0)

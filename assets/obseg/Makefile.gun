@@ -1,0 +1,51 @@
+# gun
+
+# Pattern rules for building .rz files from .bin files
+$(BUILD_DIR)/$(OBSEG_DIR)/gun/%.rz: $(BUILD_DIR)/$(OBSEG_DIR)/gun/%.bin
+	$(RZ_COMP) $< $@
+
+# Build .bin from .elf
+$(BUILD_DIR)/$(OBSEG_DIR)/gun/%.bin: $(BUILD_DIR)/$(OBSEG_DIR)/gun/%.elf
+	$(OBJCOPY) $< $@ -O binary
+
+# Build .elf from Model.o (and Switches.o if it exists)
+# The pattern G%Z.elf extracts the gun name from the target
+$(BUILD_DIR)/$(OBSEG_DIR)/gun/G%Z.elf: $(BUILD_DIR)/$(OBSEG_DIR)/gun/%/Model.o
+	@mkdir -p $(@D)
+	@if [ -f $(BUILD_DIR)/$(OBSEG_DIR)/gun/$*/Switches.o ]; then \
+		$(LD) -T assets/obseg/gun/Gname.ld -o $@ $(BUILD_DIR)/$(OBSEG_DIR)/gun/$*/Switches.o $(BUILD_DIR)/$(OBSEG_DIR)/gun/$*/Model.o; \
+	else \
+		$(LD) -T assets/obseg/gun/Gname.ld -o $@ $(BUILD_DIR)/$(OBSEG_DIR)/gun/$*/Model.o; \
+	fi
+
+# Build Model.o from Model.c
+# If Model.c doesn't exist but GnameZ.bin does, convert it first
+$(BUILD_DIR)/$(OBSEG_DIR)/gun/%/Model.o: $(OBSEG_DIR)/gun/%/Model.c
+	@mkdir -p $(@D)
+	$(CC) -c $(CFLAGS) -o $@ -O2 $<
+
+# Generate Model.c from binary if needed
+$(OBSEG_DIR)/gun/%/Model.c:
+	@if [ -f $(OBSEG_DIR)/gun/G$*Z.bin ]; then \
+		echo "Converting G$*Z.bin to Model.c..."; \
+		python3 scripts/generate_gun_c.py --cleanup $* || exit 1; \
+	else \
+		echo "Error: Neither $(OBSEG_DIR)/gun/$*/Model.c nor $(OBSEG_DIR)/gun/G$*Z.bin exists"; \
+		exit 1; \
+	fi
+
+# Build Switches.o from Switches.c (if it exists)
+$(BUILD_DIR)/$(OBSEG_DIR)/gun/%/Switches.o: $(OBSEG_DIR)/gun/%/Switches.c
+	@mkdir -p $(@D)
+	$(CC) -c $(CFLAGS) -o $@ -O2 $<
+
+# Build GUN_RZ_NAMES from GUNNAMELIST
+GUN_RZ_NAMES = $(foreach gun,$(GUNNAMELIST),G$(gun)Z)
+
+# Use GUN_RZ_NAMES to generate the list of .rz files
+GUN_RZ_FILES = $(addprefix $(BUILD_DIR)/$(OBSEG_DIR)/gun/, $(addsuffix .rz, $(GUN_RZ_NAMES)))
+
+# Default target
+all: $(GUN_RZ_FILES)
+
+.PHONY: all

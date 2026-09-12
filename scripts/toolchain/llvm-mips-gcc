@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " ${*:-} " == *" -dumpmachine "* ]]; then
+  echo mips-linux-gnu
+  exit 0
+fi
+args=(--target=mips-linux-gnu -Wno-int-conversion -fno-builtin-memmove)
+for a in "$@"; do
+  case "$a" in
+    -mgp32|-mno-shared|-fno-toplevel-reorder|-fno-reorder-blocks-and-partition|-fno-ipa-icf|-fno-merge-constants)
+      ;;
+    -mtune=vr4300)
+      # This clang does not model VR4300 scheduling; keep ISA at MIPS II.
+      ;;
+    *) args+=("$a") ;;
+  esac
+done
+exec clang "${args[@]}"

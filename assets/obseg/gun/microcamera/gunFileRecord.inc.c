@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(        microcamera,  0,     GUNSTATS(microcamera), getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_4E_MICROCAMERA_LF),   8.0,   0.0,  310.0,   0.0, 270.0, getStringID(LGUN, GUN_STR_4E_MICROCAMERA_LF), getStringID(LGUN, GUN_STR_B0_MICROCAMERA_LF), 0.0, -8.0, 229.0)

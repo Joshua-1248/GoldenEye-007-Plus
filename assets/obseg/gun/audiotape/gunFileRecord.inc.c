@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( audiotape, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_14_AUDIOTAPE_LF),  16.0,   0.0,  428.0,  90.0, 90.0, getStringID(LGUN, GUN_STR_14_AUDIOTAPE_LF), getStringID(LGUN, GUN_STR_85_AUDIOTAPE_LF), 0.0, -2.0, 292.0)

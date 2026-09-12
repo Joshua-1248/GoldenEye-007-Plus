@@ -1,0 +1,2 @@
+//D:8003D410
+MODELFILEHEADER(headpete, 0, NULL, 0, 2, 1, 216.28949, 0, 4)

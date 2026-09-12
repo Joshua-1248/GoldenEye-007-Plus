@@ -1,0 +1,1 @@
+{&oddjob_header, "CoddjobZ", 1.0, 0.78780001, 0x1, 0x01, 0x00, 0x00},

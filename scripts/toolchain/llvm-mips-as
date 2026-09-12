@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+argv=("$@")
+args=(--target=mips-linux-gnu -EB -c -x assembler -mno-abicalls -fno-pic)
+input=""
+output=""
+for ((i=0; i<${#argv[@]}; i++)); do
+  a="${argv[i]}"
+  case "$a" in
+    -march=vr4300) args+=(-march=mips3) ;;
+    --defsym)
+      ((++i))
+      args+=(-Wa,--defsym,"${argv[i]}")
+      ;;
+    --defsym=*) args+=(-Wa,--defsym,"${a#--defsym=}") ;;
+    -o)
+      args+=(-o)
+      ((++i))
+      output="${argv[i]}"
+      args+=("$output")
+      ;;
+    *.s|*.S) input="$a" ;;
+    *) args+=("$a") ;;
+  esac
+done
+if [[ -n "$input" ]]; then
+  tmp="$(mktemp --suffix=.s)"
+  trap 'rm -f "$tmp"' EXIT
+  {
+    echo '.option pic0'
+    if [[ "$input" == "assets/music/music.s" || "$input" == "assets/obseg/ob_seg.s" ]]; then
+      scripts/toolchain/expand-llvm-incbin-macros.py "$input"
+    else
+      cat "$input"
+    fi | sed -e '/^[[:space:]]*\.set[[:space:]]\+gp=64[[:space:]]*$/d' \
+        -e 's/^[[:space:]]*\.half[[:space:]]/.short /' \
+        -e 's#\\/#/#g' \
+        -e 's#\\\.#.#g'
+  } > "$tmp"
+  if [[ "$output" == build/u-*/* ]]; then
+    outdir="${output#build/}"
+    outdir="${outdir%%/*}"
+    sed -i -e "s#build/u/#build/${outdir}/#g" "$tmp"
+  fi
+  exec clang "${args[@]}" "$tmp"
+else
+  exec clang "${args[@]}"
+fi

@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD( map, 1,                      NULL, getStringID(LGUN, GUN_STR_83_LF), getStringID(LGUN, GUN_STR_4D_MAP_LF),  18.0,   0.0,  579.0, 350.0, 90.0, getStringID(LGUN, GUN_STR_4D_MAP_LF), getStringID(LGUN, GUN_STR_AF_MAP_LF), 0.0, -6.0, 364.0)

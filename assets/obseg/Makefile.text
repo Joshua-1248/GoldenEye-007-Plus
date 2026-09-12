@@ -1,0 +1,43 @@
+# text
+
+# Pattern rules for building .rz files from .bin files
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.rz: $(OBSEG_DIR)/text/$(COUNTRYCODE)/%.bin
+	$(RZ_COMP) $< $@
+
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.rz: $(OBSEG_DIR)/text/%.bin
+	$(RZ_COMP) $< $@
+
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.rz: $(BUILD_DIR)/$(OBSEG_DIR)/text/%.bin
+	$(RZ_COMP) $< $@
+
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.bin: $(BUILD_DIR)/$(OBSEG_DIR)/text/%.elf
+	$(OBJCOPY) $< $@ -O binary
+
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.elf: $(BUILD_DIR)/$(OBSEG_DIR)/text/%.o
+	$(LD) -T assets/obseg/text/LnameX.ld -o $@ $<
+
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.o: $(OBSEG_DIR)/text/$(COUNTRYCODE)/%.c
+	$(CC) -c $(CFLAGS) -o $@ -O2 $<
+
+$(BUILD_DIR)/$(OBSEG_DIR)/text/%.o: $(OBSEG_DIR)/text/%.c
+	$(CC) -c $(CFLAGS) -o $@ -O2 $<
+
+# List of language codes
+TEXT_LANGS := J E P
+
+# Compose all possible text file names
+TEXT_ALL_RZ_FILES := $(foreach lang,$(TEXT_LANGS),$(foreach name,$(TEXTNAMELIST),$(BUILD_DIR)/$(OBSEG_DIR)/text/L$(name)$(lang).rz))
+
+# Region-specific file lists
+ifneq ($(VERSION), EU)
+TEXT_RZ_FILES := \
+	$(foreach lang,J E,$(foreach name,$(TEXTNAMELIST),$(BUILD_DIR)/$(OBSEG_DIR)/text/L$(name)$(lang).rz))
+else
+TEXT_RZ_FILES := \
+	$(foreach lang,J E P,$(foreach name,$(TEXTNAMELIST),$(BUILD_DIR)/$(OBSEG_DIR)/text/L$(name)$(lang).rz))
+endif
+
+# Default target
+all: $(TEXT_RZ_FILES)
+
+.PHONY: all

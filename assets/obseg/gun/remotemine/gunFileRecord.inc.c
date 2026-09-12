@@ -1,0 +1,2 @@
+             /*NAME, NOMODEL,         STATS,      UPPERTEXTID,      LOWERTEXTID,   POSX,   POSY,   POSZ,   XROT,  YROT,           WOCTEXT,        EQUIPTEXT,   EQUIPX, EQUIPY, EQUIPZ*/
+	GUNFILERECORD(    remotemine,                         0,      GUNSTATS(remotemine), getStringID(LGUN, GUN_STR_07__MINE_LF), getStringID(LGUN, GUN_STR_0E_REMOTE_LF),   8.0,   0.0,  364.0,  90.0, 0.0, getStringID(LGUN, GUN_STR_60_REMOTEMINE_LF), getStringID(LGUN, GUN_STR_BE_REMOTEMINE_LF), 0.0, -3.0, 179.0)
