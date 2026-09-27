@@ -26,7 +26,13 @@
 #include "prop.h"
 #include "stan.h"
 #include "model.h"
+#ifdef GE_MODDED_CHEATS
+#include "mirroredlevels.h"
+#endif
 #include "token.h"
+#ifdef GE_MAP_MAKER
+#include "mapmaker.h"
+#endif
 
 /**
  * EU .bss 0x80068480
@@ -1235,7 +1241,6 @@ void proplvreset2(enum LEVELID stageId)
 
     withchrs = (((void *) tokenFind(1, "-nochr")) == NULL) && (((void *) tokenFind(1, "-noprop")) == NULL);
     withobjs = (((void *) tokenFind(1, "-noobj")) == NULL) && (((void *) tokenFind(1, "-noprop")) == NULL);
-
     g_DoorScale = 1.0f;
 
     /**
@@ -1464,6 +1469,12 @@ void proplvreset2(enum LEVELID stageId)
         }
 
         // PD rejoins here
+
+#ifdef GE_MODDED_CHEATS
+        /* Mirrored Levels transforms setup pads before any stage props/guards
+         * are instantiated, so initial placement is born in mirrored space. */
+        mirrorLevelsApplySetupIfNeeded();
+#endif
 
         if (withchrs)
         {

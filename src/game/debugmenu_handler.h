@@ -40,6 +40,7 @@ s32 get_debug_enable_all_levels_flag(void);
 s32 get_debug_fast_bond_flag(void);
 void set_debug_fast_bond_flag(s32 flag);
 s32 get_debug_all_obj_complete_flag(void);
+void set_debug_all_obj_complete_flag(s32 flag);
 s32 get_debug_portal_flag(void);
 s32 get_debug_chrnum_flag(void);
 s32 get_debug_gunwatchpos_flag(void);

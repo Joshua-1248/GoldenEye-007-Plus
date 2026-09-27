@@ -23,6 +23,35 @@ PHYSICAL_CODE ?= NO
 PHYSICAL_FASTPATHS ?= NO
 UNLOCK_SAVE1 ?= NO
 MODDED_CHEATS ?= NO
+# R22+ in-game Map Maker is part of the GoldenEye Plus / MODDED_CHEATS build.
+# Default it on only for Plus builds; retail/non-modded builds remain unchanged.
+# Map Maker is editor-only here and must not participate in normal stage-ID routing.
+MAP_MAKER ?= $(MODDED_CHEATS)
+# GoldenEye Plus defaults to 16 Kbit (2 KiB) EEPROM for compatibility with
+# the GE/PD Edition of 1964 and hardware using a 16 Kbit EEPROM save device.
+# The 32 KiB SRAM backend is retained as an explicit opt-in backend.
+SAVE_EEPROM16K ?= $(MODDED_CHEATS)
+SAVE_SRAM ?= NO
+# Start Plus + Map Maker at 32 MiB as requested.  The plumbing still supports
+# 12/16/32/64 MiB and ROM_SIZE_MIB can be overridden explicitly later.
+ROM_SIZE_MIB ?= 32
+
+ifeq ($(ROM_SIZE_MIB),12)
+ ROM_SIZE_BYTES := 12582912
+ ROM_SIZE_HEX := 0x00C00000
+else ifeq ($(ROM_SIZE_MIB),16)
+ ROM_SIZE_BYTES := 16777216
+ ROM_SIZE_HEX := 0x01000000
+else ifeq ($(ROM_SIZE_MIB),32)
+ ROM_SIZE_BYTES := 33554432
+ ROM_SIZE_HEX := 0x02000000
+else ifeq ($(ROM_SIZE_MIB),64)
+ ROM_SIZE_BYTES := 67108864
+ ROM_SIZE_HEX := 0x04000000
+else
+ $(error Unsupported ROM_SIZE_MIB='$(ROM_SIZE_MIB)' (use 12, 16, 32, or 64))
+endif
+
 PHYSICAL_FAST_CFILES := chrprop.c stan.c
 # Native-12MiB optimized ROM profile. "balanced" keeps most game code at -Os
 # (important both for ROM capacity and the VR4300's small I-cache) while
@@ -105,7 +134,7 @@ $(FAST_BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(FAST_CC) -c $(FAST_CFLAGS) $(FAST_OPT) -o $@ $<
 
-.PHONY: fastbuild fastbuild-sweep fastbuild-abi-audit fastpath-test
+.PHONY: tp-camera-default-reset-v30c-audit tp-camera-default-reset-v30b-audit mainmenu-special-highlight-v30a-audit tp-camera-defaults-v29a-audit fastbuild fastbuild-sweep fastbuild-abi-audit fastpath-test
 fastbuild-sweep:
 	scripts/fastbuild_sweep.sh
 
@@ -272,6 +301,50 @@ ifeq ($(MODDED_CHEATS), YES)
  ASMDEFS += --defsym GE_MODDED_CHEATS=1
 endif
 
+ifeq ($(SAVE_EEPROM16K), YES)
+ ifneq ($(MODDED_CHEATS), YES)
+  $(error SAVE_EEPROM16K=YES is currently supported only for GoldenEye Plus / MODDED_CHEATS builds)
+ endif
+ ifeq ($(SAVE_SRAM), YES)
+  $(error SAVE_EEPROM16K=YES and SAVE_SRAM=YES are mutually exclusive)
+ endif
+ EEPROM16_BASE_OUTCODE := $(OUTCODE)
+ OUTCODE := $(EEPROM16_BASE_OUTCODE)-eep16
+ LDFILEOPTS := $(subst -DOUTCODE=$(EEPROM16_BASE_OUTCODE),-DOUTCODE=$(OUTCODE),$(LDFILEOPTS))
+ LCDEFS += -DGE_SAVE_EEPROM16K
+ ASMDEFS += --defsym GE_SAVE_EEPROM16K=1
+endif
+
+ifeq ($(SAVE_SRAM), YES)
+ ifneq ($(MODDED_CHEATS), YES)
+  $(error SAVE_SRAM=YES is currently supported only for GoldenEye Plus / MODDED_CHEATS builds)
+ endif
+ SRAM_BASE_OUTCODE := $(OUTCODE)
+ OUTCODE := $(SRAM_BASE_OUTCODE)-sram
+ LDFILEOPTS := $(subst -DOUTCODE=$(SRAM_BASE_OUTCODE),-DOUTCODE=$(OUTCODE),$(LDFILEOPTS))
+ LCDEFS += -DGE_SAVE_SRAM
+ ASMDEFS += --defsym GE_SAVE_SRAM=1
+endif
+
+ifeq ($(MAP_MAKER), YES)
+ ifneq ($(MODDED_CHEATS), YES)
+  $(error MAP_MAKER=YES requires MODDED_CHEATS=YES)
+ endif
+ # Map Maker is now a normal part of the Plus build, so deliberately keep the
+ # established OUTCODE (for example u-phys-opt-mod).  This makes the ROM the
+ # file users already build/run instead of hiding the feature in a -mapXX
+ # side build while leaving a stale 12 MiB Plus ROM beside it.
+ LCDEFS += -DGE_MAP_MAKER
+ ASMDEFS += --defsym GE_MAP_MAKER=1
+ LDFILEOPTS += -DGE_MAP_MAKER
+endif
+
+# The linker places its temporary uncompressed csegment immediately after the
+# requested cartridge image. data_compress.sh removes that temporary segment
+# again, leaving an exact ROM_SIZE_MIB-byte cartridge image.
+LDFILEOPTS += -DGE_ROM_SIZE=$(ROM_SIZE_HEX)
+LCDEFS += -DGE_ROM_SIZE_MIB=$(ROM_SIZE_MIB)
+
 ifeq ($(UNLOCK_SAVE1), YES)
  ifneq ($(PHYSICAL_CODE), YES)
   $(error UNLOCK_SAVE1=YES requires PHYSICAL_CODE=YES)
@@ -369,7 +442,7 @@ WOFF :=  -woff 609,649,709,712,807,838,763
 ifeq ($(IDO_RECOMP), NO)
   CC := $(QEMU_IRIX) -silent -L $(IRIX_ROOT) $(IRIX_ROOT)/usr/bin/cc
 else
-  CC := $(IRIX_ROOT)/cc
+  CC := scripts/toolchain/ido-cc-clean.sh $(IRIX_ROOT)/cc
 endif
 
 CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64
@@ -433,7 +506,7 @@ OBJCOPY := $(TOOLCHAIN)objcopy
 .NOTPARALLEL: print_info create_directories $(APPROM) checksum
 
 # Phony Recipes - These targets are not files, Get Make to do something
-.PHONY: print_info create_directories build_tools prerequisites optimized-preflight optimized optimized-clean optimized-profile-force physical physical-source-audit physical-audit physical-clean checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets forceextractassets textures convert_props convert_chrs convert_guns extract_u extract_e extract_j force_extract_u force_extract_e force_extract_j extract_rsp
+.PHONY: autoshot-resource-audit coop-mission-item-audit tp-camera-settings-v29-audit print_info create_directories build_tools prerequisites optimized-preflight optimized optimized-clean optimized-profile-force physical physical-source-audit mapmaker-stage-isolation-audit physical-audit physical-clean checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets forceextractassets textures convert_props convert_chrs convert_guns extract_u extract_e extract_j force_extract_u force_extract_e force_extract_j extract_rsp
 
 
 # this file references variables defined above: BUILD_DIR, CFLAGWARNING, INCLUDE, LCDEFS
@@ -597,7 +670,7 @@ endif
 
 $(APPROM):	$(APPBIN)
 	@echo "Compressing ROM"
-	$(DATASEG_COMP) $< $(OUTCODE)
+	GE_ROM_SIZE_BYTES=$(ROM_SIZE_BYTES) $(DATASEG_COMP) $< $(OUTCODE)
 	@echo "Finalizing ROM"
 	$(N64CKSUM) $< $@
 
@@ -615,7 +688,112 @@ build_tools:
 	$(info Building tools...)
 	scripts/make/build_tools.sh "$(MAKE)"
 
-prerequisites: print_info create_directories build_tools extractassets
+autoshot-resource-audit: build_tools
+	python3 scripts/audit_autoshot_resource_pipeline.py
+
+coop-mission-item-audit:
+	python3 scripts/audit_coop_mission_items.py
+
+playtester-bugfix-audit:
+	python3 scripts/audit_playtester_bugfix_v27.py
+
+mipmap-metadata-audit:
+	python3 scripts/audit_mipmap_metadata_cache.py
+
+tp-camera-settings-v29-audit:
+	python3 scripts/audit_tp_camera_settings_v29.py
+
+tp-camera-defaults-v29a-audit:
+	python3 scripts/audit_tp_camera_defaults_v29a.py
+
+stay-tp-death-v30-audit:
+	python3 scripts/audit_stay_tp_death_v30.py
+
+mainmenu-special-highlight-v30a-audit:
+	python3 scripts/audit_mainmenu_special_highlight_v30a.py
+
+tp-camera-default-reset-v30b-audit:
+	python3 scripts/audit_tp_camera_defaults_v30b.py
+
+tp-camera-default-reset-v30c-audit:
+	python3 scripts/audit_tp_camera_defaults_v30c.py
+
+tp-death-animation-v30d-audit:
+	python3 scripts/audit_tp_death_animation_match_v30d.py
+
+tp-death-speed-v30e-audit:
+	python3 scripts/audit_tp_death_speed_v30e.py
+
+jungle-natalya-tp-v30h-audit:
+	python3 scripts/audit_jungle_natalya_tp_v30h.py
+
+mapmaker-hardware-v31-audit:
+	python3 scripts/audit_mapmaker_hardware_v31.py
+
+tp-controls-watch-surface-v32-audit:
+	python3 scripts/audit_tp_controls_watch_surface_v32.py
+
+directional-shoulder-toggle-v33-audit:
+	python3 scripts/audit_directional_shoulder_toggle_v33.py
+
+tp-crouched-cam-height-v34-audit:
+	python3 scripts/audit_tp_crouched_cam_height_v34.py
+
+sram-backend-v35-audit:
+	python3 scripts/audit_sram_backend_v35.py
+
+sram-extended-settings-v36-audit:
+	python3 scripts/audit_sram_extended_settings_v36.py
+
+tp-sight-distance-v74-audit:
+	python3 scripts/audit_tp_sight_distance_v74.py
+
+tp-camera-legacy-sync-v75-audit:
+	python3 scripts/audit_tp_camera_legacy_sync_v75.py
+
+surface2-posend-coop-v79-audit:
+	python3 scripts/audit_surface2_posend_coop_v79.py
+
+dam-posend-teleport-v80-audit:
+	python3 scripts/audit_dam_posend_teleport_v80.py
+
+coop-objective-team-v83-audit:
+	python3 scripts/audit_coop_objective_team_v83.py
+
+eeprom16-backend-v46-audit:
+	python3 scripts/audit_eeprom16_backend_v46.py
+
+mirrored-levels-v49-audit:
+	python3 scripts/audit_mirrored_levels_v49.py
+
+coop-autoaim-v37-audit:
+	python3 scripts/audit_coop_autoaim_friendly_filter_v37.py
+
+surface2-world-item-v38-audit:
+	python3 scripts/audit_surface2_world_item_filter_v38.py
+
+v38r1-defaults-compat-audit:
+	python3 scripts/audit_v38r1_defaults_compat.py
+
+kinetic-explosions-v41-audit:
+	python3 scripts/audit_kinetic_explosions_v41.py
+
+crouch-default-v41r3-audit:
+	python3 scripts/audit_crouch_default_sram_migration_v41r3.py
+
+tp-tank-super-tank-v42-audit:
+	python3 scripts/audit_tp_tank_super_tank_v42.py
+
+tp-crouch-super-tank-watch-v42r2-audit:
+	python3 scripts/audit_tp_crouch_super_tank_watch_v42r2.py
+
+crouch-default-v44-audit:
+	python3 scripts/audit_crouch_default_v44.py
+
+crouch-default-v45-audit:
+	python3 scripts/audit_crouch_default_v45.py
+
+prerequisites: autoshot-resource-audit coop-mission-item-audit playtester-bugfix-audit mipmap-metadata-audit tp-camera-settings-v29-audit tp-camera-defaults-v29a-audit stay-tp-death-v30-audit mainmenu-special-highlight-v30a-audit tp-camera-default-reset-v30b-audit tp-camera-default-reset-v30c-audit tp-death-animation-v30d-audit tp-death-speed-v30e-audit jungle-natalya-tp-v30h-audit mapmaker-hardware-v31-audit tp-controls-watch-surface-v32-audit directional-shoulder-toggle-v33-audit tp-crouched-cam-height-v34-audit sram-backend-v35-audit sram-extended-settings-v36-audit coop-autoaim-v37-audit surface2-world-item-v38-audit v38r1-defaults-compat-audit special-options-v40-audit kinetic-explosions-v41-audit crouch-default-v41r3-audit tp-tank-super-tank-v42-audit print_info create_directories build_tools extractassets sram-frontend-special-v39-audit tp-crouch-super-tank-watch-v42r2-audit crouch-default-v44-audit crouch-default-v45-audit eeprom16-backend-v46-audit mirrored-levels-v49-audit tp-sight-distance-v74-audit tp-camera-legacy-sync-v75-audit surface2-posend-coop-v79-audit dam-posend-teleport-v80-audit coop-objective-team-v83-audit
 
 optimized-preflight:
 ifeq ($(OPTIMIZED_ROM), YES)
@@ -660,6 +838,13 @@ else
 	@exit 2
 endif
 
+mapmaker-stage-isolation-audit:
+ifeq ($(MAP_MAKER), YES)
+	python3 scripts/audit_mapmaker_stage_isolation.py
+else
+	@true
+endif
+
 # Audit the linked physical ELF and finalized ROM.  This checks the actual
 # runtime sections/function-pointer values rather than raw ROM byte patterns.
 physical-audit: $(APPELF) $(APPROM)
@@ -685,7 +870,7 @@ all_p1: optimized-preflight
 endif
 all_p1: prerequisites
 ifeq ($(PHYSICAL_CODE), YES)
-all_p1: physical-source-audit
+all_p1: physical-source-audit mapmaker-stage-isolation-audit
 all: physical-audit
 endif
 all: all_p1 $(APPROM) checksum
@@ -805,7 +990,7 @@ extract_e:
 		if [ -f baserom.e.z64 ]; then \
 			scripts/extract_diff.e.sh; \
 		else \
-			echo "Error: baserom.e.z64 not found."; \
+			echo "Skipping PAL asset extraction: baserom.e.z64 not present."; \
 		fi \
 	else \
 		echo "Assets for e already extracted."; \
@@ -816,7 +1001,7 @@ force_extract_e:
 	if [ -f baserom.e.z64 ]; then \
 		scripts/extract_diff.e.sh; \
 	else \
-		echo "Error: baserom.e.z64 not found."; \
+		echo "Skipping PAL asset extraction: baserom.e.z64 not present."; \
 	fi
 
 extract_j:
@@ -825,7 +1010,7 @@ extract_j:
 		if [ -f baserom.j.z64 ]; then \
 			scripts/extract_diff.j.sh; \
 		else \
-			echo "Error: baserom.j.z64 not found."; \
+			echo "Skipping Japanese asset extraction: baserom.j.z64 not present."; \
 		fi \
 	else \
 		echo "Assets for j already extracted."; \
@@ -836,7 +1021,7 @@ force_extract_j:
 	if [ -f baserom.j.z64 ]; then \
 		scripts/extract_diff.j.sh; \
 	else \
-		echo "Error: baserom.j.z64 not found."; \
+		echo "Skipping Japanese asset extraction: baserom.j.z64 not present."; \
 	fi
 
 extract_rsp:
@@ -907,3 +1092,11 @@ tools/mktex/build/tex2png:
 		echo "Building tex2png..."; \
 		cd tools/mktex && $(MAKE); \
 	fi
+
+.PHONY: sram-frontend-special-v39-audit
+sram-frontend-special-v39-audit:
+	python3 scripts/audit_sram_frontend_special_options_v39.py
+
+.PHONY: special-options-v40-audit
+special-options-v40-audit:
+	python3 scripts/audit_special_options_aa_crouch_v40.py

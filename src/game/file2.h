@@ -38,15 +38,41 @@
 #define MODOPT2_R21_MIGRATED         0x80 /* legacy meaning, only while MODOPT3 signature is absent */
 #define DEFAULT_MOD_OPTIONS2         (MODOPT2_REVERSE_DEFAULT | MODOPT2_DAMAGE_FLASH)
 
-/* R22 options stored in the former tail-padding byte of save_data.
- * 0xa0 is a format signature so older saves cannot accidentally enable bits. */
-#define MODOPT3_SIGNATURE_MASK       0xf0
-#define MODOPT3_SIGNATURE            0xa0
-#define DEFAULT_MOD_OPTIONS3         MODOPT3_SIGNATURE
+/* R22/V33 options stored in the former tail-padding byte of save_data.
+ * V33 reduces the options-format marker to the top two bits, reclaiming bit 5
+ * for Directional Shoulder View Toggle without growing the EEPROM record.
+ * The exact V32 0xa0 marker is migrated explicitly and defaults the new
+ * option Off. */
+#define MODOPT3_SIGNATURE_MASK          0xc0
+#define MODOPT3_SIGNATURE               0xc0
+#define MODOPT3_LEGACY_SIGNATURE_MASK   0xe0
+#define MODOPT3_LEGACY_SIGNATURE_V32    0xa0
+#define MODOPT3_DIRECTIONAL_SHOULDER    0x20
+#define MODOPT3_TP_CROUCH_CAM           0x10
+#define MODOPT3_ENABLE_MICROOPT          0x01
+/* Micro-optimizations stay Off by default.  TP Sight Translucency is stored
+ * in the extended-settings journal, not in the camera-pack/signature bits. */
+#define DEFAULT_MOD_OPTIONS3            MODOPT3_SIGNATURE
+
+/* V29 Third Person camera settings are packed into bits which retail never
+ * consumes, while preserving the fixed 0x60-byte EEPROM record. */
+#define MOD_CAMERA_PACK_SIGNATURE3_LEGACY_V30  0x05
+#define MOD_CAMERA_PACK_SIGNATURE3_LEGACY_V30B 0x06
+#define MOD_CAMERA_PACK_SIGNATURE3             0x07
+#define MOD_CAMERA_STAY_TP_DEATH_BIT  (1u << 26)
 
 extern u8 g_ModGameplayOptions2;
+extern u8 g_ModGameplayOptions3;
+extern s32 g_ModAntiAliasingEnabled;
+s32 modMicroOptimizationsEnabled(void);
+void modSetMicroOptimizationsEnabled(s32 enabled);
+void fileStoreThirdPersonCameraSettings(save_data *save);
+void fileLoadThirdPersonCameraSettings(save_data *save);
+s32 fileLoadExtendedSettings(save_data *save);
+void fileStoreExtendedSettings(save_data *save);
 
 extern ChrRecord *g_CurModelChr;
+void fileWriteSave(save_data *save);
 
 u8 fileGetBondForFolder(u32 folder);
 void fileValidateSaves(void);

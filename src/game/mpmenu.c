@@ -20,6 +20,7 @@
 #include "file2.h"
 #include "options.h"
 #include "cheat.h"
+#include "debugmenu_handler.h"
 #include "assets/obseg/text/LmpmenuE.h"
 #include "assets/obseg/text/LoptionE.h"
 
@@ -62,6 +63,9 @@ static u8 mpcfg_row[MAX_PLAYER_COUNT];
 static u8 mpcfg_modal[MAX_PLAYER_COUNT];
 static u8 mpcfg_choice[MAX_PLAYER_COUNT];
 static u8 mpcfg_yready[MAX_PLAYER_COUNT] = {1,1,1,1};
+#define MPWATCH_BASE_CHEATS (CHEAT_INVALID - 2)
+#define MPWATCH_MIRRORED_ROW MPWATCH_BASE_CHEATS
+#define MPWATCH_TOGGLE_ROWS (MPWATCH_BASE_CHEATS + 1)
 
 static s32 mpwatchIsDebugCheat(CHEAT_ID cheat)
 {
@@ -69,7 +73,18 @@ static s32 mpwatchIsDebugCheat(CHEAT_ID cheat)
         (cheat >= CHEAT_MAXAMMO && cheat <= CHEAT_2X_ARMOR) ||
         cheat == CHEAT_EXTRA_WEAPONS || cheat == CHEAT_10X_HEALTH ||
         cheat == CHEAT_BONDPHASE || cheat == CHEAT_DEBUG_POS ||
-        cheat == CHEAT_NO_RELOAD || cheat == CHEAT_RAPID_FIRE;
+        cheat >= CHEAT_NO_RELOAD;
+}
+
+static CHEAT_ID mpwatchCheatAtRow(s32 row)
+{
+    /* Match the SP Watch ordering exactly: retail/preserved cheats first,
+     * then mod-added cheats in enum order at the bottom. */
+    if (row < MPWATCH_BASE_CHEATS)
+        return (CHEAT_ID)(row + 1);
+    if (row == MPWATCH_MIRRORED_ROW)
+        return CHEAT_MIRRORED_LEVELS;
+    return CHEAT_INVALID;
 }
 
 static s32 mpwatchCheatUnlocked(CHEAT_ID cheat)
@@ -79,7 +94,7 @@ static s32 mpwatchCheatUnlocked(CHEAT_ID cheat)
 
 static s32 mpwatchConfigRows(s32 mode)
 {
-    return mode == 0 ? 3 : mode == 1 ? 8 : mode == 2 ? 9 : CHEAT_INVALID - 1;
+    return mode == 0 ? 3 : mode == 1 ? 8 : mode == 2 ? 17 : MPWATCH_TOGGLE_ROWS + 5;
 }
 
 static void mpwatchConfigMove(s32 player, s32 dir)
@@ -101,7 +116,52 @@ static void mpwatchConfigToggleSpecial(s32 player, s32 row)
     else if (row == 5) g_ModGameplayOptions2 ^= MODOPT2_DISABLE_NOISE_DITHER;
     else if (row == 6) g_ModGameplayOptions2 ^= MODOPT2_DAMAGE_FLASH;
     else if (row == 7) g_MpPlayerCrosshair[player] ^= 1;
-    else g_MpPlayerOptions[player] ^= MP_PLAYEROPT_DAMAGE_SFX;
+    else if (row == 8) g_MpPlayerOptions[player] ^= MP_PLAYEROPT_DAMAGE_SFX;
+    else if (row == 9)
+    {
+        if (g_MpViewportLock == 0) g_PlayerThirdPerson[player] ^= 1;
+    }
+    else if (row == 10) g_PlayerStayInTpOnDeath[player] ^= 1;
+    else if (row == 11) g_MpKillCountMessageEnabled ^= 1;
+    else if (row == 12)
+    {
+        modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
+    }
+    else if (row == 13)
+    {
+        g_ModGameplayOptions3 ^= MODOPT3_TP_CROUCH_CAM;
+        g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+    }
+    else if (row == 14)
+    {
+        g_ModGameplayOptions3 ^= MODOPT3_DIRECTIONAL_SHOULDER;
+        g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+    }
+    else if (row == 15)
+    {
+        g_ModTpSightTranslucencyEnabled ^= 1;
+    }
+    else if (row == 16)
+    {
+        g_ModAntiAliasingEnabled ^= 1;
+    }
+
+    /* Global Special Options changed from the MP watch are save-backed too.
+     * Per-player presentation toggles remain session/player state, but shared
+     * gameplay/camera policy survives restart just like the main menu. */
+    if ((row >= 1 && row <= 6) || row == 12 || row == 13 || row == 14 || row == 15 || row == 16)
+    {
+        save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+        if (save)
+        {
+            save->mod_options2 = g_ModGameplayOptions2;
+            save->mod_options3 = g_ModGameplayOptions3;
+            fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+            fileStoreExtendedSettings(save);
+#endif
+        }
+    }
 }
 
 static s32 mpwatchConfigSpecialValue(s32 player, s32 row)
@@ -109,12 +169,20 @@ static s32 mpwatchConfigSpecialValue(s32 player, s32 row)
     if (row == 0) return (g_MpPlayerOptions[player] & MP_PLAYEROPT_HEADROLL) != 0;
     if (row == 1) return (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM) != 0;
     if (row == 2) return (g_ModGameplayOptions2 & MODOPT2_REALTIME_COLLAPSE) != 0;
-    if (row == 3) return (g_ModGameplayOptions2 & MODOPT2_DISABLE_HITSTUN) != 0;
-    if (row == 4) return (g_ModGameplayOptions2 & MODOPT2_DISABLE_KNOCKBACK) != 0;
-    if (row == 5) return (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) != 0;
+    if (row == 3) return (g_ModGameplayOptions2 & MODOPT2_DISABLE_HITSTUN) == 0;
+    if (row == 4) return (g_ModGameplayOptions2 & MODOPT2_DISABLE_KNOCKBACK) == 0;
+    if (row == 5) return (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) == 0;
     if (row == 6) return (g_ModGameplayOptions2 & MODOPT2_DAMAGE_FLASH) != 0;
     if (row == 7) return g_MpPlayerCrosshair[player] != 0;
-    return (g_MpPlayerOptions[player] & MP_PLAYEROPT_DAMAGE_SFX) != 0;
+    if (row == 8) return (g_MpPlayerOptions[player] & MP_PLAYEROPT_DAMAGE_SFX) != 0;
+    if (row == 9) return modThirdPersonActive(player);
+    if (row == 10) return g_PlayerStayInTpOnDeath[player] != 0;
+    if (row == 11) return g_MpKillCountMessageEnabled != 0;
+    if (row == 12) return modMicroOptimizationsEnabled();
+    if (row == 13) return (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) != 0;
+    if (row == 14) return (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) != 0;
+    if (row == 15) return g_ModTpSightTranslucencyEnabled != 0;
+    return g_ModAntiAliasingEnabled != 0;
 }
 
 static s32 mpwatchConfigOptionBit(s32 player, s32 row)
@@ -203,13 +271,21 @@ static s32 mpwatchConfigHandleInput(s32 player)
         else if (mode == 2) { mpwatchConfigToggleSpecial(player,row); mpwatchPlayBeep(); }
         else
         {
-            CHEAT_ID cheat=(CHEAT_ID)(row+1);
-            if (!mpwatchCheatUnlocked(cheat)) mpwatchPlayBeep();
+            if (row >= MPWATCH_TOGGLE_ROWS)
+            {
+                cheatModRunInGameAction(row - MPWATCH_TOGGLE_ROWS);
+                mpwatchPlayBeep();
+            }
             else
             {
-                s32 active=cheatIsActive(cheat);
-                if (active) cheatButtonHandleCheatsTurnedOff(cheat); else cheatButtonHandleCheatsTurnedOn(cheat);
-                g_CheatActivated[cheat]=!active; g_AppendCheatSinglePlayer=TRUE; mpwatchPlayBeep();
+                CHEAT_ID cheat=mpwatchCheatAtRow(row);
+                if (!mpwatchCheatUnlocked(cheat)) mpwatchPlayBeep();
+                else
+                {
+                    s32 active=cheatIsActive(cheat);
+                    if (active) cheatButtonHandleCheatsTurnedOff(cheat); else cheatButtonHandleCheatsTurnedOn(cheat);
+                    g_CheatActivated[cheat]=!active; g_AppendCheatSinglePlayer=TRUE; mpwatchPlayBeep();
+                }
             }
         }
         return 1;
@@ -1042,6 +1118,15 @@ void mpwatchMenuTick(void)
 
                         if (menu_count == player_count)
                         {
+#ifdef GE_MODDED_CHEATS
+                            /* Every terminal campaign Co-Op GAME OVER path
+                             * must arm the Mission Report route before Title.
+                             * This also covers B-driven MENU_FINISHED exits. */
+                            if (mpwatchIsCampaignCoop())
+                            {
+                                frontStoreCoopMissionReportStats();
+                            }
+#endif
                             bossSetLoadedStage(LEVELID_TITLE);
                         }
                     }
@@ -1070,6 +1155,21 @@ void mpwatchMenuTick(void)
                         mpwatchPlayBeep();
                         g_CurrentPlayer->mpmenuon = FALSE;
                         g_CurrentPlayer->healthdisplaytime = 0;
+#ifdef GE_MODDED_CHEATS
+                        if (mpwatchIsCampaignCoop())
+                        {
+                            /* Quitting campaign Co-Op is a mission abort, not
+                             * a competitive multiplayer game-over.  Snapshot
+                             * objectives and every player's level stats while
+                             * the live player records still exist, then go
+                             * straight to the folder mission report. */
+                            mission_failed_or_aborted = TRUE;
+                            g_isBondKIA = FALSE;
+                            frontStoreCoopMissionReportStats();
+                            bossSetLoadedStage(LEVELID_TITLE);
+                            return;
+                        }
+#endif
                         mpCalculateAwards(FALSE);
                     }
                 }
@@ -1900,22 +2000,39 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     else if (row == 5) label=frontModGetOptionLabel(31);
                     else if (row == 6) label=frontModGetOptionLabel(16);
                     else if (row == 7) label=frontModGetOptionLabel(8);
-                    else label=frontModGetOptionLabel(29);
+                    else if (row == 8) label=frontModGetOptionLabel(29);
+                    else if (row == 9) label=frontModGetOptionLabel(32);
+                    else if (row == 10) label=frontModGetOptionLabel(47);
+                    else if (row == 11) label=frontModGetOptionLabel(45);
+                    else if (row == 12) label=frontModGetOptionLabel(46);
+                    else if (row == 13) label=frontModGetOptionLabel(48);
+                    else if (row == 14) label=frontModGetOptionLabel(49);
+                    else if (row == 15) label=frontModGetOptionLabel(51);
+                    else label=frontModGetOptionLabel(50);
                     value=mpwatchConfigSpecialValue(curplayernum,row);
-                    vtext=(char *)langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[value+1]);
+                    vtext=(row == 9 && g_MpViewportLock) ? frontModGetOptionLabel(37) : (value ? "on" : "off");
                 }
                 else
                 {
-                    cheat=(CHEAT_ID)(row+1); label=(char *)frontModGetCheatMenuText(cheat);
-                    if (mpwatchCheatUnlocked(cheat)) vtext=(char *)langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[cheatIsActive(cheat)+1]); else vtext="Locked";
+                    if (row >= MPWATCH_TOGGLE_ROWS)
+                    {
+                        s32 a = row - MPWATCH_TOGGLE_ROWS;
+                        label = frontModGetOptionLabel(a == 0 ? 33 : a == 1 ? 34 : a == 2 ? 35 : a == 3 ? 43 : 44);
+                        vtext = frontModGetOptionLabel(36);
+                    }
+                    else
+                    {
+                        cheat=mpwatchCheatAtRow(row); label=(char *)frontModGetCheatMenuText(cheat);
+                        if (mpwatchCheatUnlocked(cheat)) vtext=(char *)langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[cheatIsActive(cheat)+1]); else vtext="Locked";
+                    }
                 }
 
                 textMeasure(&textheight,&textwidth,label,ptrFontBankGothicChars,ptrFontBankGothic,0);
                 x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+57+MPMENU_YOFF;
-                gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,0xa0ffa0f0,viGetX(),viGetY(),0,0);
+                gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,(mode == 2 && row == 9 && g_MpViewportLock) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
                 textMeasure(&textheight,&textwidth,vtext,ptrFontBankGothicChars,ptrFontBankGothic,0);
                 x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+75+MPMENU_YOFF;
-                gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,0x00ff00b0,viGetX(),viGetY(),0,0);
+                gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,(mode == 2 && row == 9 && g_MpViewportLock) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
 
                 if (mode == 1 && mpcfg_modal[curplayernum])
                 {

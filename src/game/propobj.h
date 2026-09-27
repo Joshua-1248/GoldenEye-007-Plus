@@ -55,6 +55,10 @@ extern f32 g_SoloAmmoMultiplier;
 extern struct Model *g_CurrentProjectileModel;
 extern struct ModelNode *dword_CODE_bss_80075B74;
 
+#ifdef GE_MODDED_CHEATS
+void                 autogunCoopResetTargetCache(void);
+#endif
+
 #if defined(VERSION_EU)
 extern ExplosionDetailsRecordEuList object_explosion_details;
 #else
@@ -74,6 +78,7 @@ void                 chrobjCallsApplySpeed(f32 *openPosition, f32 maxFrac, f32 *
 Gfx                 *weaponRenderTracers(Gfx *gdl);
 void                 set_color_shading_from_tile(PropRecord *prop, u8 col[4]);
 void                 propobjSetDropped(PropRecord *prop, DROPTYPE droptype);
+void                 sub_GAME_7F04E9BC(PropRecord *prop, struct ShotData *shotdata);
 void                 objDropRecursively(PropRecord *prop);
 void                 chrobjSndCreatePostEventDefault(ALSoundState *, coord3d *);
 void                 alarmActivate(void);

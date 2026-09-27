@@ -38,6 +38,9 @@
 #include "game/textrelated.h"
 #include "game/player.h"
 #include "game/frametiming.h"
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 #include "PR/R4300.h"
 
 /**
@@ -121,6 +124,10 @@ struct memallocstring memallocstringtable[] = {
 { LEVELID_EGYPT,        "-ml0 -me0 -mgfx100 -mvtx50 -mt600 -ma250"},
 { LEVELID_CITADEL,      "-ml0 -me0 -mgfx100 -mvtx50 -mt650 -ma150"},
 { LEVELID_CUBA,         "-ml0 -me0 -mgfx100 -mvtx50 -mt300 -ma300"},
+#ifdef GE_MAP_MAKER
+/* Dedicated Map Maker test stage: generous editor-world/GFX headroom, no retail stage dependency. */
+{ LEVELID_MAP_MAKER,    "-ml0 -me0 -mgfx100 -mvtx50 -mt610 -ma300"},
+#endif
 { LEVELID_TITLE,        "-ml0 -me0 -mgfx80 -mvtx20 -mt646 -ma001"},
 { 0x5B,                 "-ml0 -me0 -mgfx60 -mvtx20 -mt500 -ma001"},
 { 0x63,                 "-ml0 -me0 -mgfx60 -mvtx20 -mt500 -ma001"},
@@ -479,7 +486,11 @@ void bossMainloop(void)
                     }
                     else
                     {
-                        if (g_MainStageNum < 0 && pendingGfx < 2U)
+                        if (g_MainStageNum < 0 && pendingGfx < 2U
+#ifdef GE_MODDED_CHEATS
+                                && (!mirrorLevelsHasPending() || pendingGfx == 0)
+#endif
+                                )
                         {
                             if (get_is_ramrom_flag())
                             {
@@ -546,6 +557,18 @@ void bossMainloop(void)
                                     lvlViewMoveTick();
                                 }
                             }
+
+#ifdef GE_MODDED_CHEATS
+                            /* A queued mirror transition stops new task submission until the
+                             * already-running graphics task(s) drain. Once pendingGfx reaches
+                             * zero this is the scheduler-owned safe point: no RSP task can still
+                             * reference the persistent BG vertices/display lists we are about to
+                             * reflect, and the next task is built from the new world state. */
+                            if (pendingGfx == 0)
+                            {
+                                mirrorLevelsApplyPending();
+                            }
+#endif
 
                             gdl = lvlRender(gdl);
 

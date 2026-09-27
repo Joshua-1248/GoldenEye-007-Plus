@@ -7,16 +7,36 @@ static void __osPackEepWriteData(u8 address, u8 *buffer);
 
 s32 osEepromWrite(OSMesgQueue *mq, u8 address, u8 *buffer)
 {
-
     s32 ret;
     int i;
     u8 *ptr;
     __OSContEepromFormat eepromformat;
     OSContStatus sdata;
+#ifdef GE_SAVE_EEPROM16K
+    u16 type;
+#endif
 
     ret = 0;
     ptr = (u8 *)&__osEepPifRam.ramarray;
 
+#ifdef GE_SAVE_EEPROM16K
+    __osSiGetAccess();
+    ret = __osEepStatus(mq, &sdata);
+    type = sdata.type & (CONT_EEPROM | CONT_EEP16K);
+    if (ret != 0) {
+        __osSiRelAccess();
+        return CONT_NO_RESPONSE_ERROR;
+    }
+    if (type == CONT_EEPROM) {
+        if (address >= EEPROM_MAXBLOCKS) {
+            __osSiRelAccess();
+            return -1;
+        }
+    } else if (type != (CONT_EEPROM | CONT_EEP16K)) {
+        __osSiRelAccess();
+        return CONT_NO_RESPONSE_ERROR;
+    }
+#else
     if (address > EEPROM_MAXBLOCKS)
     {
         return -1;
@@ -29,6 +49,7 @@ s32 osEepromWrite(OSMesgQueue *mq, u8 address, u8 *buffer)
     {
         return CONT_NO_RESPONSE_ERROR;
     }
+#endif
 
     while (sdata.status & CONT_EEPROM_BUSY)
     {
@@ -36,30 +57,27 @@ s32 osEepromWrite(OSMesgQueue *mq, u8 address, u8 *buffer)
     }
 
     __osPackEepWriteData(address, buffer);
-    ret = __osSiRawStartDma(OS_WRITE, &__osEepPifRam); //send command to pif
+    ret = __osSiRawStartDma(OS_WRITE, &__osEepPifRam);
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
 
-    for (i = 0; i < ARRLEN(__osEepPifRam.ramarray) + 1; i++) // buffer overflow?
+    for (i = 0; i < ARRLEN(__osEepPifRam.ramarray) + 1; i++)
     {
         __osEepPifRam.ramarray[i] = CONT_CMD_NOP;
     }
 
     __osEepPifRam.pifstatus = CONT_CMD_REQUEST_STATUS;
 
-
-    ret = __osSiRawStartDma(OS_READ, &__osEepPifRam); //recv response
+    ret = __osSiRawStartDma(OS_READ, &__osEepPifRam);
     __osContLastCmd = CONT_CMD_WRITE_EEPROM;
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
 
-    for (i = 0; i < 4; i++) //skip the first 4 bytes
+    for (i = 0; i < 4; i++)
     {
         ptr++;
     }
 
     eepromformat = *(__OSContEepromFormat *)ptr;
-
-    //probably indicates an error, from PIF
-    ret = CHNL_ERR(eepromformat); //TODO: remove magic constants
+    ret = CHNL_ERR(eepromformat);
 
     __osSiRelAccess();
 

@@ -213,6 +213,11 @@ LEVELID langGetLangBankIndexFromStagenum(LEVELID level)
         case LEVELID_CUBA:
             return_id = LLEN;
             break;
+#ifdef GE_MAP_MAKER
+        case LEVELID_MAP_MAKER:
+            return_id = LMISC;
+            break;
+#endif
         default:
         {
             #ifdef DEBUG

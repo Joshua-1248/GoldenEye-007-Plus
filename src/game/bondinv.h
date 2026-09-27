@@ -36,8 +36,11 @@ void bondinvAddTextOverride(textoverride *override);
 void bondinvResetCoopSharedProps(void);
 void bondinvShareCoopItem(ITEM_IDS item);
 void bondinvShareCoopProp(PropRecord *prop);
+bool bondinvCoopAnyPlayerHasPropInInv(PropRecord *prop);
 s32 bondinvCycleMissionItem(void);
+s32 bondinvWeaponSwitchInProgress(void);
 void bondinvProcessMissionItemQueue(void);
+s32 bondinvMissionItemModeActive(void);
 #endif
 
 #endif

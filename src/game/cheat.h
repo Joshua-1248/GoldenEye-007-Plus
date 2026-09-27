@@ -103,6 +103,7 @@ void cheatButtonTurnOnCheatForPlayers(CHEAT_ID cheatindex);
 #ifdef GE_MODDED_CHEATS
 /* RC5 watch Cheats submenu reuses the real runtime activation handlers. */
 void cheatButtonHandleCheatsTurnedOn(CHEAT_ID cheatindex);
+void cheatModRunInGameAction(s32 action);
 void cheatButtonHandleCheatsTurnedOff(CHEAT_ID cheatindex);
 #endif
 void cheat_buttons_mp_related(void);

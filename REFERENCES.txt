@@ -30,22 +30,16 @@ Role:
 The ROM is NOT part of the public source distribution and must not be
 redistributed with this project.
 
-3. GOLDENEYE 007 PLUS R21/R22 BASELINES
----------------------------------------
+3. GOLDENEYE 007 PLUS BASELINES
+-------------------------------
 R21 Final was the known-good baseline entering R22 development.
 
-R22 adds and consolidates further work including Disable Knockback, Disable
-Noise Dithering, expanded Special Options integration, and SP Watch Special
-Options scrolling.
-
-Cumulative addenda in the repository document exact release/build history and
-should be kept with archival source snapshots.
+The current public development tree is R22-derived and includes later work in
+Third Person, campaign Co-Op, Map Maker, Mirrored Levels, save-backed options,
+cutscene ownership and objective synchronization.
 
 4. PERFECT DARK DECOMPILATION
 -----------------------------
-Supplied repository:
-  Perfect Dark decompilation (Ryan Dwyer / project contributors)
-
 Public project reference:
   https://github.com/n64decomp/perfect_dark
 
@@ -63,9 +57,6 @@ License:
 Role:
   Community modding/research reference for GoldenEye engine behavior, assets,
   level/model structures and historical modding techniques.
-
-When specific code or assets are used in the future, record the exact source,
-version and license/permission in this file before release.
 
 6. GOLDENEYE SETUP EDITOR
 -------------------------
@@ -107,11 +98,6 @@ Project:
 
 Role:
   Graphics plugin used for testing.
-
-Important project-specific compatibility finding:
-  Enable "Force depth buffer clear" when regression-testing the current
-  GoldenEye 007 Plus split-screen builds. An intermittent black-world issue
-  was traced to graphics-plugin state rather than the GoldenEye source.
 
 11. NINTENDO 64 / LIBULTRA MATERIAL
 -----------------------------------

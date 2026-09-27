@@ -318,6 +318,9 @@ u16 *get_ptr_short_watch_text_for_item(ITEM_IDS item);
 s32 bondwalkItemHasAmmo(ITEM_IDS item);
 
 void gunDrawSight(s32 *gdl);
+#ifdef GE_MODDED_CHEATS
+void gunRenderThirdPersonWorldSight(Gfx **gdl);
+#endif
 
 WeaponStats *get_ptr_item_statistics(ITEM_IDS item);
 
@@ -343,6 +346,12 @@ u8 bondwalkItemGetSoundTriggerRate(ITEM_IDS item);
 void recall_joy2_hits_edit_detail_edit_flag(enum ITEM_IDS item, PropRecord* prop, s32 texture_index);
 void recall_joy2_hits_edit_flag(enum ITEM_IDS item, coord3d* arg1, s32 texture_index);
 void gunInitProjectileObject(ObjectRecord *arg0, coord3d *arg1,  StandTile *arg2, Mtxf *arg3, coord3d *arg4, Mtxf *arg5,  PropRecord *owner);
+s32 gunGetThirdPersonHandOrigin(enum GUNHAND hand, coord3d *out);
+s32 gunGetThirdPersonMuzzleOrigin(enum GUNHAND hand, coord3d *out);
+#ifdef GE_MODDED_CHEATS
+void gunClearThirdPersonResolvedBeam(enum GUNHAND hand);
+void gunSetThirdPersonResolvedBeam(enum GUNHAND hand, const coord3d *origin, const coord3d *target);
+#endif
 void CapBeamLengthAndDecideIfRendered(struct BeamRecord *arg0, ITEM_IDS item, coord3d *arg2, coord3d *arg3);
 void sub_GAME_7F068190(coord3d *arg0, coord3d *arg1);
 

@@ -1222,6 +1222,11 @@ typedef enum CHEAT_IDS
     /* Mod gameplay cheats are appended so all existing retail cheat IDs remain stable. */
     CHEAT_NO_RELOAD,
     CHEAT_RAPID_FIRE,
+    CHEAT_NO_CLIPPING,
+    CHEAT_FLY_MODE,
+    CHEAT_KINETIC_EXPLOSIONS,
+    CHEAT_SUPER_TANK,
+    CHEAT_MIRRORED_LEVELS,
 #endif
 
     CHEAT_INVALID,
@@ -1681,6 +1686,10 @@ typedef enum LEVELID
     LEVELID_CUBA,
     LEVELID_WAX,
     LEVELID_PAM,
+#ifdef GE_MAP_MAKER
+    /* Dedicated GoldenEye Plus authoring/test stage.  Never aliases a retail map. */
+    LEVELID_MAP_MAKER,
+#endif
     LEVELID_MAX,
     LEVELID_TITLE = 90,
     LEVELID_BUNKER2_MP  = LEVELID_BUNKER2 + ENVIRONMENTDATA_PLAYERS_4,
@@ -1749,6 +1758,9 @@ char *LEVELID_ToString[] = {
     "LEVELID_CUBA",
     "LEVELID_WAX",
     "LEVELID_PAM",
+#ifdef GE_MAP_MAKER
+    "LEVELID_MAP_MAKER",
+#endif
     "LEVELID_MAX"};
 
 #endif
@@ -1869,6 +1881,11 @@ typedef enum MENU
     MENU_MP_SETTINGS,
     /* Per-player multiplayer control/HUD preferences. */
     MENU_MP_PLAYER_OPTIONS,
+#ifdef GE_MAP_MAKER
+    /* R22+ Basic Map Maker. Appended so all existing frontend IDs remain stable. */
+    MENU_MAP_MAKER,
+    MENU_MAP_MAKER_BASIC,
+#endif
 #endif
     MENU_MAX
 } MENU;
@@ -2161,7 +2178,7 @@ typedef enum PORTALFLAGS
 
 #define SAVEFLAGS_SET(folder, slot, bond, reset) (((folder << 5) & 0xE0) | ((slot * 8) & 0x18) | ((bond << 1) & 0x6) | (reset & 1 ? SAVEFLAG_DORESET : 0))
 
-#define BLANKSAVEDATA {0, 0, SAVEFLAGS_SET(0,0,BOND_BROSNAN,1), 0x00, 0xFF, 0xFF, DEFAULT_OPTIONS, 0x00, 0x00, 0, 0x88, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define BLANKSAVEDATA {0, 0, SAVEFLAGS_SET(0,0,BOND_BROSNAN,1), 0x00, 0xFF, 0xFF, DEFAULT_OPTIONS, 0x00, 0x00, 0, 0x88, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
 #define MAX_PLAYER_COUNT 4
 
@@ -4706,7 +4723,7 @@ typedef enum PROJECTILES
 #define getBGAIListID(ID)         ((ID) - 4096)
 
     /* language file to slot allocation */
-#define getStringID(TEXTBANK, TEXTSLOT) ((TEXTBANK * 0x0400U) + TEXTSLOT)
+#define getStringID(TEXTBANK, TEXTSLOT) (((TEXTBANK) * 0x0400U) + (TEXTSLOT))
 
     /* Image ID to RAM allocation */
 #define IMAGESEG(id)             0xABCD0000 | id

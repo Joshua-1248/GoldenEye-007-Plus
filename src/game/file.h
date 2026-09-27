@@ -19,6 +19,7 @@ typedef struct save_data
   u8 mod_options2; /* R21: formerly-unused save padding byte; struct stays 0x60 bytes */
   u8 times[(SP_LEVEL_MAX-1) * 4];
   u8 mod_options3; /* R22: consumes former tail padding; struct remains 0x60 bytes */
+  u8 mod_camera_tail; /* R22 V29: explicit former alignment byte; camera pack tail */
 } save_data;
 
 // Used by fileValidateSaves

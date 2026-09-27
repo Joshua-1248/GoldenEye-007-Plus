@@ -95,6 +95,30 @@ s32 m_stanRegion = 0;
 //D:80040FB4
 s32 stanlinelog_flag = 0;
 
+#ifdef GE_MODDED_CHEATS
+static s32 g_StanMirrorLevelsEnabled = FALSE;
+
+static s32 stanMirrorPointX(const StandTilePoint *point)
+{
+    return g_StanMirrorLevelsEnabled ? -(s32)point->x : (s32)point->x;
+}
+
+static f32 stanMirrorSignedDistance(f32 value)
+{
+    return g_StanMirrorLevelsEnabled ? -value : value;
+}
+#else
+static s32 stanMirrorPointX(const StandTilePoint *point)
+{
+    return (s32)point->x;
+}
+
+static f32 stanMirrorSignedDistance(f32 value)
+{
+    return value;
+}
+#endif
+
 #if defined(LEFTOVERDEBUG)
 
 s32 D_80040FB8[] = {
@@ -285,7 +309,18 @@ void stanBuildRoomData(void)
 
         for (i = 0; i < (tile->tail.hdrTail.pointCount & 0xf); i++)
         {
-            for (j = 0; j < 3; j++)
+            s32 pointx = stanMirrorPointX(&tile->points[i]);
+
+            if (pointx < g_StanRoomBounds[lastRoom].min[0])
+            {
+                g_StanRoomBounds[lastRoom].min[0] = pointx < -32768 ? -32768 : pointx;
+            }
+            if (pointx > g_StanRoomBounds[lastRoom].max[0])
+            {
+                g_StanRoomBounds[lastRoom].max[0] = pointx > 32767 ? 32767 : pointx;
+            }
+
+            for (j = 1; j < 3; j++)
             {
                 if (tile->points[i].AsArray[j] < g_StanRoomBounds[lastRoom].min[j])
                 {
@@ -302,6 +337,30 @@ void stanBuildRoomData(void)
         tile = (StandTile *)(((u8 *)tile) + list_of_tilesizes[tile->tail.hdrTail.pointCount & 0xf]);
     }
 }
+
+#ifdef GE_MODDED_CHEATS
+void stanMirrorLevelsSetEnabled(s32 enabled)
+{
+    enabled = enabled ? TRUE : FALSE;
+
+    if (enabled == g_StanMirrorLevelsEnabled)
+    {
+        return;
+    }
+
+    g_StanMirrorLevelsEnabled = enabled;
+
+    if (stan_prefix != NULL && stan_prefix->ptr_firstroom != NULL)
+    {
+        stanBuildRoomData();
+    }
+}
+
+s32 stanMirrorLevelsIsEnabled(void)
+{
+    return g_StanMirrorLevelsEnabled;
+}
+#endif
 
 
 /**
@@ -509,6 +568,8 @@ void stanLoadFile(struct StanPrefixRecord *file)
 }
 
 
+
+
 //stanRegion()
 void sub_GAME_7F0AF630(s32 arg0)
 {
@@ -642,10 +703,10 @@ bool stanTileHasZeroArea(StandTile *tile)
     temp2 = (tile->tail.half >> 4) & 0xf;
     temp3 = (tile->tail.half) & 0xf;
 
-    AB[0] = tile->points[temp2].x - tile->points[temp1].x;
+    AB[0] = stanMirrorPointX(&tile->points[temp2]) - stanMirrorPointX(&tile->points[temp1]);
     AB[2] = tile->points[temp2].z - tile->points[temp1].z;
     
-    AC[0] = tile->points[temp3].x - tile->points[temp1].x;
+    AC[0] = stanMirrorPointX(&tile->points[temp3]) - stanMirrorPointX(&tile->points[temp1]);
     AC[2] = tile->points[temp3].z - tile->points[temp1].z;
 
     crossStore[0] = (AB[2] * AC[0]) - (AB[0] * AC[2]);
@@ -714,7 +775,7 @@ void getTileMidPoint(StandTile *tile, coord3d *out)
     new_var3 = &(&tile->points[indexC])->x;
     pointA = &tile->points[indexA];
     pointB = &tile->points[indexB];
-    out->x = (((((f32) pointA->x) + ((f32) pointB->x)) + ((f32) (*new_var3))) / 3.0f) * inv_level_scale;
+    out->x = (((f32)stanMirrorPointX(pointA) + (f32)stanMirrorPointX(pointB) + (f32)stanMirrorPointX(&tile->points[indexC])) / 3.0f) * inv_level_scale;
     out->y = (((((f32) (&tile->points[indexA])->y) + ((f32) pointB->y)) + ((f32) (&tile->points[indexC])->y)) / 3.0f) * inv_level_scale;
     out->z = (((((f32) (&tile->points[indexA])->z) + ((f32) pointB->z)) + ((f32) ((float) (&tile->points[indexC])->z))) / 3.0f) * inv_level_scale;
 }
@@ -734,7 +795,7 @@ void getPointJustInsideOfTileTriple(StandTile *tile, s32 tripleIndex /*canonical
     if (1);
     if (&midPoint);
     
-    out->x = ((f32) tile->points[pntIndex].x) * inv_level_scale;
+    out->x = ((f32) stanMirrorPointX(&tile->points[pntIndex])) * inv_level_scale;
     out->y = ((f32) tile->points[pntIndex].y) * inv_level_scale;
     out->z = ((f32) tile->points[pntIndex].z) * inv_level_scale;
     
@@ -870,7 +931,7 @@ f32 getShortest2dDispToInfTileEdge(StandTile *tile,s32 index,f32 p_x,f32 p_z)
 
     nextPnt = &tile->points[nextIndex];
     currPnt = &tile->points[index];
-    edge_x = (f32)(nextPnt->x - currPnt->x);
+    edge_x = (f32)(stanMirrorPointX(nextPnt) - stanMirrorPointX(currPnt));
     edge_z = (f32)(nextPnt->z - currPnt->z);
 
     edge_len = sqrtf(edge_x * edge_x + edge_z * edge_z);
@@ -878,7 +939,7 @@ f32 getShortest2dDispToInfTileEdge(StandTile *tile,s32 index,f32 p_x,f32 p_z)
     if (edge_len == 0) {
         // Degenerate case, edge is vertical
         // They just return the distance between the points, which is sensible and the correct value in 3 dimensions.
-        v_x = p_x - (f32)tile->points[nextIndex].x;
+        v_x = p_x - (f32)stanMirrorPointX(&tile->points[nextIndex]);
         v_z = p_z - (f32)tile->points[nextIndex].z;
         return sqrtf(v_x * v_x + v_z * v_z);
     }
@@ -891,11 +952,11 @@ f32 getShortest2dDispToInfTileEdge(StandTile *tile,s32 index,f32 p_x,f32 p_z)
         // | (AP x AB) / ||AB|| | = ||PA|| sin(a),
         // so we're returning the SIGNED displacement
         crossProduct = (
-            edge_z * (p_x - (f32)tile->points[index].x)
+            edge_z * (p_x - (f32)stanMirrorPointX(&tile->points[index]))
             +
             -edge_x * (p_z - (f32)tile->points[index].z)
         );
-        return crossProduct / edge_len;
+        return stanMirrorSignedDistance(crossProduct / edge_len);
     }
 
 }
@@ -929,12 +990,12 @@ f32 getShortest2dDispToInfTripleEdge(StandTile *tile, s32 start3index, f32 p_x, 
     start3index = (tile->tail.half >> (8 - (start3index << nextPntI))) & 0xf;
     end3index = (tile->tail.half >> (8 - (end3index << nextPntI))) & 0xf;
 
-    edgeX = tile->points[end3index].x - tile->points[start3index].x;
+    edgeX = stanMirrorPointX(&tile->points[end3index]) - stanMirrorPointX(&tile->points[start3index]);
     edgeZ = tile->points[end3index].z - tile->points[start3index].z;
     edgeLen = sqrtf((edgeX * edgeX) + (edgeZ * edgeZ));
 
     if (edgeLen == 0.0f) {
-        dx = p_x - tile->points[end3index].x;
+        dx = p_x - stanMirrorPointX(&tile->points[end3index]);
         dz = p_z - tile->points[end3index].z;
         return sqrtf((dx * dx) + (dz * dz));
     }
@@ -943,8 +1004,8 @@ f32 getShortest2dDispToInfTripleEdge(StandTile *tile, s32 start3index, f32 p_x, 
     assert(d>0.0f);
     #endif
 
-    crossProduct = (edgeZ * (p_x - tile->points[start3index].x)) + (-edgeX * (p_z - tile->points[start3index].z));
-    return crossProduct / edgeLen;
+    crossProduct = (edgeZ * (p_x - stanMirrorPointX(&tile->points[start3index]))) + (-edgeX * (p_z - tile->points[start3index].z));
+    return stanMirrorSignedDistance(crossProduct / edgeLen);
 }
 
 
@@ -970,7 +1031,7 @@ f32 distToTilePnt2D(StandTile *tile,int pntI,f32 p_x,f32 p_z)
 {
   f32 len;
 
-  p_x -= (f32)tile->points[pntI].x;
+  p_x -= (f32)stanMirrorPointX(&tile->points[pntI]);
   p_z -= (f32)tile->points[pntI].z;
   return sqrtf(p_x * p_x + p_z * p_z);
 }
@@ -984,7 +1045,7 @@ f32 sub_GAME_7F0B00C4(StandTile *tile, s32 pntI, f32 p_x, f32 p_z)
     p_x *= level_scale;
     p_z *= level_scale;
 
-    p_x -= tile->points[pntI].x;
+    p_x -= stanMirrorPointX(&tile->points[pntI]);
     p_z -= tile->points[pntI].z;
 
     return sqrtf((p_x * p_x) + (p_z * p_z)) * inv_level_scale;
@@ -1005,7 +1066,7 @@ f32 stanPointDot2D(StandTile *tile, s32 index, f32 x, f32 z)
     x *= level_scale;
     z *= level_scale;
 
-    return (((f32)point->z * z) + (x * (f32)point->x)) * inv_level_scale;
+    return (((f32)point->z * z) + (x * (f32)stanMirrorPointX(point))) * inv_level_scale;
 }
 
 
@@ -1036,14 +1097,14 @@ bool stanPointProjectsOntoTileEdge(StandTile *tile, s32 edgeIndex, f32 p_x, f32 
 
     point = &tile->points[edgeIndex];
 
-    startX = point->x;
+    startX = stanMirrorPointX(point);
     startZ = point->z;
 
     edgeIndex = (edgeIndex + 1) % ((tile->tail.half >> 12) & 0xf);
 
     point = (nextPoint = &tile->points[edgeIndex]);
 
-    edgeX = point->x;
+    edgeX = stanMirrorPointX(point);
     edgeX = edgeX - startX;
 
     edgeZ = point->z;
@@ -1124,7 +1185,7 @@ f32 sub_GAME_7F0B0400(StandTile *tile, s32 start3index, f32 p_x, f32 p_z)
     start3index = (tile->tail.half >> (8 - (start3index << 2))) & 0xF;
     var_a0 = (tile->tail.half >> (8 - (var_a0 << 2))) & 0xF;
 
-    temp_f2 = (f32)(tile->points[var_a0].x - tile->points[start3index].x);
+    temp_f2 = (f32)(stanMirrorPointX(&tile->points[var_a0]) - stanMirrorPointX(&tile->points[start3index]));
     temp_f14 = (f32)(tile->points[var_a0].z - tile->points[start3index].z);
 
     temp_f0 = sqrtf((temp_f2 * temp_f2) + (temp_f14 * temp_f14));
@@ -1137,8 +1198,8 @@ f32 sub_GAME_7F0B0400(StandTile *tile, s32 start3index, f32 p_x, f32 p_z)
     assert(d>0.0f);
     #endif
 
-    tempf = (temp_f14 * (p_x - tile->points[start3index].x)) + ((p_z - tile->points[start3index].z) * -temp_f2);
-    return tempf / temp_f0;
+    tempf = (temp_f14 * (p_x - stanMirrorPointX(&tile->points[start3index]))) + ((p_z - tile->points[start3index].z) * -temp_f2);
+    return stanMirrorSignedDistance(tempf / temp_f0);
 }
 
 
@@ -1464,11 +1525,14 @@ bool sub_GAME_7F0B0914(StandTile **tileStack, f32 start_x, f32 start_z, f32 dest
             nextPointIndex = (edgeIndex + 1) % (tile->tail.hdrTail.pointCount & 0xF);
             nextPoint = &((StandTilePoint *) tile)[nextPointIndex];
 
-            if (((lineNegDz * (nextPoint[1].x - curPoint[1].x)) + (lineDx * (nextPoint[1].z - curPoint[1].z))) <= 0.0f)
+            if (stanMirrorSignedDistance((lineNegDz * (stanMirrorPointX(&nextPoint[1]) - stanMirrorPointX(&curPoint[1])))
+                    + (lineDx * (nextPoint[1].z - curPoint[1].z))) <= 0.0f)
             {
                 hasLink = curPoint[1].link >> 4 != 0;
 
-                if (sub_GAME_7F0B07BC(start_x, start_z, dest_x, dest_z, curPoint[1].x, curPoint[1].z, nextPoint[1].x, nextPoint[1].z, hasLink))
+                if (sub_GAME_7F0B07BC(start_x, start_z, dest_x, dest_z,
+                        stanMirrorPointX(&curPoint[1]), curPoint[1].z,
+                        stanMirrorPointX(&nextPoint[1]), nextPoint[1].z, hasLink))
                 {
                     linkedTile = &standTileStart[curPoint[1].link];
                     crossings++;
@@ -1727,10 +1791,10 @@ s32 stanTestLineUnobstructed(StandTile **pTile, f32 p_x, f32 p_z, f32 dest_x, f3
         point_index = (stanSavedColl_pointI + 1) % (s32)((stanSavedColl_tile->tail.half >> 0xC) & 0xF);
         D_800413BC = 1;
 
-        stanSavedColl_pntA.f[0] = (f32) stanSavedColl_tile->points[stanSavedColl_pointI].x * inv_level_scale;
+        stanSavedColl_pntA.f[0] = (f32) stanMirrorPointX(&stanSavedColl_tile->points[stanSavedColl_pointI]) * inv_level_scale;
         stanSavedColl_pntA.f[1] = (f32) stanSavedColl_tile->points[stanSavedColl_pointI].z * inv_level_scale;
 
-        stanSavedColl_pntB.f[0] = (f32) stanSavedColl_tile->points[point_index].x * inv_level_scale;
+        stanSavedColl_pntB.f[0] = (f32) stanMirrorPointX(&stanSavedColl_tile->points[point_index]) * inv_level_scale;
         stanSavedColl_pntB.f[1] = (f32) stanSavedColl_tile->points[point_index].z * inv_level_scale;
 
         sp140 = calculateSegmentIntersectionFraction(&sp14C, &sp144, &stanSavedColl_pntA, &stanSavedColl_pntB);
@@ -2207,7 +2271,7 @@ void getTileEdgePoints(StandTile *tile, s32 pointI, coord3d *currPntRtn, coord3d
 
     scale = inv_level_scale;
 
-    currPntRtn->x = tile->points[pointI].x * scale;
+    currPntRtn->x = stanMirrorPointX(&tile->points[pointI]) * scale;
     currPntRtn->y = tile->points[pointI].y * scale;
     currPntRtn->z = tile->points[pointI].z * scale;
 
@@ -2221,7 +2285,7 @@ void getTileEdgePoints(StandTile *tile, s32 pointI, coord3d *currPntRtn, coord3d
      */
     pointI = (pointI + 1) % ((tile->tail.half >> 12) & 0xf);
 
-    nextPointRtn->x = tile->points[pointI].x * scale;
+    nextPointRtn->x = stanMirrorPointX(&tile->points[pointI]) * scale;
     nextPointRtn->y = tile->points[pointI].y * scale;
     nextPointRtn->z = tile->points[pointI].z * scale;
 }
@@ -2557,7 +2621,7 @@ void stanGetTileOrderedPointWorldPos(StandTile *tile, s32 pointnum, coord3d *out
 
     scale = inv_level_scale;
 
-    out->x = point->x * scale;
+    out->x = stanMirrorPointX(point) * scale;
     out->y = point->y * scale;
     out->z = point->z * scale;
 }
@@ -3043,11 +3107,11 @@ f32 stanGetPositionYValue(StandTile *tile, f32 p_x, f32 p_z)
     temp_a3 = STAN_TAIL_POINT_COUNT(tile);
     p_z *= level_scale;
 
-    a[0] = (f32) (tile->points[temp_t7].x - tile->points[temp_t6].x);
+    a[0] = (f32) (stanMirrorPointX(&tile->points[temp_t7]) - stanMirrorPointX(&tile->points[temp_t6]));
     a[1] = (f32) (tile->points[temp_t7].y - tile->points[temp_t6].y);
     a[2] = (f32) (tile->points[temp_t7].z - tile->points[temp_t6].z);
 
-    b[0] = (f32) (tile->points[temp_a3].x - tile->points[temp_t6].x);
+    b[0] = (f32) (stanMirrorPointX(&tile->points[temp_a3]) - stanMirrorPointX(&tile->points[temp_t6]));
     b[1] = (f32) (tile->points[temp_a3].y - tile->points[temp_t6].y);
     b[2] = (f32) (tile->points[temp_a3].z - tile->points[temp_t6].z);
 
@@ -3067,7 +3131,7 @@ f32 stanGetPositionYValue(StandTile *tile, f32 p_x, f32 p_z)
         cp[1] = __f_to_ll((a[2] * b[0]) - (a[0] * b[2]));
         cp[2] = __f_to_ll((a[0] * b[1]) - (a[1] * b[0]));
 
-        rsum = (s64)__ll_mul((u64)cp[0], (u64)(s64)tile->points[temp_t6].x)
+        rsum = (s64)__ll_mul((u64)cp[0], (u64)(s64)stanMirrorPointX(&tile->points[temp_t6]))
             + (s64)__ll_mul((u64)cp[1], (u64)(s64)tile->points[temp_t6].y)
             + (s64)__ll_mul((u64)cp[2], (u64)(s64)tile->points[temp_t6].z);
     }
@@ -3077,7 +3141,7 @@ f32 stanGetPositionYValue(StandTile *tile, f32 p_x, f32 p_z)
     cp[2] = (s64)((a[0] * b[1]) - (a[1] * b[0]));
 
     // implicit call to __ll_mul
-    rsum = ((s64)cp[0] * (s64)tile->points[temp_t6].x)
+    rsum = ((s64)cp[0] * (s64)stanMirrorPointX(&tile->points[temp_t6]))
         + ((s64)cp[1] * (s64)tile->points[temp_t6].y)
         + ((s64)cp[2] * (s64)tile->points[temp_t6].z);
 #endif

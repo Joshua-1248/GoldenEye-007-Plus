@@ -3,9 +3,16 @@
 #include "file2.h"
 #include "front.h"
 
+#ifdef GE_PHYSICAL_FASTPATHS
+extern s32 g_SelectedDifficulty;
+#define FILE_GET_SELECTED_DIFFICULTY() (modMicroOptimizationsEnabled() ? g_SelectedDifficulty : lvlGetSelectedDifficulty())
+#else
+#define FILE_GET_SELECTED_DIFFICULTY() lvlGetSelectedDifficulty()
+#endif
+
 f32 get_007_reaction_speed(void)
 {
-    if (lvlGetSelectedDifficulty() == DIFFICULTY_007) {
+    if (FILE_GET_SELECTED_DIFFICULTY() == DIFFICULTY_007) {
         return slider_007_mode_reaction;
     }
     return 0.f;
@@ -13,7 +20,7 @@ f32 get_007_reaction_speed(void)
 
 f32 get_007_health_mod(void)
 {
-    if (lvlGetSelectedDifficulty() == DIFFICULTY_007) {
+    if (FILE_GET_SELECTED_DIFFICULTY() == DIFFICULTY_007) {
         return slider_007_mode_health;
     }
     return 1.f;
@@ -21,7 +28,7 @@ f32 get_007_health_mod(void)
 
 f32 get_007_damage_mod(void)
 {
-    if (lvlGetSelectedDifficulty() == DIFFICULTY_007) {
+    if (FILE_GET_SELECTED_DIFFICULTY() == DIFFICULTY_007) {
         return slider_007_mode_damage;
     }
     return 1.f;
@@ -29,7 +36,7 @@ f32 get_007_damage_mod(void)
 
 f32 get_007_accuracy_mod(void)
 {
-    if (lvlGetSelectedDifficulty() == DIFFICULTY_007) {
+    if (FILE_GET_SELECTED_DIFFICULTY() == DIFFICULTY_007) {
         return slider_007_mode_accuracy;
     }
     return 1.f;

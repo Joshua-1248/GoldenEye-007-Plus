@@ -334,6 +334,7 @@ extern u32 full_actor_intro;
 void frontChangeMenu(MENU menu, s32 reload);
 #ifdef GE_MODDED_CHEATS
 void frontStoreCoopMissionReportStats(void);
+char *frontModGetOptionLabel(s32 index);
 #endif
 s32 get_selected_num_players(void);
 void do_extended_cast_display(bool doExtended);

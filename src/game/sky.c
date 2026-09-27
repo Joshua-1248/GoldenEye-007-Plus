@@ -10,8 +10,17 @@
 #include "othermodemicrocode.h"
 #include "fr.h"
 #include "image_bank.h"
+#ifdef GE_MODDED_CHEATS
+#include "front.h"
+#endif
 
 #define SKYABS(val) (val >= 0.0f ? (val) : -(val))
+
+#ifdef GE_MODDED_CHEATS
+#define SKY_PRESENTATION_EYE_ARG , presentationeye
+#else
+#define SKY_PRESENTATION_EYE_ARG
+#endif
 
 // bss
 s32 g_SkyStageNum;
@@ -41,9 +50,15 @@ void skyGetWorldPosFromScreenPos(f32 offset_x, f32 offset_y, coord3d* out) {
 /*
 * Address: 0x7F0938FC
 */
-bool skyIsScreenCornerInSky(coord3d *corner3dpos, coord3d *dstpos, f32 *dstfrac)
+bool skyIsScreenCornerInSky(coord3d *corner3dpos, coord3d *dstpos, f32 *dstfrac
+#ifdef GE_MODDED_CHEATS
+    , coord3d *eye
+#endif
+)
 {
+#ifndef GE_MODDED_CHEATS
     coord3d *eye = bondviewGetCurrentPlayersPosition();
+#endif
     f32 f12 = 2.0f * corner3dpos->y / sqrtf(corner3dpos->f[0] * corner3dpos->f[0] + corner3dpos->f[2] * corner3dpos->f[2] + 0.0001f);
     f32 sp2c;
     f32 f12_2;
@@ -93,9 +108,15 @@ bool skyIsScreenCornerInSky(coord3d *corner3dpos, coord3d *dstpos, f32 *dstfrac)
 /*
 * Address: 0x7F093A78
 */
-bool skyIsCornerInWater(coord3d *corner3dpos, coord3d *dstpos, f32 *dstfrac)
+bool skyIsCornerInWater(coord3d *corner3dpos, coord3d *dstpos, f32 *dstfrac
+#ifdef GE_MODDED_CHEATS
+    , coord3d *eye
+#endif
+)
 {
+#ifndef GE_MODDED_CHEATS
     coord3d *eye = bondviewGetCurrentPlayersPosition();
+#endif
     f32 f12 = -2.0f * corner3dpos->y / sqrtf(corner3dpos->f[0] * corner3dpos->f[0] + corner3dpos->f[2] * corner3dpos->f[2] + 0.0001f);
     f32 sp2c;
     f32 f12_2;
@@ -312,11 +333,14 @@ Gfx *skyRender(Gfx *gdl)
     f32 scale;
     bool sp430;
     struct CurrentEnvironmentRecord *env;
+#ifdef GE_MODDED_CHEATS
+    coord3d thirdpersoneye;
+    coord3d *presentationeye;
+#endif
 
     scale = get_room_data_float1() / 30.0f;
     sp430 = FALSE;
     env = fogGetCurrentEnvironmentp();
-
     if (!fogGetCurrentEnvironmentp()->Clouds)
     {
         if (getPlayerCount() == 1)
@@ -336,6 +360,21 @@ Gfx *skyRender(Gfx *gdl)
         gDPPipeSync(gdl++);
         gDPSetCycleType(gdl++, G_CYC_FILL);
 
+#ifdef GE_MODDED_CHEATS
+        /* Campaign Co-Op uses the mission's real single-player environment,
+         * including dense coloured fog in Facility and Jungle. Retail's
+         * multiplayer no-cloud path never sets a fill colour because normal
+         * multiplayer generally renders against its own black/MP environment.
+         * Once Co-Op inherits a mission fog record, leaving the fill colour
+         * untouched makes the split-screen clear colour (black) show through
+         * wherever dense fog hides the world. Match the solo path here for
+         * Co-Op only, without changing competitive multiplayer presentation. */
+        if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)
+        {
+            gdl = viSetFillColor(gdl, env->Red, env->Green, env->Blue);
+        }
+#endif
+
         gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
 
         gDPFillRectangle(gdl++,
@@ -347,6 +386,24 @@ Gfx *skyRender(Gfx *gdl)
         return gdl;
     }
 
+#ifdef GE_MODDED_CHEATS
+    /* The stock sky/water projector is anchored to Bond's gameplay eye.
+     * Third Person changes the actual view origin without moving Bond, so
+     * Frigate's generated cloud/water sheets were still projected from the
+     * old First Person origin and could slice across the chase camera as huge
+     * blue quads. Resolve the presentation eye once per sky pass and reuse it
+     * for every corner calculation; this avoids recomputing the TP spring arm
+     * and collision test for each sky vertex on N64 hardware.
+     *
+     * Keep this below the no-cloud early return so indoor/no-sky stages pay
+     * no additional TP camera work. */
+    presentationeye = bondviewGetCurrentPlayersPosition();
+    if (bondviewGetThirdPersonVisibilityCamera(&thirdpersoneye))
+    {
+        presentationeye = &thirdpersoneye;
+    }
+#endif
+
     gdl = viSetFillColor(gdl, env->Red, env->Green, env->Blue);
 
     if (&sp6a4);
@@ -356,15 +413,15 @@ Gfx *skyRender(Gfx *gdl)
     skyGetWorldPosFromScreenPos(0.0f, getPlayer_c_screenheight() - 0.1f, &sp68c);
     skyGetWorldPosFromScreenPos(getPlayer_c_screenwidth() - 0.1f, getPlayer_c_screenheight() - 0.1f, &sp680);
 
-    sp538 = skyIsScreenCornerInSky(&sp6a4, &sp644, &sp58c);
-    sp534 = skyIsScreenCornerInSky(&sp698, &sp638, &sp588);
-    sp530 = skyIsScreenCornerInSky(&sp68c, &sp62c, &sp584);
-    sp52c = skyIsScreenCornerInSky(&sp680, &sp620, &sp580);
+    sp538 = skyIsScreenCornerInSky(&sp6a4, &sp644, &sp58c SKY_PRESENTATION_EYE_ARG);
+    sp534 = skyIsScreenCornerInSky(&sp698, &sp638, &sp588 SKY_PRESENTATION_EYE_ARG);
+    sp530 = skyIsScreenCornerInSky(&sp68c, &sp62c, &sp584 SKY_PRESENTATION_EYE_ARG);
+    sp52c = skyIsScreenCornerInSky(&sp680, &sp620, &sp580 SKY_PRESENTATION_EYE_ARG);
 
-    skyIsCornerInWater(&sp6a4, &sp5e4, &sp56c);
-    skyIsCornerInWater(&sp698, &sp5d8, &sp568);
-    skyIsCornerInWater(&sp68c, &sp5cc, &sp564);
-    skyIsCornerInWater(&sp680, &sp5c0, &sp560);
+    skyIsCornerInWater(&sp6a4, &sp5e4, &sp56c SKY_PRESENTATION_EYE_ARG);
+    skyIsCornerInWater(&sp698, &sp5d8, &sp568 SKY_PRESENTATION_EYE_ARG);
+    skyIsCornerInWater(&sp68c, &sp5cc, &sp564 SKY_PRESENTATION_EYE_ARG);
+    skyIsCornerInWater(&sp680, &sp5c0, &sp560 SKY_PRESENTATION_EYE_ARG);
 
     if (sp538 != sp530)
     {
@@ -372,8 +429,8 @@ sp54c = getPlayer_c_screentop() + getPlayer_c_screenheight() * (sp6a4.f[1] / (sp
 
         skyGetWorldPosFromScreenPos(0.0f, sp54c, &sp65c);
         skyCalculateEdgeVertex(&sp6a4, &sp68c, &sp65c);
-        skyIsScreenCornerInSky(&sp65c, &sp5fc, &sp574);
-        skyIsCornerInWater(&sp65c, &sp59c, &sp554);
+        skyIsScreenCornerInSky(&sp65c, &sp5fc, &sp574 SKY_PRESENTATION_EYE_ARG);
+        skyIsCornerInWater(&sp65c, &sp59c, &sp554 SKY_PRESENTATION_EYE_ARG);
     }
     else
     {
@@ -386,8 +443,8 @@ sp548 = getPlayer_c_screentop() + getPlayer_c_screenheight() * (sp698.f[1] / (sp
 
         skyGetWorldPosFromScreenPos(getPlayer_c_screenwidth() - 0.1f, sp548, &sp650);
         skyCalculateEdgeVertex(&sp698, &sp680, &sp650);
-        skyIsScreenCornerInSky(&sp650, &sp5f0, &sp570);
-        skyIsCornerInWater(&sp650, &sp590, &sp550);
+        skyIsScreenCornerInSky(&sp650, &sp5f0, &sp570 SKY_PRESENTATION_EYE_ARG);
+        skyIsCornerInWater(&sp650, &sp590, &sp550 SKY_PRESENTATION_EYE_ARG);
     }
     else
     {
@@ -398,8 +455,8 @@ sp548 = getPlayer_c_screentop() + getPlayer_c_screenheight() * (sp698.f[1] / (sp
     {
 skyGetWorldPosFromScreenPos(getPlayer_c_screenleft() + getPlayer_c_screenwidth() * (sp6a4.f[1] / (sp6a4.f[1] - sp698.f[1])), 0.0f, &sp674);
         skyCalculateEdgeVertex(&sp6a4, &sp698, &sp674);
-        skyIsScreenCornerInSky(&sp674, &sp614, &sp57c);
-        skyIsCornerInWater(&sp674, &sp5b4, &sp55c);
+        skyIsScreenCornerInSky(&sp674, &sp614, &sp57c SKY_PRESENTATION_EYE_ARG);
+        skyIsCornerInWater(&sp674, &sp5b4, &sp55c SKY_PRESENTATION_EYE_ARG);
     }
 
     if (sp530 != sp52c)
@@ -408,8 +465,8 @@ tmp = getPlayer_c_screenleft() + getPlayer_c_screenwidth() * (sp68c.f[1] / (sp68
 
         skyGetWorldPosFromScreenPos(tmp, getPlayer_c_screenheight() - 0.1f, &sp668);
         skyCalculateEdgeVertex(&sp68c, &sp680, &sp668);
-        skyIsScreenCornerInSky(&sp668, &sp608, &sp578);
-        skyIsCornerInWater(&sp668, &sp5a8, &sp558);
+        skyIsScreenCornerInSky(&sp668, &sp608, &sp578 SKY_PRESENTATION_EYE_ARG);
+        skyIsCornerInWater(&sp668, &sp5a8, &sp558 SKY_PRESENTATION_EYE_ARG);
     }
 
     switch ((sp538 << 3) | (sp534 << 2) | (sp530 << 1) | sp52c)

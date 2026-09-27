@@ -54,32 +54,43 @@ void dynInitMemory(void) {
 #ifdef GE_MODDED_CHEATS
     /* Campaign stage tokens contain single-player display-list/vertex sizes.
      * Using those values for two or more Co-Op viewports corrupts memory as
-     * soon as the first split-screen frame is built.  Keep Co-Op's render
-     * scratch outside MEMPOOL_STAGE and use GoldenEye's native per-player
-     * default sizes (64/96/128/160 KiB per half).  Two gfx halves plus two
-     * vtx halves fit exactly in the 640 KiB Expansion Pak reservation at 4P. */
+     * soon as the first split-screen frame is built. Keep Co-Op render scratch
+     * outside MEMPOOL_STAGE.
+     *
+     * R22 stress fix: Perfect Dark's gfxReset() has an explicit -mgfxtra
+     * mechanism which adds master display-list memory for Co-Op. Dense campaign
+     * rooms can generate much more GBI than retail 4P multiplayer, so give the
+     * GFX half extra headroom while retaining GoldenEye's established VTX/Mtx
+     * sizes. Dump-confirmed four-crowd-view stress testing exceeded the old
+     * 224 KiB 4P GFX half by 3,784 bytes.  Give 4P 248 KiB GFX + 160 KiB
+     * VTX per task, double buffered, for 816 KiB total. */
     if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP) {
-        static const u32 coopDynSizeByPlayerCount[4] = {
+        static const u32 coopGfxSizeByPlayerCount[4] = {
+            0x10000, 0x20000, 0x2C000, 0x3E000
+        };
+        static const u32 coopVtxSizeByPlayerCount[4] = {
             0x10000, 0x18000, 0x20000, 0x28000
         };
         extern u8 _coopDynBuffersStart[];
         extern u8 _coopDynBuffersEnd[];
         u8 *base = _coopDynBuffersStart;
-        u32 size;
+        u32 gfxsize;
+        u32 vtxsize;
 
         if (playerindex < 0) playerindex = 0;
         if (playerindex > 3) playerindex = 3;
-        size = coopDynSizeByPlayerCount[playerindex];
+        gfxsize = coopGfxSizeByPlayerCount[playerindex];
+        vtxsize = coopVtxSizeByPlayerCount[playerindex];
 
-        g_GfxSizesByPlayerCount[playerindex] = size;
-        g_VtxSizesByPlayerCount[playerindex] = size;
+        g_GfxSizesByPlayerCount[playerindex] = gfxsize;
+        g_VtxSizesByPlayerCount[playerindex] = vtxsize;
 
         g_GfxBuffers[0] = base;
-        g_GfxBuffers[1] = base + size;
-        g_GfxBuffers[2] = base + size * 2;
+        g_GfxBuffers[1] = base + gfxsize;
+        g_GfxBuffers[2] = base + gfxsize * 2;
         g_VtxBuffers[0] = g_GfxBuffers[2];
-        g_VtxBuffers[1] = g_VtxBuffers[0] + size;
-        g_VtxBuffers[2] = g_VtxBuffers[1] + size;
+        g_VtxBuffers[1] = g_VtxBuffers[0] + vtxsize;
+        g_VtxBuffers[2] = g_VtxBuffers[1] + vtxsize;
 
         /* Linker assertion guarantees the 4P maximum fits; retain a runtime
          * guard so a bad future repartition cannot scribble into the next

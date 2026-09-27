@@ -112,4 +112,38 @@ if [[ "$script" == assets/* ]]; then
   filtered=(-e 0 "${filtered[@]}")
 fi
 
+# The final GoldenEye image intentionally has an ELF entry of zero.  Tell LLD
+# explicitly so it does not emit the irrelevant "cannot find __start" warning.
+# This changes only the ELF header from the value LLD already fell back to (0).
+if [[ "$script" == build/*/ge007.*.ld ]]; then
+  filtered=(-e 0 "${filtered[@]}")
+
+  # LLVM diagnoses GoldenEye's 63 music-table offset relocations before the
+  # llvm-mips-objcopy compatibility wrapper reconstructs those exact words.
+  # Keep every unrelated LLD diagnostic, but collapse only these known repaired
+  # warnings into one transparent compatibility notice.
+  errfile="$(mktemp)"
+  set +e
+  ld.lld --no-check-sections "${filtered[@]}" 2>"$errfile"
+  status=$?
+  set -e
+  python3 - "$errfile" <<'PYFILTER'
+from pathlib import Path
+import re, sys
+p = Path(sys.argv[1])
+lines = p.read_text(errors='replace').splitlines()
+pat = re.compile(r"^ld\.lld: warning: build/.*/assets/music/music\.o:\(\.music\+0x[0-9a-fA-F]+\): has non-ABS relocation R_MIPS_PC32 against symbol '.+'$")
+count = 0
+for line in lines:
+    if pat.match(line):
+        count += 1
+    else:
+        print(line, file=sys.stderr)
+if count:
+    print(f"llvm-mips-ld: deferred {count} expected music-offset relocation(s) to objcopy repair", file=sys.stderr)
+PYFILTER
+  rm -f "$errfile"
+  exit "$status"
+fi
+
 exec ld.lld --no-check-sections "${filtered[@]}"

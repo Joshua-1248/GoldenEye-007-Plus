@@ -1,6 +1,7 @@
 #include <ultra64.h>
 #include <memp.h>
 #include "model.h"
+#include "file2.h"
 #include "../rmon.h" /*<PR/rmon.h>*/
 #include "bondview.h"
 #include "chr.h"
@@ -12,10 +13,16 @@
 #include "math_ceil.h"
 #include "math_unk_05A9E0.h"
 #include "objecthandler.h"
+#ifdef GE_PHYSICAL_FASTPATHS
+#include "player.h"
+#endif
 #include "quaternion.h"
 #include "random.h"
 
 
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 typedef struct ModelGroupMtxBuildArg {
     u16 flags;
     u16 pad;
@@ -368,11 +375,25 @@ void sub_GAME_7F06C710(Model* model, coord3d* pos)
 
 f32 sub_GAME_7F06C768(Model *objinst)
 {
-    Mtxf *mtx = getsubmatrix(objinst);
-    if (mtx != 0)
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled() && objinst != NULL && objinst->obj != NULL)
     {
-        return -mtx->m[3][2];
+        ModelNode *root = objinst->obj->RootNode;
+
+        if (root != NULL && (root->Opcode & 0xff) == MODELNODE_OPCODE_HEADER)
+        {
+            return -objinst->render_pos[root->Data->Header.MatrixIndex].pos.m[3][2];
+        }
     }
+#endif
+    {
+        Mtxf *mtx = getsubmatrix(objinst);
+        if (mtx != 0)
+        {
+            return -mtx->m[3][2];
+        }
+    }
+
     return 0.0f;
 }
 
@@ -666,6 +687,13 @@ f32 getsubroty(Model *objinst)
     root = objinst->obj->RootNode;
     if ((root->Opcode & 0xFF) == MODELNODE_OPCODE_HEADER)
     {
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled() && root->Parent == NULL)
+        {
+            s32 index = root->Data->Header.RwDataIndex;
+            return ((struct modeldata_root *)&objinst->datas[index])->subroty;
+        }
+#endif
         return ((struct modeldata_root *)modelGetNodeRwData(objinst, root))->subroty;
     }
 
@@ -698,8 +726,22 @@ void setsubroty(Model *model, f32 angle)
     node = model->obj->RootNode;
     if ((node->Opcode & 0xff) == MODELNODE_OPCODE_HEADER)
     {
-        ModelRwData_HeaderRecord *rwdata = modelGetNodeRwData(model, node);
-        f32 diff = angle - rwdata->unk14;
+        ModelRwData_HeaderRecord *rwdata;
+        f32 diff;
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled() && node->Parent == NULL)
+        {
+            s32 index = node->Data->Header.RwDataIndex;
+            rwdata = (ModelRwData_HeaderRecord *)&model->datas[index];
+        }
+        else
+        {
+            rwdata = modelGetNodeRwData(model, node);
+        }
+#else
+        rwdata = modelGetNodeRwData(model, node);
+#endif
+        diff = angle - rwdata->unk14;
 
         if (diff < 0) { diff += M_TAU_F; }
 
@@ -1788,7 +1830,11 @@ void modelUpdateDistanceRelations(Model* model, ModelNode* node)
     }
     else
     {
+#ifdef GE_PHYSICAL_FASTPATHS
+        distance = -mtx->m[3][2] * (modMicroOptimizationsEnabled() ? g_CurrentPlayer->c_lodscalez : getPlayer_c_lodscalez());
+#else
         distance = -mtx->m[3][2] * getPlayer_c_lodscalez();
+#endif
 
         if (g_ModelDistanceScale != 1)
         {
@@ -2708,11 +2754,22 @@ void modelSetAnimLooping(Model *model, f32 loopframe, f32 loopmerge) {
 
 void modelSetAnimEndFrame(Model *model, f32 endframe) {
     ModelAnimation *modelAnimation = model->anim;
-
-    if ((modelAnimation != NULL) && (endframe < (modelAnimation->unk04 - 1))) {
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled())
+    {
+        if ((modelAnimation == NULL) || !(endframe < (modelAnimation->unk04 - 1))) {
+            endframe = -1.0f;
+        }
         model->endframe = endframe;
-    } else {
-        model->endframe = -1.0f;
+    }
+    else
+#endif
+    {
+        if ((modelAnimation != NULL) && (endframe < (modelAnimation->unk04 - 1))) {
+            model->endframe = endframe;
+        } else {
+            model->endframe = -1.0f;
+        }
     }
 #ifdef DEBUG
     // not too sure why debug wants to call this - must have some significance when most debug has been stripped from this file in XBLA

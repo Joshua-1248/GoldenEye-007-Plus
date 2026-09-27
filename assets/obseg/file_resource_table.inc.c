@@ -868,6 +868,11 @@ struct fileentry file_resource_table[] = {
 #ifdef VERSION_EU
     {WAXP, "LwaxP", &LwaxP},
 #endif
+#ifdef GE_MAP_MAKER
+    {BG_MAPMAKER_ALL_P, "bg/bg_mapmaker_all_p.seg", &bg_mapmaker_all_p_seg},
+    {BG_MAPMAKER_ALL_P_STAN, "Tbg_mapmaker_all_p_stanZ", &Tbg_mapmaker_all_p_stanZ},
+    {SETUPMAPMAKER, "UsetupmapmakerZ", &UsetupmapmakerZ},
+#endif
     
     {OBENDSEG, "ob/ob_end.seg", &ob__ob_end_seg},
     {0},

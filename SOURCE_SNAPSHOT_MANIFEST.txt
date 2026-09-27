@@ -1,0 +1,29 @@
+GoldenEye 007 Plus — GitHub Source Refresh
+===========================================
+Snapshot date: 2026-09-27
+Internal development checkpoint: V83
+Repository target: Joshua-1248/GoldenEye-007-Plus (main)
+
+Contents:
+- current game/runtime source through V83
+- current Map Maker source and audits
+- current Mirrored Levels source and audits
+- Third Person / Co-Op cutscene fixes through V81
+- Third Person Moonraker straight-ray work through V82
+- Co-Op team objective synchronization through V83
+- public build/tool/source directories
+- updated README and build helper
+- no retail ROM and no generated ROM output
+
+Validated package-side prerequisite command:
+make VERSION=US PHYSICAL_CODE=YES PHYSICAL_FASTPATHS=YES MODDED_CHEATS=YES MAP_MAKER=YES OPT_USE_LLVM=YES COMPARE=0 prerequisites -j2
+
+Result: PASS
+
+Packaging hardening included in this source refresh:
+- autoshot-resource-audit depends on build_tools so a fresh public checkout can
+  build the bundled historical gzip before the audit runs.
+- root options.h compatibility mirror is retained because several historical
+  audit scripts intentionally compare it with src/game/options.h.
+- generated/ignored retail extraction products and local build artifacts are
+  excluded.

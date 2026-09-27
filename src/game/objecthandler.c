@@ -1,6 +1,7 @@
 #include <ultra64.h>
 #include <memp.h>
 #include "objecthandler.h"
+#include "file2.h"
 #include "model.h"
 
 // bss
@@ -920,6 +921,48 @@ void drawjointlist(ModelRenderData *data, ModelHitEntry *entry)
                 descend = 1;
                 opcode = node->Opcode & 0xff;
 
+#ifdef GE_PHYSICAL_FASTPATHS
+                if (modMicroOptimizationsEnabled())
+                switch (opcode)
+                {
+                case MODELNODE_OPCODE_HEADER:
+                case MODELNODE_OPCODE_GROUP:
+                case MODELNODE_OPCODE_OP03:
+                case MODELNODE_OPCODE_OP14:
+                case MODELNODE_OPCODE_INTERLINK:
+                case MODELNODE_OPCODE_OP16:
+                case MODELNODE_OPCODE_GROUPSIMPLE:
+                    if (node != root) descend = 0;
+                    break;
+                case MODELNODE_OPCODE_OP11:
+                case MODELNODE_OPCODE_GUNFIRE:
+                case MODELNODE_OPCODE_SHADOW:
+                    if (node == root) sub_GAME_7F074534(data, entry->model, node); else descend = 0;
+                    break;
+                case MODELNODE_OPCODE_DLCOLLISION:
+                    modelRenderNodeDl(data, entry->model, node);
+                    break;
+                case MODELNODE_OPCODE_LOD:
+                    modelApplyDistanceRelations(entry->model, node);
+                    break;
+                case MODELNODE_OPCODE_BBOX:
+                case MODELNODE_OPCODE_OP17:
+                    break;
+                case MODELNODE_OPCODE_SWITCH:
+                    modelApplyToggleRelations(entry->model, node);
+                    break;
+                case MODELNODE_OPCODE_BSP:
+                    modelApplyReorderRelations(entry->model, node);
+                    break;
+                case MODELNODE_OPCODE_HEAD:
+                    modelApplyHeadRelations(entry->model, node);
+                    break;
+                default:
+                    sub_GAME_7F074534(data, entry->model, node);
+                    break;
+                }
+                else
+#endif
                 switch (opcode)
                 {
                 case MODELNODE_OPCODE_HEADER:
@@ -941,7 +984,6 @@ void drawjointlist(ModelRenderData *data, ModelHitEntry *entry)
                         descend = 0;
                     }
                     break;
-
                 case MODELNODE_OPCODE_DL:
                 case MODELNODE_OPCODE_OP05:
                 case MODELNODE_OPCODE_OP06:

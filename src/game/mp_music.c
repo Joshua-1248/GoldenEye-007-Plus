@@ -35,7 +35,7 @@ s32 mission_state = MISSION_STATE_0;
 
 u16 sub_GAME_7F0C0BF0(void)
 {
-    get_mTrack2Vol();
+    return get_mTrack2Vol();
 }
 
 u16 sub_GAME_7F0C0C10(void)

@@ -14,6 +14,7 @@
 #include "bondhead.h"
 #include "bondinv.h"
 #include "bondview.h"
+#include "file2.h"
 #include "chr.h"
 #include "chr_b.h"
 #include "chraction.h"
@@ -1130,6 +1131,15 @@ bool camIsPosInScreen(coord3d *pos, f32 margin)
  */
 bool camIsPosInScreenBox(coord3d *pos, f32 margin, bbox2d *box)
 {
+#ifdef GE_PHYSICAL_FASTPATHS
+    struct player *camboxplayer = g_CurrentPlayer;
+    Mtxf *camboxmtx = camboxplayer->viewtoworldmtxf;
+#define CAMBOX_PLAYER (modMicroOptimizationsEnabled() ? camboxplayer : g_CurrentPlayer)
+#define CAMBOX_MTX (modMicroOptimizationsEnabled() ? camboxmtx : g_CurrentPlayer->viewtoworldmtxf)
+#else
+#define CAMBOX_PLAYER g_CurrentPlayer
+#define CAMBOX_MTX g_CurrentPlayer->viewtoworldmtxf
+#endif
     coord3d topnormal;
     f32 topoffset;
     coord3d bottomnormal;
@@ -1149,70 +1159,70 @@ bool camIsPosInScreenBox(coord3d *pos, f32 margin, bbox2d *box)
     f32 topneginvlen;
     f32 bottomneginvlen;
 
-    if (g_CamFrustumNearOffset + margin < g_CurrentPlayer->viewtoworldmtxf->m[2][0] * pos->f[0] + g_CurrentPlayer->viewtoworldmtxf->m[2][1] * pos->f[1] + g_CurrentPlayer->viewtoworldmtxf->m[2][2] * pos->f[2])
+    if (g_CamFrustumNearOffset + margin < CAMBOX_MTX->m[2][0] * pos->f[0] + CAMBOX_MTX->m[2][1] * pos->f[1] + CAMBOX_MTX->m[2][2] * pos->f[2])
     {
         return FALSE;
     }
 
-    xslope = (box->min.x - g_CurrentPlayer->c_screenleft - g_CurrentPlayer->c_halfwidth) * g_CurrentPlayer->c_scalex;
+    xslope = (box->min.x - CAMBOX_PLAYER->c_screenleft - CAMBOX_PLAYER->c_halfwidth) * CAMBOX_PLAYER->c_scalex;
 
     leftinvlen = 1.0f / sqrtf(xslope * xslope + 1.0f);
     xslope *= leftinvlen;
     leftneginvlen = -leftinvlen;
 
-    leftnormal.f[0] = leftneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[0][0] - xslope * g_CurrentPlayer->viewtoworldmtxf->m[2][0];
-    leftnormal.f[1] = leftneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[0][1] - xslope * g_CurrentPlayer->viewtoworldmtxf->m[2][1];
-    leftnormal.f[2] = leftneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[0][2] - xslope * g_CurrentPlayer->viewtoworldmtxf->m[2][2];
+    leftnormal.f[0] = leftneginvlen * CAMBOX_MTX->m[0][0] - xslope * CAMBOX_MTX->m[2][0];
+    leftnormal.f[1] = leftneginvlen * CAMBOX_MTX->m[0][1] - xslope * CAMBOX_MTX->m[2][1];
+    leftnormal.f[2] = leftneginvlen * CAMBOX_MTX->m[0][2] - xslope * CAMBOX_MTX->m[2][2];
 
-    leftoffset = leftnormal.f[0] * g_CurrentPlayer->viewtoworldmtxf->m[3][0] + leftnormal.f[1] * g_CurrentPlayer->viewtoworldmtxf->m[3][1] + leftnormal.f[2] * g_CurrentPlayer->viewtoworldmtxf->m[3][2];
+    leftoffset = leftnormal.f[0] * CAMBOX_MTX->m[3][0] + leftnormal.f[1] * CAMBOX_MTX->m[3][1] + leftnormal.f[2] * CAMBOX_MTX->m[3][2];
 
     if (leftoffset + margin < leftnormal.f[0] * pos->f[0] + leftnormal.f[1] * pos->f[1] + leftnormal.f[2] * pos->f[2])
     {
         return FALSE;
     }
 
-    xslope = -(box->max.x - g_CurrentPlayer->c_screenleft - g_CurrentPlayer->c_halfwidth) * g_CurrentPlayer->c_scalex;
+    xslope = -(box->max.x - CAMBOX_PLAYER->c_screenleft - CAMBOX_PLAYER->c_halfwidth) * CAMBOX_PLAYER->c_scalex;
     rightinvlen = 1.0f / sqrtf(xslope * xslope + 1.0f);
     xslope *= rightinvlen;
     rightneginvlen = -rightinvlen;
 
-    rightnormal.f[0] = -rightneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[0][0] - xslope * g_CurrentPlayer->viewtoworldmtxf->m[2][0];
-    rightnormal.f[1] = -rightneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[0][1] - xslope * g_CurrentPlayer->viewtoworldmtxf->m[2][1];
-    rightnormal.f[2] = -rightneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[0][2] - xslope * g_CurrentPlayer->viewtoworldmtxf->m[2][2];
+    rightnormal.f[0] = -rightneginvlen * CAMBOX_MTX->m[0][0] - xslope * CAMBOX_MTX->m[2][0];
+    rightnormal.f[1] = -rightneginvlen * CAMBOX_MTX->m[0][1] - xslope * CAMBOX_MTX->m[2][1];
+    rightnormal.f[2] = -rightneginvlen * CAMBOX_MTX->m[0][2] - xslope * CAMBOX_MTX->m[2][2];
 
-    rightoffset = rightnormal.f[0] * g_CurrentPlayer->viewtoworldmtxf->m[3][0] + rightnormal.f[1] * g_CurrentPlayer->viewtoworldmtxf->m[3][1] + rightnormal.f[2] * g_CurrentPlayer->viewtoworldmtxf->m[3][2];
+    rightoffset = rightnormal.f[0] * CAMBOX_MTX->m[3][0] + rightnormal.f[1] * CAMBOX_MTX->m[3][1] + rightnormal.f[2] * CAMBOX_MTX->m[3][2];
 
     if (rightoffset + margin < rightnormal.f[0] * pos->f[0] + rightnormal.f[1] * pos->f[1] + rightnormal.f[2] * pos->f[2])
     {
         return FALSE;
     }
 
-    yslope = (g_CurrentPlayer->c_halfheight - (box->min.y - g_CurrentPlayer->c_screentop)) * g_CurrentPlayer->c_scaley;
+    yslope = (CAMBOX_PLAYER->c_halfheight - (box->min.y - CAMBOX_PLAYER->c_screentop)) * CAMBOX_PLAYER->c_scaley;
     topinvlen = 1.0f / sqrtf(yslope * yslope + 1.0f);
     yslope *= topinvlen;
     topneginvlen = -topinvlen;
 
-    topnormal.f[0] = -topneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[1][0] + yslope * g_CurrentPlayer->viewtoworldmtxf->m[2][0];
-    topnormal.f[1] = -topneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[1][1] + yslope * g_CurrentPlayer->viewtoworldmtxf->m[2][1];
-    topnormal.f[2] = -topneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[1][2] + yslope * g_CurrentPlayer->viewtoworldmtxf->m[2][2];
+    topnormal.f[0] = -topneginvlen * CAMBOX_MTX->m[1][0] + yslope * CAMBOX_MTX->m[2][0];
+    topnormal.f[1] = -topneginvlen * CAMBOX_MTX->m[1][1] + yslope * CAMBOX_MTX->m[2][1];
+    topnormal.f[2] = -topneginvlen * CAMBOX_MTX->m[1][2] + yslope * CAMBOX_MTX->m[2][2];
 
-    topoffset = topnormal.f[0] * g_CurrentPlayer->viewtoworldmtxf->m[3][0] + topnormal.f[1] * g_CurrentPlayer->viewtoworldmtxf->m[3][1] + topnormal.f[2] * g_CurrentPlayer->viewtoworldmtxf->m[3][2];
+    topoffset = topnormal.f[0] * CAMBOX_MTX->m[3][0] + topnormal.f[1] * CAMBOX_MTX->m[3][1] + topnormal.f[2] * CAMBOX_MTX->m[3][2];
 
     if (topoffset + margin < topnormal.f[0] * pos->f[0] + topnormal.f[1] * pos->f[1] + topnormal.f[2] * pos->f[2])
     {
         return FALSE;
     }
 
-    yslope = -(g_CurrentPlayer->c_halfheight - (box->max.y - g_CurrentPlayer->c_screentop)) * g_CurrentPlayer->c_scaley;
+    yslope = -(CAMBOX_PLAYER->c_halfheight - (box->max.y - CAMBOX_PLAYER->c_screentop)) * CAMBOX_PLAYER->c_scaley;
     bottominvlen = 1.0f / sqrtf(yslope * yslope + 1.0f);
     yslope *= bottominvlen;
     bottomneginvlen = -bottominvlen;
 
-    bottomnormal.f[0] = bottomneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[1][0] + yslope * g_CurrentPlayer->viewtoworldmtxf->m[2][0];
-    bottomnormal.f[1] = bottomneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[1][1] + yslope * g_CurrentPlayer->viewtoworldmtxf->m[2][1];
-    bottomnormal.f[2] = bottomneginvlen * g_CurrentPlayer->viewtoworldmtxf->m[1][2] + yslope * g_CurrentPlayer->viewtoworldmtxf->m[2][2];
+    bottomnormal.f[0] = bottomneginvlen * CAMBOX_MTX->m[1][0] + yslope * CAMBOX_MTX->m[2][0];
+    bottomnormal.f[1] = bottomneginvlen * CAMBOX_MTX->m[1][1] + yslope * CAMBOX_MTX->m[2][1];
+    bottomnormal.f[2] = bottomneginvlen * CAMBOX_MTX->m[1][2] + yslope * CAMBOX_MTX->m[2][2];
 
-    bottomoffset = bottomnormal.f[0] * g_CurrentPlayer->viewtoworldmtxf->m[3][0] + bottomnormal.f[1] * g_CurrentPlayer->viewtoworldmtxf->m[3][1] + bottomnormal.f[2] * g_CurrentPlayer->viewtoworldmtxf->m[3][2];
+    bottomoffset = bottomnormal.f[0] * CAMBOX_MTX->m[3][0] + bottomnormal.f[1] * CAMBOX_MTX->m[3][1] + bottomnormal.f[2] * CAMBOX_MTX->m[3][2];
 
     if (bottomoffset + margin < bottomnormal.f[0] * pos->f[0] + bottomnormal.f[1] * pos->f[1] + bottomnormal.f[2] * pos->f[2])
     {
@@ -1220,6 +1230,8 @@ bool camIsPosInScreenBox(coord3d *pos, f32 margin, bbox2d *box)
     }
 
     return TRUE;
+#undef CAMBOX_MTX
+#undef CAMBOX_PLAYER
 }
 
 

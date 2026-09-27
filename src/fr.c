@@ -191,6 +191,21 @@ const s16 g_viRuntimeScreenHeights[] = {SCREEN_HEIGHT_272, SCREEN_HEIGHT_272, SC
  * 3C60	70003060
  */
 #ifdef GE_MODDED_CHEATS
+static OSViMode g_ModViModeScratch;
+
+static OSViMode *viApplyAntiAliasingSetting(OSViMode *source)
+{
+    if (g_ModAntiAliasingEnabled)
+        return source;
+
+    /* Keep VI resampling so GoldenEye's low-resolution timings/scaling remain
+     * valid, but disable edge AA itself.  DIVOT is only useful with VI AA. */
+    g_ModViModeScratch = *source;
+    g_ModViModeScratch.comRegs.ctrl &= ~(0x00000300u | 0x00000010u);
+    g_ModViModeScratch.comRegs.ctrl |= 0x00000200u; /* VI AA mode 2: resample only */
+    return &g_ModViModeScratch;
+}
+
 static void viApplyDitherSetting(void)
 {
     osViSetSpecialFeatures(((g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) ? OS_VI_DITHER_FILTER_OFF : OS_VI_DITHER_FILTER_ON) | OS_VI_GAMMA_OFF);
@@ -270,7 +285,11 @@ void viVsyncRelated(void)
     registerValue = g_viOriginalVstart1;
     (*viMode).fldRegs[1].vStart = ADD_LOW_AND_HI_16_TRUNCATE(registerValue, verticalOffset);
 
+#ifdef GE_MODDED_CHEATS
+    osViSetMode(viApplyAntiAliasingSetting(viMode));
+#else
     osViSetMode(viMode);
+#endif
     osViBlack(g_ViUnblackTimer);
 
     // g_ViUnblackTimer might be declared signed which means the if statement is

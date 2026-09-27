@@ -3,6 +3,8 @@
 
 #include <ultra64.h>
 
+extern u8 g_GfxActiveBufferIndex;
+
 void dynInit(void);
 void dynInitMemory(void);
 Gfx *dynGetMasterDisplayList(void);

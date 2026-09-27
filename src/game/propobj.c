@@ -18,6 +18,7 @@
 #include <snd.h>
 #include <gbi_extension.h>
 #include "propobj.h"
+#include "file2.h"
 #include "assets/obseg/text/LpropobjE.h"
 #include "bg.h"
 #include "bgfog.h"
@@ -43,6 +44,7 @@
 #include "model.h"
 #include "objecthandler.h"
 #include "objective_status.h"
+#include "options.h"
 #include "player.h"
 #include "quaternion.h"
 #include "random.h"
@@ -53,6 +55,9 @@
 #include "vtxstore.h"
 
 
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 #if defined(VERSION_JP) || defined(VERSION_EU)
 #define MONITOR_TIMER_DELTA g_JP_GlobalTimerDelta
 #else
@@ -183,6 +188,184 @@
 /* 0x80030B1C */ f32 g_AutogunPendingDamageTick = 1.0;
 /* 0x80030B20 */ f32 g_AutogunDamageScalar = 1.0;
 /* 0x80030B24 */ f32 F_80030B24 = 1.0;
+
+#ifdef GE_MODDED_CHEATS
+/*
+ * R22 Co-Op autogun target ownership.
+ *
+ * Retail GoldenEye's drone guns aim at getCurrentPlayerProp().  That is stable
+ * in solo, but campaign Co-Op renders/ticks the shared world once per frame on
+ * whichever player is first in the freshly shuffled player order.  The result
+ * is that an autogun's effective target can jump between P1-P4 from one frame
+ * to the next, which looks like delayed/laggy tracking and firing.
+ *
+ * Perfect Dark's deployed Laptop Gun/autogun stores a persistent target prop
+ * and a next-character scan index.  Keep GoldenEye's AutogunRecord ABI intact
+ * and mirror the important semantic with a tiny prop-slot sidecar: acquire one
+ * living player, stay committed while the retail autogun can still track them,
+ * and advance to another living player only after that target is genuinely
+ * lost or dies.
+ */
+static s8 g_CoopAutogunTargetPlayer[MAX_PROPS];
+
+void autogunCoopResetTargetCache(void)
+{
+    s32 i;
+
+    for (i = 0; i < MAX_PROPS; i++)
+    {
+        g_CoopAutogunTargetPlayer[i] = -1;
+    }
+}
+
+static s32 autogunCoopPlayerIsTargetable(s32 playernum)
+{
+    return playernum >= 0
+        && playernum < getPlayerCount()
+        && g_playerPointers[playernum] != NULL
+        && g_playerPointers[playernum]->prop != NULL
+        && g_playerPointers[playernum]->bonddead == FALSE;
+}
+
+static s32 autogunCoopGetPropSlot(PropRecord *prop)
+{
+    s32 slot;
+
+    if (prop == NULL)
+    {
+        return -1;
+    }
+
+    slot = prop - g_Props;
+
+    if (slot < 0 || slot >= MAX_PROPS)
+    {
+        return -1;
+    }
+
+    return slot;
+}
+
+static s32 autogunCoopFindNearestTargetPlayer(PropRecord *prop)
+{
+    s32 i;
+    s32 bestplayer = -1;
+    f32 bestdist2 = 1.0e30f;
+
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        PropRecord *playerprop;
+        f32 dx;
+        f32 dy;
+        f32 dz;
+        f32 dist2;
+
+        if (!autogunCoopPlayerIsTargetable(i))
+        {
+            continue;
+        }
+
+        playerprop = g_playerPointers[i]->prop;
+        dx = playerprop->pos.f[0] - prop->pos.f[0];
+        dy = playerprop->pos.f[1] - prop->pos.f[1];
+        dz = playerprop->pos.f[2] - prop->pos.f[2];
+        dist2 = dx * dx + dy * dy + dz * dz;
+
+        if (dist2 < bestdist2)
+        {
+            bestdist2 = dist2;
+            bestplayer = i;
+        }
+    }
+
+    return bestplayer;
+}
+
+static s32 autogunCoopGetTargetPlayer(PropRecord *prop, AutogunRecord *autogun)
+{
+    s32 slot;
+    s32 current;
+    s32 nextplayer;
+
+    if (gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP)
+    {
+        return get_cur_playernum();
+    }
+
+    slot = autogunCoopGetPropSlot(prop);
+
+    if (slot < 0)
+    {
+        return get_cur_playernum();
+    }
+
+    current = g_CoopAutogunTargetPlayer[slot];
+
+    if (autogunCoopPlayerIsTargetable(current))
+    {
+        return current;
+    }
+
+    nextplayer = autogunCoopFindNearestTargetPlayer(prop);
+    g_CoopAutogunTargetPlayer[slot] = nextplayer;
+
+    if (nextplayer != current && autogun != NULL)
+    {
+        /* Do not carry the departed player's two-second tracking grace period
+         * onto the newly acquired player. */
+        autogun->unkB8 = -1;
+        autogun->unkBC = -1;
+    }
+
+    return nextplayer;
+}
+
+static void autogunCoopAdvanceTargetPlayer(PropRecord *prop, AutogunRecord *autogun)
+{
+    s32 slot;
+    s32 current;
+    s32 count;
+    s32 i;
+
+    if (gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP)
+    {
+        return;
+    }
+
+    slot = autogunCoopGetPropSlot(prop);
+
+    if (slot < 0)
+    {
+        return;
+    }
+
+    current = g_CoopAutogunTargetPlayer[slot];
+    count = getPlayerCount();
+
+    if (count > 0)
+    {
+        for (i = 1; i <= count; i++)
+        {
+            s32 nextplayer = current >= 0 ? (current + i) % count : i - 1;
+
+            if (autogunCoopPlayerIsTargetable(nextplayer))
+            {
+                g_CoopAutogunTargetPlayer[slot] = nextplayer;
+
+                if (autogun != NULL)
+                {
+                    autogun->unkB8 = -1;
+                    autogun->unkBC = -1;
+                }
+
+                return;
+            }
+        }
+    }
+
+    g_CoopAutogunTargetPlayer[slot] = -1;
+}
+#endif
 
 /*
 * Set on level load.
@@ -3385,7 +3568,11 @@ void chrobjWeaponTick(struct PropRecord* prop)
 
     obj = prop->obj;
 
-    if (get_player_position_in_shuffled(get_cur_playernum()) != 0)
+    if (get_player_position_in_shuffled(get_cur_playernum()) != 0
+#ifdef GE_MODDED_CHEATS
+        && !(lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+#endif
+    )
     {
         return;
     }
@@ -4209,6 +4396,10 @@ s32 objTick(struct PropRecord *prop)
 	 * Code outside this guard is per-viewport render setup and runs every pass. 
      */
 	bool isSimOwner;
+#ifdef GE_MODDED_CHEATS
+	s32 coopAutogunTargetPlayerNum;
+	s32 coopAutogunSavedPlayerNum;
+#endif
 
 	s32 playerCount;
 	bool applyFogCull;
@@ -4443,6 +4634,15 @@ s32 objTick(struct PropRecord *prop)
 	else
 	{
 		isSimOwner = get_player_position_in_shuffled(get_cur_playernum()) == 0;
+#ifdef GE_MODDED_CHEATS
+		/* Shared Co-Op cinematics render P1 as the single presentation owner.
+		 * Make P1 own once-per-frame object/door simulation too, otherwise the
+		 * random viewport shuffle can starve scripted objects. */
+		if (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+		{
+			isSimOwner = TRUE;
+		}
+#endif
 
 		if (obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)
 		{
@@ -5249,7 +5449,25 @@ s32 objTick(struct PropRecord *prop)
 		else if ((obj->type == PROPDEF_AUTOGUN) && (!(obj->flags & PROPFLAG_IS_DRONE_GUN)))
 		{
 			poAGun = (struct AutogunRecord *) prop->obj;
-			playerProp2 = getCurrentPlayerProp();
+#ifdef GE_MODDED_CHEATS
+			if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)
+			{
+				coopAutogunTargetPlayerNum = autogunCoopGetTargetPlayer(prop, poAGun);
+
+				if (autogunCoopPlayerIsTargetable(coopAutogunTargetPlayerNum))
+				{
+					playerProp2 = g_playerPointers[coopAutogunTargetPlayerNum]->prop;
+				}
+				else
+				{
+					playerProp2 = getCurrentPlayerProp();
+				}
+			}
+			else
+#endif
+			{
+				playerProp2 = getCurrentPlayerProp();
+			}
 			AutogunSeesPlayer = 0;
 			isTracking = 0;
 			hasLineOfSight = 0;
@@ -5465,6 +5683,18 @@ s32 objTick(struct PropRecord *prop)
 						}
 					}
 				}
+
+#ifdef GE_MODDED_CHEATS
+				/* Once the retail two-second lost-target grace has expired, move to
+				 * another living Co-Op player instead of waiting for the random
+				 * simulation-owner viewport to become useful. */
+				if (gamemode == GAMEMODE_MULTI
+					&& get_scenario() == SCENARIO_COOP
+					&& AutogunSeesPlayer == 0)
+				{
+					autogunCoopAdvanceTargetPlayer(prop, poAGun);
+				}
+#endif
 
 				if (isTracking != 0) //firing
 				{
@@ -6357,7 +6587,25 @@ s32 objTick(struct PropRecord *prop)
 					sp10C = NULL;
 					sp108 = prop->stan;
 					sp104 = (autogun->unkAC & 3) == 0;
-					sp100 = getCurrentPlayerProp();
+#ifdef GE_MODDED_CHEATS
+					if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)
+					{
+						coopAutogunTargetPlayerNum = autogunCoopGetTargetPlayer(prop, autogun);
+
+						if (autogunCoopPlayerIsTargetable(coopAutogunTargetPlayerNum))
+						{
+							sp100 = g_playerPointers[coopAutogunTargetPlayerNum]->prop;
+						}
+						else
+						{
+							sp100 = getCurrentPlayerProp();
+						}
+					}
+					else
+#endif
+					{
+						sp100 = getCurrentPlayerProp();
+					}
 					var_a0_6 = 5;
 
 					if ((model->obj->Switches[7] != 0) && (!(autogun->unkAC & 7)))
@@ -6406,6 +6654,18 @@ s32 objTick(struct PropRecord *prop)
 						sp110.f[2] -= 26.0f * sp120.f[2];
 					}
 
+#ifdef GE_MODDED_CHEATS
+					coopAutogunSavedPlayerNum = get_cur_playernum();
+
+					if (gamemode == GAMEMODE_MULTI
+						&& get_scenario() == SCENARIO_COOP
+						&& autogunCoopPlayerIsTargetable(coopAutogunTargetPlayerNum)
+						&& coopAutogunTargetPlayerNum != coopAutogunSavedPlayerNum)
+					{
+						set_cur_player(coopAutogunTargetPlayerNum);
+					}
+#endif
+
 					if (g_GlobalTimer == ((s32) autogun->unkBC))
 					{
 						beam_xdiff = sp100->pos.f[0] - sp12C.f[0];
@@ -6436,6 +6696,13 @@ s32 objTick(struct PropRecord *prop)
 							}
 						}
 					}
+
+#ifdef GE_MODDED_CHEATS
+					if (get_cur_playernum() != coopAutogunSavedPlayerNum)
+					{
+						set_cur_player(coopAutogunSavedPlayerNum);
+					}
+#endif
 
 					if (sp11C != 0)
 					{
@@ -6584,7 +6851,11 @@ Gfx *weaponRenderTracers(Gfx *gdl)
                 if (prop->voidp != NULL)
                 {
                     playernum = getPlayerPointerIndex(prop);
-                    if (get_cur_playernum() != playernum)
+                    if (get_cur_playernum() != playernum
+#ifdef GE_MODDED_CHEATS
+                        || modThirdPersonActive(playernum)
+#endif
+                    )
                     {
                         chr2 = prop->chr;
                         gdl = sub_GAME_7F061E18(gdl, &chr2->beams[0], one);
@@ -7260,6 +7531,23 @@ void sub_GAME_7F04AC20(PropRecord *prop, ModelRenderData *mrData, s32 arg2)
 
             gSPClearGeometryMode(gdl++, G_CULL_BOTH);
 
+#ifdef GE_MODDED_CHEATS
+            if (mirrorLevelsIsEnabled())
+            {
+                /* Mirroring a door model in local X reverses its triangle
+                 * winding.  Swap the normal door cull side so asymmetric
+                 * details (handles/knobs) render on the reflected side. */
+                if (door->doorFlags & DOORFLAG_FLIP)
+                {
+                    mrData->cullmode = CULLMODE_BACK;
+                }
+                else
+                {
+                    mrData->cullmode = CULLMODE_FRONT;
+                }
+            }
+            else
+#endif
             if (door->doorFlags & DOORFLAG_FLIP)
             {
                 mrData->cullmode = CULLMODE_FRONT;
@@ -9513,15 +9801,36 @@ void objHit(ShotData *shotdata, BulletHit *hit)
 
     obj = hit->prop->obj;
 
-    pos.x = shotdata->viewOrigin.x - ((hit->dist * shotdata->viewDir.x) / shotdata->viewDir.z);
-    pos.y = shotdata->viewOrigin.y - ((hit->dist * shotdata->viewDir.y) / shotdata->viewDir.z);
-    pos.z = shotdata->viewOrigin.z - hit->dist;
+    {
+        f32 rayt = (-hit->dist - shotdata->viewOrigin.z) / shotdata->viewDir.z;
 
-    pos.x -= 26.0f * shotdata->viewDir.x;
-    pos.y -= 26.0f * shotdata->viewDir.y;
-    pos.z -= 26.0f * shotdata->viewDir.z;
+        pos.x = shotdata->viewOrigin.x + rayt * shotdata->viewDir.x;
+        pos.y = shotdata->viewOrigin.y + rayt * shotdata->viewDir.y;
+        pos.z = shotdata->viewOrigin.z + rayt * shotdata->viewDir.z;
+    }
 
-    mtx4TransformVecInPlace(currentPlayerGetViewToWorldMtxf(), &pos);
+#ifdef GE_MODDED_CHEATS
+    if (modThirdPersonActive(get_cur_playernum()) && shotdata->viewDir.z < -0.0001f)
+    {
+        f32 rayt = (-hit->dist - shotdata->viewOrigin.z) / shotdata->viewDir.z;
+
+        pos.x = shotdata->gunpos.x + rayt * shotdata->dir.x;
+        pos.y = shotdata->gunpos.y + rayt * shotdata->dir.y;
+        pos.z = shotdata->gunpos.z + rayt * shotdata->dir.z;
+
+        pos.x -= 26.0f * shotdata->dir.x;
+        pos.y -= 26.0f * shotdata->dir.y;
+        pos.z -= 26.0f * shotdata->dir.z;
+    }
+    else
+#endif
+    {
+        pos.x -= 26.0f * shotdata->viewDir.x;
+        pos.y -= 26.0f * shotdata->viewDir.y;
+        pos.z -= 26.0f * shotdata->viewDir.z;
+
+        mtx4TransformVecInPlace(currentPlayerGetViewToWorldMtxf(), &pos);
+    }
 
     if (hit->countsAsPenetration != 0)
     {
@@ -11597,6 +11906,33 @@ KeyRecord *check_if_entry_is_collectable(s32 ID, PropRecord *prop) //#MATCH
  * @return: Key if found and "Dropped"
  * @RenameTo: objGetKeyIfDropped
 */
+#ifdef GE_MODDED_CHEATS
+/*
+ * A held/equipped player item is presentation/inventory state, never a
+ * dropped world item.  Test the entire ownership chain rather than only the
+ * immediate parent: weaponFindThrown() recursively searches each active prop,
+ * so starting that recursion from the viewer itself used to rediscover the
+ * very held weapon that the direct-parent check was trying to exclude.
+ *
+ * Once a mine/key/gadget is genuinely thrown or planted, the normal object
+ * path detaches it from the player tree, so it remains eligible here.
+ */
+static bool weaponPropOwnedByPlayer(PropRecord *prop)
+{
+    while (prop != NULL)
+    {
+        if (prop->type == PROP_TYPE_VIEWER || prop->type == PROP_TYPE_PLAYER)
+        {
+            return TRUE;
+        }
+
+        prop = prop->parent;
+    }
+
+    return FALSE;
+}
+#endif
+
 KeyRecord *weaponFindThrown(s32 KeyID) //MATCH
 {
     KeyRecord  *obj;
@@ -11604,6 +11940,15 @@ KeyRecord *weaponFindThrown(s32 KeyID) //MATCH
 
     for (prop = chrpropGetActiveTail(); prop; prop = prop->prev)
     {
+#ifdef GE_MODDED_CHEATS
+        /* Do not recurse into, or individually reconsider descendants of, a
+         * live player's prop tree.  This keeps held TP/MP presentation props
+         * out of the world-item query regardless of attachment depth. */
+        if (weaponPropOwnedByPlayer(prop))
+        {
+            continue;
+        }
+#endif
         obj = check_if_entry_is_collectable(KeyID, prop);
         if (obj && (!(obj->runtime_bitflags & RUNTIMEBITFLAG_HASPROJECTILE)))
         {
@@ -12264,6 +12609,18 @@ void door7F0526EC(DoorRecord *door, Mtxf *rhs)
         sp38.f[1] = (temp_v0_2->up.f[2] * temp_v0_2->look.f[0]) - (temp_v0_2->up.f[0] * temp_v0_2->look.f[2]); // cross product
         sp38.f[2] = (temp_v0_2->up.f[0] * temp_v0_2->look.f[1]) - (temp_v0_2->up.f[1] * temp_v0_2->look.f[0]); // cross product
 
+#ifdef GE_MODDED_CHEATS
+        if (mirrorLevelsIsEnabled())
+        {
+            /* A reflection reverses handedness.  cross(Fu, Fl) is -F(u x l),
+             * so negate the cross-product result to recover the reflected
+             * door-side vector used for the hinge point. */
+            sp38.f[0] = -sp38.f[0];
+            sp38.f[1] = -sp38.f[1];
+            sp38.f[2] = -sp38.f[2];
+        }
+#endif
+
         sp54.f[0] = temp_v0_2->pos.f[0] + (temp_v0_2->up.f[0] * temp_v0_2->bbox.ymin);
         sp54.f[1] = temp_v0_2->pos.f[1] + (temp_v0_2->up.f[1] * temp_v0_2->bbox.ymin);
         sp54.f[2] = temp_v0_2->pos.f[2] + (temp_v0_2->up.f[2] * temp_v0_2->bbox.ymin);
@@ -12295,24 +12652,32 @@ void door7F0526EC(DoorRecord *door, Mtxf *rhs)
         matrix_4x4_set_identity_and_position(&sp48, &lhs);
         matrix_4x4_multiply_in_place(&lhs, rhs);
 
-        if (door->doorType == DOORTYPE_AZTECCHAIR)
         {
+            f32 angle = (door->openPosition * M_TAU_F) / 360.0f;
+
             if (door->flags & PROPFLAG_DOOR_OPENTOFRONT)
             {
-                matrix_4x4_set_rotation_around_z(M_TAU_F - ((door->openPosition * M_TAU_F) / 360.0f), &lhs);
+                angle = M_TAU_F - angle;
+            }
+
+#ifdef GE_MODDED_CHEATS
+            if (mirrorLevelsIsEnabled())
+            {
+                /* Reflection conjugates a Y/Z rotation into its inverse.
+                 * Keep gameplay/openPosition unchanged and only reverse the
+                 * presentation/collision transform of the swing. */
+                angle = M_TAU_F - angle;
+            }
+#endif
+
+            if (door->doorType == DOORTYPE_AZTECCHAIR)
+            {
+                matrix_4x4_set_rotation_around_z(angle, &lhs);
             }
             else
             {
-                matrix_4x4_set_rotation_around_z((door->openPosition * M_TAU_F) / 360.0f, &lhs);
+                matrix_4x4_set_rotation_around_y(angle, &lhs);
             }
-        }
-        else if (door->flags & PROPFLAG_DOOR_OPENTOFRONT)
-        {
-            matrix_4x4_set_rotation_around_y(M_TAU_F - ((door->openPosition * M_TAU_F) / 360.0f), &lhs);
-        }
-        else
-        {
-            matrix_4x4_set_rotation_around_y((door->openPosition * M_TAU_F) / 360.0f, &lhs);
         }
 
         matrix_4x4_multiply_in_place(&lhs, rhs);
@@ -12338,6 +12703,17 @@ void door7F0526EC(DoorRecord *door, Mtxf *rhs)
     {
         matrix_column_3_scalar_multiply_2(-1.0f, rhs);
     }
+
+#ifdef GE_MODDED_CHEATS
+    if (mirrorLevelsIsEnabled())
+    {
+        /* Reflect the door MODEL itself, not just its world-space origin and
+         * orientation.  This moves asymmetric details such as knobs/handles
+         * to the opposite side and makes the collision hull use the same
+         * reflected transform. */
+        matrix_column_1_scalar_multiply(-1.0f, rhs);
+    }
+#endif
 }
 
 
@@ -13273,8 +13649,65 @@ bool doorIsClosed(DoorRecord *door)
 *              so it can be used for scissors. Returns true when the prop
 *              has at least one room bounding box.
 */
+#ifdef GE_PHYSICAL_FASTPATHS
+/* Merge room scissor bounds from a room list which has already been collected.
+ * posIsOnScreen already owns that list, so reusing it avoids rebuilding the
+ * same prop room list a second time in the common character visibility path. */
+static s32 getRoomsCombinedBBox2DFast(s32 *rooms, bbox2d *bbox)
+{
+    bool result = FALSE;
+    s32 room_id = *rooms;
+    bbox2d bbox2;
+
+    while (room_id >= 0)
+    {
+        if (bgGet2dBboxByRoomId(room_id, &bbox2))
+        {
+            if (result)
+            {
+                if (bbox->min.x > bbox2.min.x) bbox->min.x = bbox2.min.x;
+                if (bbox->min.y > bbox2.min.y) bbox->min.y = bbox2.min.y;
+                if (bbox->max.x < bbox2.max.x) bbox->max.x = bbox2.max.x;
+                if (bbox->max.y < bbox2.max.y) bbox->max.y = bbox2.max.y;
+            }
+            else
+            {
+                bbox->min.x = bbox2.min.x;
+                bbox->min.y = bbox2.min.y;
+                bbox->max.x = bbox2.max.x;
+                bbox->max.y = bbox2.max.y;
+            }
+            result = TRUE;
+        }
+
+        rooms++;
+        room_id = *rooms;
+    }
+
+    return result;
+}
+#endif
+
 s32 getPropCombinedRoomsBBox2D(PropRecord *prop, bbox2d *bbox)
 {
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled())
+    {
+        s32 fast_room_ids[8];
+
+        if ((prop->stan != NULL)
+                && !((prop->type == PROP_TYPE_VIEWER) && (prop->obj == NULL))
+                && prop->rooms[0] != 0xff
+                && prop->rooms[1] == 0xff)
+        {
+            return bgGet2dBboxByRoomId(prop->rooms[0], bbox);
+        }
+
+        chraiGetPropRoomIds(prop, fast_room_ids);
+        return getRoomsCombinedBBox2DFast(fast_room_ids, bbox);
+    }
+#endif
+    {
     s32 room_ids[8];
     s32 *rooms;
     bool result = FALSE;
@@ -13322,7 +13755,9 @@ s32 getPropCombinedRoomsBBox2D(PropRecord *prop, bbox2d *bbox)
     }
 
     return result;
+    }
 }
+
 
 
 /**
@@ -13339,11 +13774,21 @@ f32 chrobjFogVisRangeRelated(PropRecord *prop, f32 size)
     f32 temp_f12;
 
     ret = 1.0f;
+#ifdef GE_PHYSICAL_FASTPATHS
+    /* Both helpers below are trivial global/field accessors. This path is hit
+     * for every visible character render, so avoid their call/return overhead. */
+    nfd = modMicroOptimizationsEnabled() ? g_NearFogValuesP : fogGetNearFogValuesP();
+#else
     nfd = fogGetNearFogValuesP();
+#endif
 
     if ((nfd != NULL) && (nfd->MaxObfuscationRange < prop->zDepth))
     {
+#ifdef GE_PHYSICAL_FASTPATHS
+        temp_f12 = modMicroOptimizationsEnabled() ? g_CurrentPlayer->c_lodscalez : getPlayer_c_lodscalez();
+#else
         temp_f12 = getPlayer_c_lodscalez();
+#endif
         temp_f12 = ((((prop->zDepth - nfd->MaxObfuscationRange) * 100.0f) / size) + nfd->MaxObfuscationRange) * temp_f12;
 
         if (nfd->MaxVisRange <= temp_f12)
@@ -13366,14 +13811,24 @@ f32 chrobjFogVisRangeRelated(PropRecord *prop, f32 size)
 bool sub_GAME_7F054C58(coord3d *coord, f32 arg1)
 {
     bool result = TRUE;
+#ifdef GE_PHYSICAL_FASTPATHS
+    coord3d *ptr = (coord3d*)(modMicroOptimizationsEnabled() ? g_NearFogValuesP : fogGetNearFogValuesP());
+#else
     coord3d *ptr = (coord3d*)fogGetNearFogValuesP();
+#endif
     coord3d tmp;
     f32 sp20;
 
     if (ptr != NULL)
     {
+#ifdef GE_PHYSICAL_FASTPATHS
+        struct player *player = g_CurrentPlayer;
+        coord3d *campos = modMicroOptimizationsEnabled() ? (player->cameramode == 1 ? &player->pos : &player->field_488.pos) : bondviewGetCurrentPlayersPosition();
+        Mtxf *mtx = modMicroOptimizationsEnabled() ? player->field_10CC : camGetWorldToScreenMtxf();
+#else
         coord3d *campos = bondviewGetCurrentPlayersPosition();
         Mtxf *mtx = camGetWorldToScreenMtxf();
+#endif
 
         tmp.x = coord->x - campos->x;
         tmp.y = coord->y - campos->y;
@@ -13383,7 +13838,11 @@ bool sub_GAME_7F054C58(coord3d *coord, f32 arg1)
 
         if (sp20 > ptr->z)
         {
+#ifdef GE_PHYSICAL_FASTPATHS
+            f32 scalez = modMicroOptimizationsEnabled() ? player->c_lodscalez : getPlayer_c_lodscalez();
+#else
             f32 scalez = getPlayer_c_lodscalez();
+#endif
             sp20 = ((sp20 - ptr->z) * 100 / arg1 + ptr->z) * scalez;
 
             if (sp20 >= ptr->y)
@@ -13419,7 +13878,11 @@ bool posIsOnScreen(PropRecord *prop, coord3d *pos, f32 arg2, bool arg3)
         {
             if (fogPositionIsVisibleThroughFog(pos, arg2) && (!arg3 || sub_GAME_7F054C58(pos, arg2)))
             {
+#ifdef GE_PHYSICAL_FASTPATHS
+                if ((modMicroOptimizationsEnabled() ? (room_ids[1] < 0 ? bgGet2dBboxByRoomId(room_ids[0], &bbox) : getRoomsCombinedBBox2DFast(room_ids, &bbox)) : getPropCombinedRoomsBBox2D(prop, &bbox)) != 0)
+#else
                 if (getPropCombinedRoomsBBox2D(prop, &bbox) != 0)
+#endif
                 {
                     result = camIsPosInScreenBox(pos, arg2, &bbox);
                 }
@@ -13430,7 +13893,11 @@ bool posIsOnScreen(PropRecord *prop, coord3d *pos, f32 arg2, bool arg3)
 
                 if (result)
                 {
+#ifdef GE_PHYSICAL_FASTPATHS
+                    coord3d *campos = modMicroOptimizationsEnabled() ? (g_CurrentPlayer->cameramode == 1 ? &g_CurrentPlayer->pos : &g_CurrentPlayer->field_488.pos) : bondviewGetCurrentPlayersPosition();
+#else
                     coord3d *campos = bondviewGetCurrentPlayersPosition();
+#endif
                     f32 xdiff = pos->x - campos->x;
                     f32 ydiff = pos->y - campos->y;
                     f32 zdiff = pos->z - campos->z;
@@ -13667,6 +14134,16 @@ void door7F05522C(DoorRecord *door, f32 *arg1, f32 *arg2, s32 altcoordsystem)
         normal.f[0] = (pad->up.y * pad->look.z) - (pad->look.y * pad->up.z);
         normal.f[1] = (pad->up.z * pad->look.x) - (pad->look.z * pad->up.x);
         normal.f[2] = (pad->up.x * pad->look.y) - (pad->look.x * pad->up.y);
+#ifdef GE_MODDED_CHEATS
+        if (mirrorLevelsIsEnabled())
+        {
+            /* Reflection reverses handedness, so a cross product computed
+             * from already-reflected pad axes points the opposite way. */
+            normal.f[0] = -normal.f[0];
+            normal.f[1] = -normal.f[1];
+            normal.f[2] = -normal.f[2];
+        }
+#endif
     }
     else
     {
@@ -13703,6 +14180,12 @@ void door7F05522C(DoorRecord *door, f32 *arg1, f32 *arg2, s32 altcoordsystem)
         {
             angle2 = M_TAU_F - angle2;
         }
+#ifdef GE_MODDED_CHEATS
+        if (mirrorLevelsIsEnabled())
+        {
+            angle2 = M_TAU_F - angle2;
+        }
+#endif
 
         cosine = cosf(angle2);
         sine = sinf(angle2);
@@ -13920,6 +14403,14 @@ bool posIsInFrontOfDoor(PropRecord *prop, DoorRecord *door)
     normal.f[0] = (pad->up.y * pad->look.z) - (pad->look.y * pad->up.z);
     normal.f[1] = (pad->up.z * pad->look.x) - (pad->look.z * pad->up.x);
     normal.f[2] = (pad->up.x * pad->look.y) - (pad->look.x * pad->up.y);
+#ifdef GE_MODDED_CHEATS
+    if (mirrorLevelsIsEnabled())
+    {
+        normal.f[0] = -normal.f[0];
+        normal.f[1] = -normal.f[1];
+        normal.f[2] = -normal.f[2];
+    }
+#endif
 
     diff.x = prop->pos.x - pad->pos.x;
     diff.y = prop->pos.y - pad->pos.y;

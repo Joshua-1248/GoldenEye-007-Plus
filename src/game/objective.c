@@ -2,6 +2,9 @@
 #include <boss.h>
 #include "objective.h"
 #include "objective_status.h"
+#ifdef GE_MODDED_CHEATS
+#include "debugmenu_handler.h"
+#endif
 
 
 
@@ -20,6 +23,11 @@ void something_with_stage_objectives(void)
     if (bossGetStageNum() != LEVELID_TITLE)
     {
         objective_count = -1;
+#ifdef GE_MODDED_CHEATS
+        /* All Objectives Complete is an action for the current mission, not
+         * a persistent toggle.  A fresh stage always starts normally. */
+        set_debug_all_obj_complete_flag(FALSE);
+#endif
 
         for (i = 0; i < OBJECTIVES_MAX; i++)
         {

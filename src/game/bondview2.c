@@ -32,6 +32,9 @@
 #include "lv.h"
 #include "math_atan2f.h"
 #include "matrixmath.h"
+#ifdef GE_MODDED_CHEATS
+#include "mirroredlevels.h"
+#endif
 #include "model.h"
 #include "mp_music.h"
 #include "mpmenu.h"
@@ -45,6 +48,9 @@
 #include "stan.h"
 #include "stanintersection.h"
 #include "textrelated.h"
+#ifdef GE_MAP_MAKER
+#include "mapmaker.h"
+#endif
 
 #ifdef VERSION_EU
 
@@ -220,9 +226,17 @@ struct coord3d g_EnterTankCoord;
 //CODE.bss:800799DC
 f32 flt_CODE_bss_800799DC; // unused/padding
 #ifdef GE_MODDED_CHEATS
-/* Reuse the retail padding word; two bits per player record which controller
- * owns an active B-first/Z-second mission-item chord. No BSS layout growth. */
-#define g_R21BzChordSources (*(u32 *)&flt_CODE_bss_800799DC)
+/* Reuse the retail padding word for R22 A+B quick-switch input state.
+ * Bits 0-7 hold the two-bit-per-player controller source for an active
+ * A-first/B-second gadget chord. Bits 8-15 hold the two-bit-per-player
+ * controller source for a pending A-alone exit from settled gadget mode.
+ * This keeps responsive gadget-to-gadget cycling without growing BSS. */
+#define g_R22AbInputState (*(u32 *)&flt_CODE_bss_800799DC)
+#endif
+
+#ifdef GE_MODDED_CHEATS
+static void bondviewSetThirdPersonShoulder(s32 player, s32 leftshoulder);
+static void bondviewToggleThirdPersonShoulder(s32 player);
 #endif
 
 //CODE.bss:800799E0
@@ -326,6 +340,99 @@ f32 g_MpSwirlDistance;
 
 #define ALIGN64_V3(val) (((val) | 0x3f) ^ 0x3f)
 
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+/*
+ * Dedicated Plus Third Person weapon cache.
+ *
+ * The stock remote-character weapon path calls modelLoad(), which makes each
+ * newly encountered PROP_CHR* model and its textures stage-resident.  That is
+ * correct for normal AI/MP props, but a local Third Person player can cycle
+ * through the whole inventory and eventually exhaust those persistent pools.
+ *
+ * Keep two disposable Expansion-Pak slots instead (right/left hand).  Each
+ * slot owns its model bytes and texture pool for exactly as long as that
+ * hand's currently attached TP weapon.  The swap path only reuses a slot once
+ * chrGetEquippedWeaponProp() reports that the previous prop has actually been
+ * removed, so no live model points at memory being overwritten.
+ */
+extern u8 _thirdPersonWeaponCacheStart[];
+extern u8 _thirdPersonWeaponCacheEnd[];
+
+#define TP_WEAPON_CACHE_SLOT_SIZE      0x1B000
+#define TP_WEAPON_MODEL_BUFFER_SIZE    0x08000
+#define TP_WEAPON_TEXTURE_BUFFER_SIZE  0x13000
+
+static ModelFileHeader g_ThirdPersonWeaponHeaders[2];
+static struct texpool g_ThirdPersonWeaponTexturePools[2];
+
+static PropRecord *bondviewCreateThirdPersonCachedWeapon(ChrRecord *chr, GUNHAND hand, PROP propid, ITEM_IDS itemid, s32 flags)
+{
+    u8 *slot;
+    u8 *modelbuf;
+    u8 *texbuf;
+    ModelFileHeader *header;
+    struct texpool *pool;
+
+    if (hand < GUNRIGHT || hand > GUNLEFT || propid < 0)
+    {
+        return NULL;
+    }
+
+    slot = _thirdPersonWeaponCacheStart + (hand * TP_WEAPON_CACHE_SLOT_SIZE);
+
+    /* Linker assertions reserve exactly two slots below 0x80600000. */
+    if (slot + TP_WEAPON_CACHE_SLOT_SIZE > _thirdPersonWeaponCacheEnd)
+    {
+        return NULL;
+    }
+
+    modelbuf = slot;
+    texbuf = slot + TP_WEAPON_MODEL_BUFFER_SIZE;
+    header = &g_ThirdPersonWeaponHeaders[hand];
+    pool = &g_ThirdPersonWeaponTexturePools[hand];
+
+    texInitPool(pool, texbuf, TP_WEAPON_TEXTURE_BUFFER_SIZE);
+    *header = *PitemZ_entries[propid].header;
+
+    load_object_fill_header(
+        header,
+        (u8 *)PitemZ_entries[propid].filename,
+        modelbuf,
+        TP_WEAPON_MODEL_BUFFER_SIZE,
+        pool);
+    modelCalculateRwDataLen(header);
+
+    return something_with_generating_object(
+        chr,
+        propid,
+        itemid,
+        flags,
+        NULL,
+        (ItemModelFileRecord *)header);
+}
+#endif
+
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+/*
+ * Persistent live-Third-Person Bond body cache.  Keep it separate from both
+ * MEMPOOL_STAGE and the ordinary hand buffers.  The latter are still actively
+ * reused by the first-person weapon state machine even while TP presentation
+ * is enabled, while a stage-bank body allocation can push memory-heavy stages
+ * such as Frigate into GoldenEye's intentional allocator hang.
+ *
+ * Each half is the same size as a stock hand weapon buffer.  The body/head
+ * loader already fits inside this exact pair during retail solo cinematic
+ * loading, so reusing those proven bounds avoids inventing a larger working
+ * set.
+ */
+extern u8 _thirdPersonBodyCacheStart[];
+extern u8 _thirdPersonBodyCacheEnd[];
+
+#define TP_BODY_CACHE_BUFFER_SIZE 0x14820
+
+static ModelFileHeader g_ThirdPersonBodyHeader;
+#endif
+
 void solo_char_load(void)
 {
     f32                         yaw;
@@ -343,6 +450,10 @@ void solo_char_load(void)
     WeaponObjRecord             weapon;
     struct player             **pp;
     s32                         prop;
+    s32                         useweaponbuffers;
+#ifdef GE_MODDED_CHEATS
+    s32                         usethirdpersonbodycache;
+#endif
     ITEM_IDS                    item;
     s32                         body;
     s32                         head;
@@ -363,6 +474,33 @@ void solo_char_load(void)
         head       = HEAD_Male_Brosnan_Default;
         model      = NULL;
         bodyheader = NULL;
+#ifdef GE_MODDED_CHEATS
+        usethirdpersonbodycache = FALSE;
+#if defined(GE_PHYSICAL_FASTPATHS)
+        /* Scripted/cinematic cameras own their temporary Bond body exactly as
+         * retail does, even if the user's TP option is latched.  Only ordinary
+         * live gameplay needs the persistent TP cache.  This both keeps
+         * cutscenes compatible with TP and avoids charging intro/cutscene body
+         * data to the stage heap. */
+        if (getPlayerCount() == 1
+            && modThirdPersonActive(get_cur_playernum())
+            && (g_CameraMode == CAMERAMODE_NONE
+                || g_CameraMode == CAMERAMODE_FP
+                || g_CameraMode == CAMERAMODE_MP))
+        {
+            usethirdpersonbodycache = TRUE;
+        }
+#endif
+#if defined(GE_PHYSICAL_FASTPATHS)
+        useweaponbuffers = (getPlayerCount() == 1 && !usethirdpersonbodycache);
+#else
+        /* Preserve the pre-cache behavior for non-physical/modded builds; the
+         * dedicated upper-RDRAM reservation only exists in the physical map. */
+        useweaponbuffers = (getPlayerCount() == 1 && !modThirdPersonActive(get_cur_playernum()));
+#endif
+#else
+        useweaponbuffers = (getPlayerCount() == 1);
+#endif
 
         bondviewDeregisterPlayerRoom(g_CurrentPlayer);
 
@@ -492,27 +630,103 @@ void solo_char_load(void)
             item = starting_weapon[GUNRIGHT];
         }
 
-        if (getPlayerCount() == 1)
+        if (useweaponbuffers
+#ifdef GE_MODDED_CHEATS
+            || usethirdpersonbodycache
+#endif
+        )
         {
-            remove_item_in_hand(GUNLEFT);
-            remove_item_in_hand(GUNRIGHT);
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_PHYSICAL_FASTPATHS)
+            if (usethirdpersonbodycache)
+            {
+                weaponbuf0 = _thirdPersonBodyCacheStart;
+                weaponbuf1 = _thirdPersonBodyCacheStart + TP_BODY_CACHE_BUFFER_SIZE;
+                size0 = TP_BODY_CACHE_BUFFER_SIZE;
+                size1 = TP_BODY_CACHE_BUFFER_SIZE;
+
+                /* Linker owns 0x2A000; the two stock-size halves consume only
+                 * 0x29040 and deliberately leave alignment/headroom. */
+                if (weaponbuf1 + size1 > _thirdPersonBodyCacheEnd)
+                {
+                    return;
+                }
+
+                bodyheader = &g_ThirdPersonBodyHeader;
+            }
+            else
+#endif
+#endif
+            {
+                remove_item_in_hand(GUNLEFT);
+                remove_item_in_hand(GUNRIGHT);
+                bodyheader = get_ptr_itemheader_in_hand(GUNRIGHT);
+            }
+
             texInitPool(&pool, weaponbuf1, size1);
-            bodyheader  = get_ptr_itemheader_in_hand(GUNRIGHT);
             *bodyheader = *c_item_entries[body].header;
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_PHYSICAL_FASTPATHS)
+            if (usethirdpersonbodycache)
+            {
+                s32 bodybytes = get_pc_buffer_remaining_value((u8 *)c_item_entries[body].filename);
+
+                /* The live TP body cache is fixed upper-RDRAM storage rather
+                 * than a growable stage allocation.  Reject an unexpectedly
+                 * large/corrupt body resource before the loader can write past
+                 * the slot.  This is particularly important on stages which
+                 * select a different Bond outfit, such as Bunker I. */
+                if (bodybytes <= 0 || bodybytes > size0)
+                {
+                    return;
+                }
+            }
+#endif
+#endif
             load_object_fill_header(bodyheader, (u8 *)c_item_entries[body].filename, weaponbuf0, size0, &pool);
             cursor = get_pc_buffer_remaining_value((u8 *)c_item_entries[body].filename);
 
             do
             {
-                cursor      = ALIGN64_V3(cursor + 0x3f);
-                headheader  = (ModelFileHeader *)(weaponbuf0 + cursor);
-                cursor      = ALIGN64_V3(cursor + sizeof(ModelFileHeader) + 0x3f);
+                cursor = ALIGN64_V3(cursor + 0x3f);
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_PHYSICAL_FASTPATHS)
+                if (usethirdpersonbodycache
+                    && (cursor < 0 || cursor + (s32)sizeof(ModelFileHeader) > size0))
+                {
+                    return;
+                }
+#endif
+#endif
+                headheader = (ModelFileHeader *)(weaponbuf0 + cursor);
+                cursor = ALIGN64_V3(cursor + sizeof(ModelFileHeader) + 0x3f);
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_PHYSICAL_FASTPATHS)
+                if (usethirdpersonbodycache)
+                {
+                    s32 headbytes = get_pc_buffer_remaining_value((u8 *)c_item_entries[head].filename);
+
+                    if (cursor < 0 || cursor > size0 || headbytes <= 0 || headbytes > size0 - cursor)
+                    {
+                        return;
+                    }
+                }
+#endif
+#endif
                 *headheader = *c_item_entries[head].header;
 
                 if(1);
 
                 load_object_fill_header(headheader, (u8 *)c_item_entries[head].filename, weaponbuf0 + cursor, size0 - cursor, &pool);
                 cursor = ALIGN64_V3(get_pc_buffer_remaining_value((u8 *)c_item_entries[head].filename) + cursor + 0x3f);
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_PHYSICAL_FASTPATHS)
+                if (usethirdpersonbodycache && (cursor < 0 || cursor + 0xfb > size0))
+                {
+                    return;
+                }
+#endif
+#endif
                 model  = (Model *)(weaponbuf0 + cursor);
                 cursor = ALIGN64_V3(cursor + 0xfb);
                 modelCalculateRwDataLen(bodyheader);
@@ -521,9 +735,20 @@ void solo_char_load(void)
                 {
                     u32 *animdata;
                     s32  nrec;
+                    s32  nextcursor;
                     animdata = (u32 *)(weaponbuf0 + cursor);
                     nrec     = (bodyheader->numRecords + headheader->numRecords) + 0xa;
-                    cursor   = ALIGN64_V3(cursor + (nrec << 2) + 0x3f);
+                    nextcursor = ALIGN64_V3(cursor + (nrec << 2) + 0x3f);
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_PHYSICAL_FASTPATHS)
+                    if (usethirdpersonbodycache
+                        && (nrec <= 0 || cursor < 0 || cursor > size0 || nextcursor < cursor || nextcursor > size0))
+                    {
+                        return;
+                    }
+#endif
+#endif
+                    cursor = nextcursor;
                     animInit(model, bodyheader, animdata);
                     model->rwdatalen = nrec;
                 }
@@ -557,6 +782,14 @@ void solo_char_load(void)
         }
 
         g_CurrentPlayer->bodyModel = makeonebody(body, head, bodyheader, headheader, 0, model);
+        if (g_CurrentPlayer->bodyModel == NULL)
+        {
+            /* A live Third Person toggle must fail safely rather than
+             * dereferencing a missing model slot/header and taking the game
+             * down.  The option remains enabled, but the renderer will simply
+             * have no local body to draw until a model can be created. */
+            return;
+        }
         modelSetScale(g_CurrentPlayer->bodyModel, g_CurrentPlayer->bodyModel->scale * 0.97f);
         init_GUARDdata_with_set_values(g_CurrentPlayer->prop, g_CurrentPlayer->bodyModel, &g_CurrentPlayer->prop->pos, yaw, g_CurrentPlayer->prop->stan, NULL);
         pp = &g_CurrentPlayer;
@@ -573,7 +806,7 @@ void solo_char_load(void)
 
         if (prop >= 0)
         {
-            if (getPlayerCount() == 1)
+            if (useweaponbuffers)
             {
                 helddst      = cursor;
                 helddst      = ((s32)weaponbuf0) + helddst;
@@ -590,7 +823,16 @@ void solo_char_load(void)
                 pitemheader = NULL;
             }
 
-            something_with_generating_object(self, prop, item, 0, (WeaponObjRecord *)helddst, (ItemModelFileRecord *)pitemheader);
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+            if (usethirdpersonbodycache)
+            {
+                bondviewCreateThirdPersonCachedWeapon(self, GUNRIGHT, prop, item, 0);
+            }
+            else
+#endif
+            {
+                something_with_generating_object(self, prop, item, 0, (WeaponObjRecord *)helddst, (ItemModelFileRecord *)pitemheader);
+            }
         }
 
         chrlvMergeKneelToStand(self, 0.0f);
@@ -630,6 +872,60 @@ void bondviewRemovePlayerBody(void)
         bondviewUpdatePlayerRoom(g_CurrentPlayer);
     }
 }
+
+#ifdef GE_MODDED_CHEATS
+/* Live Third Person is presentation, not a cinematic state transition.  The
+ * retail removal path permanently frees all child props, including generic
+ * mission props which are parented to Bond while held in inventory.  Use the
+ * TP-specific character cleanup so turning the camera option off cannot alter
+ * objective state. */
+void bondviewRemovePlayerBodyForThirdPersonToggle(void)
+{
+    if (g_CurrentPlayer->prop->chr && getPlayerCount() == 1)
+    {
+        chrpropCleanupForThirdPersonToggle(g_CurrentPlayer->prop);
+        g_CurrentPlayer->prop->chr = NULL;
+        g_CurrentPlayer->bodyModel = NULL;
+        g_bondviewForceDisarm = 1;
+        bondviewUpdatePlayerRoom(g_CurrentPlayer);
+    }
+}
+
+/*
+ * A live Third Person body is backed by Plus' persistent TP cache and is
+ * authored/ticked as gameplay presentation geometry.  GoldenEye's scripted
+ * POSEND cameras expect the stock disposable cinematic Bond body instead.
+ *
+ * Entering a cutscene with the live TP body still attached leaves
+ * solo_char_load() nothing to do (prop->chr is already non-NULL), so the
+ * cinematic can inherit the gameplay model/animation state.  That can make
+ * Bond invisible to the stock cutscene path and, more importantly, leave AI
+ * scripts waiting forever for a cinematic animation state that was never
+ * installed.
+ *
+ * Retire only the TP presentation body here, preserving mission/inventory
+ * child props just like the normal TP toggle cleanup, but do NOT arm the
+ * retail force-disarm transient.  The cinematic body is rebuilt immediately
+ * by solo_char_load() in stock hand/model buffers while CAMERAMODE_POSEND owns
+ * the viewport.  The user's TP option remains latched and the ordinary
+ * post-cinema auto-rearm recreates the persistent live body afterward.
+ */
+static void bondviewPrepareThirdPersonBodyForCinematic(void)
+{
+    if (getPlayerCount() == 1
+        && modThirdPersonActive(get_cur_playernum())
+        && g_CurrentPlayer != NULL
+        && g_CurrentPlayer->prop != NULL
+        && g_CurrentPlayer->prop->chr != NULL
+        && g_CurrentPlayer->bodyModel != NULL)
+    {
+        chrpropCleanupForThirdPersonToggle(g_CurrentPlayer->prop);
+        g_CurrentPlayer->prop->chr = NULL;
+        g_CurrentPlayer->bodyModel = NULL;
+        bondviewUpdatePlayerRoom(g_CurrentPlayer);
+    }
+}
+#endif
 
 
 u32 bondviewGetCameraMode(void) {
@@ -784,6 +1080,12 @@ void bondviewSetCameraMode(s32 arg0)
     s32 padding2;
 #ifdef GE_MODDED_CHEATS
     s32 coop_restore_player = -1;
+    s32 previousCameraMode = g_CameraMode;
+
+    /* V79: Surface II chains several camera_switch opcodes while already in
+     * CAMERAMODE_POSEND. Keep the existing cinematic Bond alive across those
+     * POSEND -> POSEND camera changes; only the first transition into POSEND
+     * may replace a live gameplay/TP/Co-Op body. */
 
     /* RC6: campaign exit-camera commands can execute while P2-P4 are the
      * current simulation player. POSEND itself is global, but its body/camera
@@ -1037,16 +1339,26 @@ void bondviewSetCameraMode(s32 arg0)
     else if (g_CameraMode == CAMERAMODE_POSEND)
     {
 #ifdef GE_MODDED_CHEATS
-        /* R21: campaign Co-Op P1 normally owns a multiplayer-selected body.
-         * End-cinematic animations are authored against Bond's campaign body,
-         * so discard the MP body before solo_char_load rebuilds the canonical
-         * stage/cuff Bond model.  This prevents skeleton mismatch triangles. */
-        if (gamemode == GAMEMODE_MULTI
-            && get_scenario() == SCENARIO_COOP
-            && get_cur_playernum() == 0
-            && g_CurrentPlayer->prop->chr != NULL)
+        if (previousCameraMode != CAMERAMODE_POSEND)
         {
-            bondviewRemovePlayerBody();
+            /* A live SP Third Person body must yield ownership to GoldenEye's
+             * stock scripted-cinematic body. Do this only on the transition
+             * INTO POSEND. Surface II camera 0x0b -> 0x0c -> 0x0d switches all
+             * remain POSEND and its cinematic Bond AI keeps executing between
+             * them, so destroying that ChrRecord again would invalidate the
+             * currently-running cutscene actor. */
+            bondviewPrepareThirdPersonBodyForCinematic();
+
+            /* Campaign Co-Op P1 normally owns a multiplayer-selected body.
+             * Replace it once at cinematic entry, then retain the canonical
+             * Bond body for every subsequent camera segment. */
+            if (gamemode == GAMEMODE_MULTI
+                && get_scenario() == SCENARIO_COOP
+                && get_cur_playernum() == PLAYER_1
+                && g_CurrentPlayer->prop->chr != NULL)
+            {
+                bondviewRemovePlayerBody();
+            }
         }
 #endif
         solo_char_load();
@@ -1526,16 +1838,19 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
                 g_CameraAfterCinema = CAMERAMODE_INTRO;
             }
 
+#ifdef GE_MODDED_CHEATS
+            if (g_CurrentPlayer->bonddead
+                && (((gamemode != GAMEMODE_MULTI && (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM))
+                        && (buttons & ~oldbuttons))
+                    || ((buttons & ~oldbuttons & (CONT_A | B_BUTTON | Z_TRIG | START_BUTTON))
+                        && g_CurrentPlayer->redbloodfinished
+                        && g_CurrentPlayer->deathanimfinished)))
+#else
             if ((buttons & ~oldbuttons & (CONT_A | B_BUTTON | Z_TRIG | START_BUTTON))
                 && g_CurrentPlayer->bonddead
-#ifdef GE_MODDED_CHEATS
-                && ((gamemode != GAMEMODE_MULTI && (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM))
-                    || (g_CurrentPlayer->redbloodfinished && g_CurrentPlayer->deathanimfinished))
-#else
                 && g_CurrentPlayer->redbloodfinished
-                && g_CurrentPlayer->deathanimfinished
+                && g_CurrentPlayer->deathanimfinished)
 #endif
-                )
             {
                 g_CameraAfterCinema = CAMERAMODE_INTRO;
                 camera_mode = CAMERAMODE_FADESWIRL;
@@ -1550,16 +1865,19 @@ void bondviewFrozenCameraTick(u16 buttons, u16 oldbuttons, struct coord3d *pos, 
                 g_CameraAfterCinema = CAMERAMODE_INTRO;
             }
 
+#ifdef GE_MODDED_CHEATS
+            if (g_CurrentPlayer->bonddead
+                && (((gamemode != GAMEMODE_MULTI && (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM))
+                        && (buttons & ~oldbuttons))
+                    || ((buttons & ~oldbuttons & (CONT_A | B_BUTTON | Z_TRIG | START_BUTTON))
+                        && g_CurrentPlayer->redbloodfinished
+                        && g_CurrentPlayer->deathanimfinished)))
+#else
             if ((buttons & ~oldbuttons & (CONT_A | B_BUTTON | Z_TRIG | START_BUTTON))
                 && g_CurrentPlayer->bonddead
-#ifdef GE_MODDED_CHEATS
-                && ((gamemode != GAMEMODE_MULTI && (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM))
-                    || (g_CurrentPlayer->redbloodfinished && g_CurrentPlayer->deathanimfinished))
-#else
                 && g_CurrentPlayer->redbloodfinished
-                && g_CurrentPlayer->deathanimfinished
+                && g_CurrentPlayer->deathanimfinished)
 #endif
-                )
             {
                 camera_mode = CAMERAMODE_FADESWIRL;
             }
@@ -2628,6 +2946,65 @@ void bondviewCalcUpdatePlayerCollision(struct coord3d *offset, s32 allow_scoot)
     next_pos.f[0] = g_CurrentPlayer->field_488.collision_position.f[0] + offset->f[0];
     next_pos.f[2] = g_CurrentPlayer->field_488.collision_position.f[2] + offset->f[2];
 
+#ifdef GE_MAP_MAKER
+    if (mapmakerNativeTestActive() && g_PlayerIsInTank == 0)
+    {
+        f32 nextx = next_pos.f[0];
+        f32 nextz = next_pos.f[2];
+
+        mapmakerNativeTryMove(
+                g_CurrentPlayer->field_488.collision_position.f[0],
+                g_CurrentPlayer->field_488.collision_position.f[2],
+                &nextx, &nextz,
+                g_CurrentPlayer->field_70,
+                g_CurrentPlayer->field_488.collision_position.f[1]);
+        g_CurrentPlayer->field_488.collision_position.f[0] = nextx;
+        g_CurrentPlayer->field_488.collision_position.f[2] = nextz;
+        g_BondCanEnterTank = 0;
+        return;
+    }
+#endif
+
+#ifdef GE_MODDED_CHEATS
+    /* True No-Clipping: move directly in world X/Z space without requiring a
+     * destination STAN or running wall/object/door collision. Keep the last
+     * valid STAN/room as the render anchor so leaving the mapped floor does
+     * not feed NULL/invalid floor data into the player/camera pipeline. */
+    if (g_CheatActivated[CHEAT_NO_CLIPPING] && g_PlayerIsInTank == 0)
+    {
+        struct coord3d roomprobe;
+        StandTile *roomstan;
+
+        g_CurrentPlayer->field_488.collision_position.f[0] = next_pos.f[0];
+        g_CurrentPlayer->field_488.collision_position.f[2] = next_pos.f[2];
+        g_BondCanEnterTank = 0;
+
+        /* Y-aware No-Clipping room reacquisition.  Use Bond's actual altitude
+         * instead of probing from the top of the entire level.  This makes
+         * stacked rooms at the same X/Z resolve to the floor immediately below
+         * Bond's current vertical position.  A small upward cushion avoids
+         * losing a room while crossing its floor plane. */
+        roomprobe.f[0] = next_pos.f[0];
+        roomprobe.f[1] = g_CurrentPlayer->field_70 + 80.0f;
+        roomprobe.f[2] = next_pos.f[2];
+        roomstan = stanFindTileBelowPos(&roomprobe, NULL, NULL);
+
+        if (roomstan != NULL)
+        {
+            g_CurrentPlayer->field_488.current_tile_ptr = roomstan;
+        }
+
+        bondviewUpdatePlayerRoom(g_CurrentPlayer);
+
+        if (g_CurrentPlayer->field_488.current_tile_ptr != NULL)
+        {
+            objectivestatusCheckRoomEntered(g_CurrentPlayer->field_488.current_tile_ptr->room);
+        }
+
+        return;
+    }
+#endif
+
     g_BondCanEnterTank = 0;
 
     g_CurrentPlayer->autocrouchpos = CROUCH_STAND;
@@ -2658,6 +3035,19 @@ void bondviewCalcUpdatePlayerCollision(struct coord3d *offset, s32 allow_scoot)
                 g_BondCanEnterTank = 1;
             }
 
+#ifdef GE_MODDED_CHEATS
+            /* Campaign Co-Op: standing on the shared tank is just moving-platform
+             * support, not a partial tank-entry animation.  Retail's gradual
+             * Y-offset climb can return early here and consume ordinary on-foot
+             * movement ticks.  Snap the non-driver support height immediately
+             * in Co-Op, while preserving retail behaviour everywhere else. */
+            if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP
+                && g_PlayerIsInTank == 0)
+            {
+                g_PlayerTankYOffset = temp_f2;
+            }
+            else
+#endif
             if ((g_PlayerIsInTank == 0) && (g_PlayerTankYOffset < temp_f2))
             {
                 g_PlayerTankYOffset += (20.0f * g_GlobalTimerDelta);
@@ -2744,6 +3134,24 @@ void bondviewCalcUpdatePlayerCollision(struct coord3d *offset, s32 allow_scoot)
     }
 
     /**
+     * Recover the player's floor tile if movement leaves the current tile.
+     * The mod build uses the deterministic global STAN lookup.  This is both
+     * safer for No-Clipping and smaller than retail's random five-link walk.
+     */
+#ifdef GE_MODDED_CHEATS
+    if (stanTestPointWithinTileBoundsMaybe(
+            g_CurrentPlayer->field_488.current_tile_ptr,
+            g_CurrentPlayer->field_488.collision_position.f[0],
+            g_CurrentPlayer->field_488.collision_position.f[2]) == 0)
+    {
+        next_pos.f[0] = g_CurrentPlayer->field_488.collision_position.f[0];
+        next_pos.f[1] = g_CurrentPlayer->field_488.collision_position.f[1] + 200.0f;
+        next_pos.f[2] = g_CurrentPlayer->field_488.collision_position.f[2];
+        stan = stanFindTileBelowPos(&next_pos, NULL, NULL);
+        if (stan != NULL) g_CurrentPlayer->field_488.current_tile_ptr = stan;
+    }
+#else
+    /**
      * This block seems to be some error checking code, this will only occur when Bond
      * goes out of bounds.
     */
@@ -2801,6 +3209,7 @@ void bondviewCalcUpdatePlayerCollision(struct coord3d *offset, s32 allow_scoot)
             }
         }
     }
+#endif
 
     bondviewUpdatePlayerRoom(g_CurrentPlayer);
 
@@ -4498,6 +4907,37 @@ void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)
 
     if (1);
 
+#ifdef GE_MAP_MAKER
+    if (mapmakerNativeTestActive() && g_PlayerIsInTank == 0)
+    {
+        mapmakerNativeUpdatePlayerY();
+        return;
+    }
+#endif
+
+#ifdef GE_MODDED_CHEATS
+    if (g_CheatActivated[CHEAT_FLY_MODE] && g_PlayerIsInTank == 0)
+    {
+        /* True free-flight vertical movement: pitch controls climb/descent,
+         * and unlike ordinary grounded movement there is deliberately no
+         * floor-height clamp.  This allows descending below the altitude at
+         * which Fly Mode was enabled and below authored floor geometry. */
+        g_CurrentPlayer->field_70 += g_CurrentPlayer->field_488.applied_view.f[1]
+            * g_CurrentPlayer->speedforwards * g_GlobalTimerDelta * 10.0f;
+        g_CurrentPlayer->field_7C = 0.0f;
+        return;
+    }
+
+    /* Outside the level there is no floor STAN to sample. Keep Bond at the
+     * current world height while No-Clipping is active rather than forcing
+     * him back to the last legal floor. */
+    if (g_CheatActivated[CHEAT_NO_CLIPPING] && g_PlayerIsInTank == 0)
+    {
+        g_CurrentPlayer->stanHeight = g_CurrentPlayer->field_70;
+        return;
+    }
+#endif
+
     if (g_PlayerIsInTank == 1)
     {
         g_CurrentPlayer->stanHeight = bondviewYPositionRelated(
@@ -4726,28 +5166,54 @@ void bondviewUpdatePlayerCollisionPositionFields(void)
         g_CurrentPlayer->field_488.pos.f[1] += -(1.0f - g_CurrentPlayer->vv_cosverta) * g_CurrentPlayer->field_29C0;
     }
 
-    sp2C = g_CurrentPlayer->field_488.current_tile_ptr;
-    sp28 = stanlinelog_flag;
-    stanlinelog_flag = 0;
+#if defined(GE_MODDED_CHEATS) || defined(GE_MAP_MAKER)
+    if (
+#ifdef GE_MAP_MAKER
+            mapmakerNativeTestActive()
+#ifdef GE_MODDED_CHEATS
+            ||
+#endif
+#endif
+#ifdef GE_MODDED_CHEATS
+            (g_CheatActivated[CHEAT_NO_CLIPPING] && g_PlayerIsInTank == 0)
+#endif
+            )
+    {
+        /* Coordinates may intentionally be outside every STAN. Preserve the
+         * last valid tile for room/portal visibility instead of trying to
+         * resolve an out-of-level point through the STAN walker. */
+        g_CurrentPlayer->field_488.current_tile_ptr_for_portals =
+            g_CurrentPlayer->field_488.current_tile_ptr;
+        g_CurrentPlayer->field_488.pos3.f[0] = g_CurrentPlayer->field_488.pos.f[0];
+        g_CurrentPlayer->field_488.pos3.f[1] = g_CurrentPlayer->field_70;
+        g_CurrentPlayer->field_488.pos3.f[2] = g_CurrentPlayer->field_488.pos.f[2];
+    }
+    else
+#endif
+    {
+        sp2C = g_CurrentPlayer->field_488.current_tile_ptr;
+        sp28 = stanlinelog_flag;
+        stanlinelog_flag = 0;
 
-    walkTilesBetweenPoints_NoCallback(
-        &sp2C,
-        g_CurrentPlayer->field_488.collision_position.f[0],
-        g_CurrentPlayer->field_488.collision_position.f[2],
-        g_CurrentPlayer->field_488.pos.f[0],
-        g_CurrentPlayer->field_488.pos.f[2]);
+        walkTilesBetweenPoints_NoCallback(
+            &sp2C,
+            g_CurrentPlayer->field_488.collision_position.f[0],
+            g_CurrentPlayer->field_488.collision_position.f[2],
+            g_CurrentPlayer->field_488.pos.f[0],
+            g_CurrentPlayer->field_488.pos.f[2]);
 
-    stanlinelog_flag = sp28;
+        stanlinelog_flag = sp28;
 
-    g_CurrentPlayer->field_488.current_tile_ptr_for_portals = sp2C;
+        g_CurrentPlayer->field_488.current_tile_ptr_for_portals = sp2C;
 
-    g_CurrentPlayer->field_488.pos3.f[0] = g_CurrentPlayer->field_488.pos.f[0];
-    g_CurrentPlayer->field_488.pos3.f[2] = g_CurrentPlayer->field_488.pos.f[2];
+        g_CurrentPlayer->field_488.pos3.f[0] = g_CurrentPlayer->field_488.pos.f[0];
+        g_CurrentPlayer->field_488.pos3.f[2] = g_CurrentPlayer->field_488.pos.f[2];
 
-    g_CurrentPlayer->field_488.pos3.f[1] = bondviewYPositionRelated(
-        g_CurrentPlayer->field_488.current_tile_ptr_for_portals,
-        g_CurrentPlayer->field_488.pos.f[0],
-        g_CurrentPlayer->field_488.pos.f[2]);
+        g_CurrentPlayer->field_488.pos3.f[1] = bondviewYPositionRelated(
+            g_CurrentPlayer->field_488.current_tile_ptr_for_portals,
+            g_CurrentPlayer->field_488.pos.f[0],
+            g_CurrentPlayer->field_488.pos.f[2]);
+    }
 
     g_CurrentPlayer->prop->stan = g_CurrentPlayer->field_488.current_tile_ptr;
 
@@ -4880,52 +5346,125 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     f32 ftemp_nostack_sp78;
     s32 canCycleWeapons; // sp74
     f32 sp70;
+    f32 supertankmult;
 #ifdef GE_MODDED_CHEATS
-    s32 bzInventoryChord;
-    s32 bzInventoryPressed;
-    s32 bzChordPlayer;
-    s32 bzChordShift;
-    s32 bzChordSource;
-    u16 bzSecondButtonsRaw;
+    s32 abGadgetChord;
+    s32 abGadgetPressed;
+    s32 abChordPlayer;
+    s32 abChordShift;
+    s32 abChordSource;
+    s32 abBrowseShift;
+    s32 abBrowseSource;
+    s32 abReleaseWeaponAdvance;
+    s32 tpShoulderCommand;
+    u16 abSecondButtonsRaw;
 #endif
 
+    supertankmult = 1.0f;
 #ifdef GE_MODDED_CHEATS
-    /* R21 RC9: B+Z is order-sensitive. B must already be down when Z gets
-     * its new press edge. Z-first/B-second is ordinary gameplay input. Once
-     * a valid chord starts, keep consuming B+Z until either button is released. */
-    bzInventoryChord = FALSE;
-    bzInventoryPressed = FALSE;
-    bzChordPlayer = get_cur_playernum();
-    bzChordShift = bzChordPlayer * 2;
-    bzChordSource = (g_R21BzChordSources >> bzChordShift) & 3;
-
-    if (bzChordSource == 1)
+    if (g_CheatActivated[CHEAT_SUPER_TANK])
     {
-        if ((buttons & (B_BUTTON | Z_TRIG)) == (B_BUTTON | Z_TRIG))
+        supertankmult = 2.5f;
+    }
+
+    /* R29: entering gadget mode from a firearm still uses GoldenEye's normal
+     * A-started lower/swap window. Once already settled on a model-less mission
+     * item, however, pressing A merely arms a short A+B browse window. B while
+     * A is held advances immediately; releasing A without B performs the normal
+     * forward weapon step. This avoids pointlessly lowering an invisible gadget
+     * between every item-to-item cycle. */
+    abGadgetChord = FALSE;
+    abGadgetPressed = FALSE;
+    abReleaseWeaponAdvance = FALSE;
+    tpShoulderCommand = 0;
+    abChordPlayer = get_cur_playernum();
+    abChordShift = abChordPlayer * 2;
+    abBrowseShift = 8 + abChordShift;
+    abChordSource = (g_R22AbInputState >> abChordShift) & 3;
+    abBrowseSource = (g_R22AbInputState >> abBrowseShift) & 3;
+
+    if (abChordSource == 1)
+    {
+        if (buttons & A_BUTTON)
         {
-            bzInventoryChord = TRUE;
+            abGadgetChord = TRUE;
+
+            if ((buttons & B_BUTTON) && !(oldbuttons & B_BUTTON))
+            {
+                abGadgetPressed = TRUE;
+            }
         }
         else
         {
-            g_R21BzChordSources &= ~(3u << bzChordShift);
-            bzChordSource = 0;
+            g_R22AbInputState &= ~(3u << abChordShift);
+            abChordSource = 0;
         }
     }
 
-    if (bzChordSource == 0
-        && (buttons & (B_BUTTON | Z_TRIG)) == (B_BUTTON | Z_TRIG)
-        && (oldbuttons & B_BUTTON)
-        && !(oldbuttons & Z_TRIG))
+    if (abBrowseSource == 1)
     {
-        g_R21BzChordSources = (g_R21BzChordSources & ~(3u << bzChordShift)) | (1u << bzChordShift);
-        bzChordSource = 1;
-        bzInventoryChord = TRUE;
-        bzInventoryPressed = TRUE;
+        if (!(buttons & A_BUTTON))
+        {
+            g_R22AbInputState &= ~(3u << abBrowseShift);
+            abBrowseSource = 0;
+            abReleaseWeaponAdvance = TRUE;
+        }
+        else if ((buttons & B_BUTTON) && !(oldbuttons & B_BUTTON))
+        {
+            g_R22AbInputState &= ~(3u << abBrowseShift);
+            g_R22AbInputState = (g_R22AbInputState & ~(3u << abChordShift)) | (1u << abChordShift);
+            abBrowseSource = 0;
+            abChordSource = 1;
+            abGadgetChord = TRUE;
+            abGadgetPressed = TRUE;
+        }
     }
 
-    if (bzInventoryChord)
+    if (abChordSource == 0 && abBrowseSource == 0
+        && bondinvMissionItemModeActive()
+        && ((buttons & ~oldbuttons) & A_BUTTON)
+        && !(buttons & B_BUTTON)
+        && !bondinvWeaponSwitchInProgress())
     {
-        buttons &= ~(B_BUTTON | Z_TRIG);
+        g_R22AbInputState = (g_R22AbInputState & ~(3u << abBrowseShift)) | (1u << abBrowseShift);
+        abBrowseSource = 1;
+    }
+
+    if (abChordSource == 0
+        && (buttons & (A_BUTTON | B_BUTTON)) == (A_BUTTON | B_BUTTON)
+        && (oldbuttons & A_BUTTON)
+        && !(oldbuttons & B_BUTTON)
+        && (bondinvWeaponSwitchInProgress()
+            || getCurrentPlayerWeaponId(GUNRIGHT) == ITEM_UNARMED
+            || getCurrentPlayerWeaponId(GUNRIGHT) == ITEM_FIST))
+    {
+        g_R22AbInputState = (g_R22AbInputState & ~(3u << abChordShift)) | (1u << abChordShift);
+        abChordSource = 1;
+        abGadgetChord = TRUE;
+        abGadgetPressed = TRUE;
+    }
+
+    /* Hold B first, then press either shoulder trigger.  By default both
+     * B+L and B+R are the same ergonomic toggle so an original N64 pad never
+     * forces the player to swap hands.  Directional Shoulder View Toggle
+     * restores explicit B+L=left / B+R=right behavior when enabled. */
+    if (bondviewThirdPersonPresentationActive(abChordPlayer)
+        && (buttons & B_BUTTON)
+        && (oldbuttons & B_BUTTON))
+    {
+        u16 freshshoulder = (buttons & ~oldbuttons) & (L_TRIG | R_TRIG);
+        if (freshshoulder)
+        {
+            if (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER)
+            {
+                if (freshshoulder & L_TRIG) tpShoulderCommand = -1;
+                else if (freshshoulder & R_TRIG) tpShoulderCommand = 1;
+            }
+            else
+            {
+                tpShoulderCommand = 2;
+            }
+        }
     }
 #endif
 
@@ -5021,36 +5560,86 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 
             copy_prev_buttons_pressed = g_CurrentPlayer->prev_buttons_pressed;
 #ifdef GE_MODDED_CHEATS
-            bzSecondButtonsRaw = player_joyGetButtons;
+            abSecondButtonsRaw = player_joyGetButtons;
 
-            if (bzChordSource == 2)
+            if (abChordSource == 2)
             {
-                if ((bzSecondButtonsRaw & (B_BUTTON | Z_TRIG)) == (B_BUTTON | Z_TRIG))
+                if (abSecondButtonsRaw & A_BUTTON)
                 {
-                    bzInventoryChord = TRUE;
+                    abGadgetChord = TRUE;
+
+                    if ((abSecondButtonsRaw & B_BUTTON) && !(copy_prev_buttons_pressed & B_BUTTON))
+                    {
+                        abGadgetPressed = TRUE;
+                    }
                 }
                 else
                 {
-                    g_R21BzChordSources &= ~(3u << bzChordShift);
-                    bzChordSource = 0;
+                    g_R22AbInputState &= ~(3u << abChordShift);
+                    abChordSource = 0;
                 }
             }
 
-            if (bzChordSource == 0
-                && (bzSecondButtonsRaw & (B_BUTTON | Z_TRIG)) == (B_BUTTON | Z_TRIG)
-                && (copy_prev_buttons_pressed & B_BUTTON)
-                && !(copy_prev_buttons_pressed & Z_TRIG))
+            if (abBrowseSource == 2)
             {
-                g_R21BzChordSources = (g_R21BzChordSources & ~(3u << bzChordShift)) | (2u << bzChordShift);
-                bzChordSource = 2;
-                bzInventoryChord = TRUE;
-                bzInventoryPressed = TRUE;
+                if (!(abSecondButtonsRaw & A_BUTTON))
+                {
+                    g_R22AbInputState &= ~(3u << abBrowseShift);
+                    abBrowseSource = 0;
+                    abReleaseWeaponAdvance = TRUE;
+                }
+                else if ((abSecondButtonsRaw & B_BUTTON) && !(copy_prev_buttons_pressed & B_BUTTON))
+                {
+                    g_R22AbInputState &= ~(3u << abBrowseShift);
+                    g_R22AbInputState = (g_R22AbInputState & ~(3u << abChordShift)) | (2u << abChordShift);
+                    abBrowseSource = 0;
+                    abChordSource = 2;
+                    abGadgetChord = TRUE;
+                    abGadgetPressed = TRUE;
+                }
             }
 
-            if (bzInventoryChord)
+            if (abChordSource == 0 && abBrowseSource == 0
+                && bondinvMissionItemModeActive()
+                && ((abSecondButtonsRaw & ~copy_prev_buttons_pressed) & A_BUTTON)
+                && !(abSecondButtonsRaw & B_BUTTON)
+                && !bondinvWeaponSwitchInProgress())
             {
-                buttons &= ~(B_BUTTON | Z_TRIG);
-                player_joyGetButtons &= ~(B_BUTTON | Z_TRIG);
+                g_R22AbInputState = (g_R22AbInputState & ~(3u << abBrowseShift)) | (2u << abBrowseShift);
+                abBrowseSource = 2;
+            }
+
+            if (abChordSource == 0
+                && (abSecondButtonsRaw & (A_BUTTON | B_BUTTON)) == (A_BUTTON | B_BUTTON)
+                && (copy_prev_buttons_pressed & A_BUTTON)
+                && !(copy_prev_buttons_pressed & B_BUTTON)
+                && (bondinvWeaponSwitchInProgress()
+                    || getCurrentPlayerWeaponId(GUNRIGHT) == ITEM_UNARMED
+                    || getCurrentPlayerWeaponId(GUNRIGHT) == ITEM_FIST))
+            {
+                g_R22AbInputState = (g_R22AbInputState & ~(3u << abChordShift)) | (2u << abChordShift);
+                abChordSource = 2;
+                abGadgetChord = TRUE;
+                abGadgetPressed = TRUE;
+            }
+
+            if (bondviewThirdPersonPresentationActive(abChordPlayer)
+                && (abSecondButtonsRaw & B_BUTTON)
+                && (copy_prev_buttons_pressed & B_BUTTON))
+            {
+                u16 freshshoulder = (abSecondButtonsRaw & ~copy_prev_buttons_pressed) & (L_TRIG | R_TRIG);
+                if (freshshoulder)
+                {
+                    if (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER)
+                    {
+                        if (freshshoulder & L_TRIG) tpShoulderCommand = -1;
+                        else if (freshshoulder & R_TRIG) tpShoulderCommand = 1;
+                    }
+                    else
+                    {
+                        tpShoulderCommand = 2;
+                    }
+                }
             }
 #endif
 
@@ -5203,6 +5792,9 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                     )
                     && (sp108);
 
+               /* A retains the retail immediate weapon-cycle edge. A later B
+                * press can redirect the switch before draw, or queue behind an
+                * already-started draw, without changing A's normal feel. */
                moveData.weaponForwardOffset = (
                     (
                        (((buttons & ~oldbuttons) & A_BUTTON) != 0)
@@ -5297,7 +5889,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 
             moveData.disableLookAhead = 1;
 #ifdef GE_MODDED_CHEATS
-            g_CurrentPlayer->prev_buttons_pressed = bzSecondButtonsRaw;
+            g_CurrentPlayer->prev_buttons_pressed = abSecondButtonsRaw;
 #else
             g_CurrentPlayer->prev_buttons_pressed = player_joyGetButtons;
 #endif
@@ -5480,11 +6072,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                         (((buttons & ~oldbuttons) & shootButtons) != 0)
                         ;
 
+                    /* Keep the normal press-edge weapon cycle. A+B is only
+                     * eligible while this A-triggered change is still active. */
                     moveData.weaponForwardOffset =
                         (((buttons & ~oldbuttons) & invButtons) != 0)
-                        &&
-                        ((buttons & shootButtons) == 0)
-                        ;
+                        && ((buttons & shootButtons) == 0);
 
                     moveData.aiming = g_CurrentPlayer->insightaimmode;
                     moveData.zooming = g_CurrentPlayer->insightaimmode;
@@ -5569,9 +6161,30 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     }
 
 #ifdef GE_MODDED_CHEATS
-    /* R19: consume B+Z as an inventory chord before either B-action or Z-fire
-     * can reach gameplay.  A new chord advances once; holding it never fires. */
-    if (bzInventoryChord
+    /* A press on an already-settled gadget is deferred only until we know
+     * whether B follows.  This keeps item-to-item browsing immediate while an
+     * A release without B still performs the normal forward inventory step. */
+    if (abBrowseSource != 0)
+    {
+        moveData.weaponForwardOffset = 0;
+    }
+    else if (abReleaseWeaponAdvance)
+    {
+        moveData.weaponForwardOffset = 1;
+    }
+
+    if (tpShoulderCommand)
+    {
+        if (tpShoulderCommand == 2)
+            bondviewToggleThirdPersonShoulder(abChordPlayer);
+        else
+            bondviewSetThirdPersonShoulder(abChordPlayer, tpShoulderCommand < 0);
+        moveData.btap = 0;
+    }
+
+    /* R22/R29: once B is pressed during the gadget chord, consume B-side
+     * gameplay actions and queue exactly one gadget advance. */
+    if (abGadgetChord
         && g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x0
         && g_CurrentPlayer->bonddead == FALSE
         && g_stopPlayFlag == 0
@@ -5585,7 +6198,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         moveData.weaponForwardOffset = 0;
         moveData.detonating = 0;
 
-        if (bzInventoryPressed)
+        if (abGadgetPressed)
         {
             bondinvCycleMissionItem();
         }
@@ -5695,8 +6308,9 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     gunTickGameplay(moveData.triggerOn);
 
 #ifdef GE_MODDED_CHEATS
-    /* Finish any reload-aware B+Z request after the normal gun state update so
-     * a reload can reach IDLE before the ordinary holster transition begins. */
+    /* Finish any A+B request after the normal gun state update. Pre-draw
+     * requests are retargeted into the active switch; requests that arrived
+     * during HOLD/RAISE wait until that weapon is fully drawn first. */
     bondinvProcessMissionItemQueue();
 #endif
 
@@ -5809,7 +6423,7 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                     ftemp_nostack_spD8 = -1.0f;
                 }
 
-                unadjustedTargetSpeed = ftemp_nostack_spD8 * TANK_MAX_SPEED;
+                unadjustedTargetSpeed = ftemp_nostack_spD8 * TANK_MAX_SPEED * supertankmult;
                 targetSpeed = unadjustedTargetSpeed;
 
                 if (g_TankDamagePenaltyTicks > 0)
@@ -5823,9 +6437,9 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                 {
                     if (g_CurrentPlayer->speedforwards < targetSpeed)
                     {
-                        unadjustedTargetSpeed = ((((((targetSpeed - g_CurrentPlayer->speedforwards) / 4.0f) / TANK_MAX_SPEED) + 0.5f) * ftemp_nostack_spE8 * FLOAT_TEN_A) / 60.0f);
+                        unadjustedTargetSpeed = ((((((targetSpeed - g_CurrentPlayer->speedforwards) / 4.0f) / (TANK_MAX_SPEED * supertankmult)) + 0.5f) * ftemp_nostack_spE8 * FLOAT_TEN_A) / 60.0f);
 
-                        g_CurrentPlayer->speedforwards += (unadjustedTargetSpeed) * g_GlobalTimerDelta;
+                        g_CurrentPlayer->speedforwards += (unadjustedTargetSpeed) * g_GlobalTimerDelta * supertankmult;
 
                         if (targetSpeed < g_CurrentPlayer->speedforwards)
                         {
@@ -5834,9 +6448,9 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                     }
                     else if (targetSpeed < g_CurrentPlayer->speedforwards)
                     {
-                        unadjustedTargetSpeed = ((((((g_CurrentPlayer->speedforwards - targetSpeed) / 4.0f) / TANK_MAX_SPEED) + 0.5f) * ftemp_nostack_spE8 * -FLOAT_TEN_A) / 60.0f);
+                        unadjustedTargetSpeed = ((((((g_CurrentPlayer->speedforwards - targetSpeed) / 4.0f) / (TANK_MAX_SPEED * supertankmult)) + 0.5f) * ftemp_nostack_spE8 * -FLOAT_TEN_A) / 60.0f);
 
-                        g_CurrentPlayer->speedforwards += (unadjustedTargetSpeed) * g_GlobalTimerDelta;
+                        g_CurrentPlayer->speedforwards += (unadjustedTargetSpeed) * g_GlobalTimerDelta * supertankmult;
 
                         if (g_CurrentPlayer->speedforwards < targetSpeed)
                         {
@@ -6233,15 +6847,15 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 
             if (moveData.canNaturalTurn)
             {
-                ftemp_nostack_sp80 = g_CurrentPlayer->speedtheta * 0.3f;
+                ftemp_nostack_sp80 = g_CurrentPlayer->speedtheta * 0.3f * supertankmult;
             }
             else if (moveData.aimTurnLeftSpeed > 0)
             {
-                ftemp_nostack_sp80 = sub_GAME_7F080228(1) * 0.3f;
+                ftemp_nostack_sp80 = sub_GAME_7F080228(1) * 0.3f * supertankmult;
             }
             else if (moveData.aimTurnRightSpeed > 0)
             {
-                ftemp_nostack_sp80 = sub_GAME_7F080228(-1) * 0.3f;
+                ftemp_nostack_sp80 = sub_GAME_7F080228(-1) * 0.3f * supertankmult;
             }
 
             for (i_1=0; i_1<g_ClockTimer; i_1++)
@@ -7499,6 +8113,25 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         move_offset.f[0] += sp220;
         move_offset.f[2] += sp21C;
 
+#ifdef GE_MODDED_CHEATS
+        if (g_CheatActivated[CHEAT_FLY_MODE] && g_PlayerIsInTank == 0)
+        {
+            /* True 3D Fly Mode: forward/backward is derived exclusively from
+             * the normalized look vector, not the stock ground/head-bob walk
+             * displacement.  At +/-90 degrees pitch applied_view X/Z becomes
+             * zero, so forward/backward changes Y only.  Strafing remains on
+             * the horizontal yaw plane and normal collision is still used. */
+            move_offset.f[0] =
+                (g_CurrentPlayer->field_488.applied_view.f[0] * g_CurrentPlayer->speedforwards
+                - g_CurrentPlayer->field_488.theta_transform.f[2] * g_CurrentPlayer->speedsideways)
+                * g_GlobalTimerDelta * 10.0f;
+            move_offset.f[2] =
+                (g_CurrentPlayer->field_488.applied_view.f[2] * g_CurrentPlayer->speedforwards
+                + g_CurrentPlayer->field_488.theta_transform.f[0] * g_CurrentPlayer->speedsideways)
+                * g_GlobalTimerDelta * 10.0f;
+        }
+#endif
+
         start_collision_pos_x = g_CurrentPlayer->field_488.collision_position.f[0];
         start_collision_pos_z = g_CurrentPlayer->field_488.collision_position.f[2];
         sp200 = g_CurrentPlayer->field_488.current_tile_ptr;
@@ -7732,6 +8365,10 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         s32 stemp;
         void *stack_padding_8;
         struct rect4f spB4_tank_collision_bounds;
+#ifdef GE_MODDED_CHEATS
+        struct coord3d old_tank_pos;
+        f32 old_tank_angle;
+#endif
         // roomids
         s32 sp94[8];
         s32 stanlineret;
@@ -7740,6 +8377,10 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         sp140_tank_as_TankRecord = ((struct TankRecord *)g_PlayerTankProp->obj);
         sp138_tank_as_ObjectRecord = (struct  ObjectRecord*)g_PlayerTankProp->obj;
         sp130 = (struct ModelNode_BoundingBoxRecord *)((struct ModelNode *)sp138_tank_as_ObjectRecord->model->obj->Switches)->Child->Data;
+#ifdef GE_MODDED_CHEATS
+        old_tank_pos = sp138_tank_as_ObjectRecord->prop->pos;
+        old_tank_angle = sp140_tank_as_TankRecord->tank_orientation_angle;
+#endif
 
         sp140_tank_as_TankRecord->is_firing_tank = (getCurrentPlayerWeaponId(GUNRIGHT) == ITEM_TANKSHELLS)
             && get_hands_firing_status(GUNRIGHT);
@@ -7789,6 +8430,16 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         sp138_tank_as_ObjectRecord->runtime_pos.f[0] = sp138_tank_as_ObjectRecord->prop->pos.f[0] = spE4.f[0];
         sp138_tank_as_ObjectRecord->runtime_pos.f[1] = sp138_tank_as_ObjectRecord->prop->pos.f[1] = spE4.f[1];
         sp138_tank_as_ObjectRecord->runtime_pos.f[2] = sp138_tank_as_ObjectRecord->prop->pos.f[2] = spE4.f[2];
+
+#ifdef GE_MODDED_CHEATS
+        /* Campaign Co-Op moving-platform support: passengers who are standing
+         * on the tank remain ordinary on-foot players, but inherit the deck's
+         * frame-to-frame translation and yaw.  The driver is excluded by the
+         * per-player tank state. */
+        playerCoopTankCarryRiders(sp138_tank_as_ObjectRecord->prop,
+            &old_tank_pos, old_tank_angle, &sp138_tank_as_ObjectRecord->prop->pos,
+            g_TankOrientationAngle);
+#endif
 
         setupUpdateObjectRoomPosition(sp138_tank_as_ObjectRecord);
         chrobjCollisionRelated(sp138_tank_as_ObjectRecord);
@@ -8158,6 +8809,43 @@ s16 bondviewGetCurrentPlayerViewportUly(void)
  * Address 0x7F0870BC (VERSION_EU).
  * Address 0x7F087668 (VERSION_JP).
  */
+#ifdef GE_MODDED_CHEATS
+/*
+ * A stage transition intentionally tears down Bond's external body when the
+ * intro/swirl hands control back to retail first person.  The persistent Plus
+ * Third Person option survives that transition, so without an automatic
+ * re-arm the option can remain enabled while the newly allocated stage player
+ * has no bodyModel/ChrRecord.  Toggling Third Person off/on manually repairs
+ * the state because the enable path calls solo_char_load().
+ *
+ * Do the same repair automatically, but only after GoldenEye's stock intro
+ * cleanup has completely finished.  In particular, bondviewRemovePlayerBody()
+ * sets g_bondviewForceDisarm for several movement ticks; rebuilding the body
+ * before that transient completes lets the retail disarm cleanup immediately
+ * disturb the freshly created held-weapon/body state.  While the body is
+ * absent, bondviewThirdPersonPresentationActive() deliberately returns FALSE,
+ * giving exactly the short stock-first-person handoff requested for map loads.
+ */
+static void bondviewThirdPersonTryAutoRearm(void)
+{
+    if (!modThirdPersonActive(get_cur_playernum())
+        || g_CurrentPlayer == NULL
+        || g_CurrentPlayer->bonddead
+        || g_CurrentPlayer->prop == NULL
+        || g_CurrentPlayer->bodyModel != NULL
+        || g_bondviewForceDisarm != 0
+        || stop_time_flag != 0
+        || g_CurrentPlayer->pause_state != 0
+        || g_CurrentPlayer->mpmenuon != 0
+        || (g_CameraMode != CAMERAMODE_NONE && g_CameraMode != CAMERAMODE_FP))
+    {
+        return;
+    }
+
+    solo_char_load();
+}
+#endif
+
 void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 {
 #ifdef VERSION_EU
@@ -8261,6 +8949,52 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     if (1);
 #endif
 
+#ifdef GE_MODDED_CHEATS
+    /*
+     * Live Third Person must not inherit GoldenEye's multiplayer intro/spot
+     * camera input lock.  Perfect Dark made this separation explicit with
+     * per-player CAMERAMODE_THIRDPERSON/CAMERAMODE_EYESPY states: presentation
+     * can use an alternate camera while the underlying player/prop simulation
+     * remains authoritative.
+     *
+     * GoldenEye's CAMERAMODE_MP is a *global* pre-match swirl state.  Its
+     * normal path goes through bondviewFrozenMoveBond(), which deliberately
+     * zeroes controller input and sets Player.cameramode = 1.  That is exactly
+     * why our chase camera could look correct while Bond remained immobile.
+     *
+     * For a player whose Plus Third Person option is active, keep ticking the
+     * stock MP-swirl state machine into throw-away camera outputs so the global
+     * transition still completes, but run MoveBond() for the actual player.
+     * The chase camera remains a render-time presentation override.
+     */
+    if (modThirdPersonActive(get_cur_playernum())
+        && !g_CurrentPlayer->bonddead
+        && g_CameraMode == CAMERAMODE_MP)
+    {
+        struct coord3d tp_campos = g_DefaultFrozenPlayerPos;
+        struct coord3d tp_camlook = g_DefaultFrozenPlayerPos2;
+        struct coord3d tp_camup = g_DefaultFrozenPlayerOffset;
+        struct coord3d tp_stanpos = g_DefaultFrozenMoveOffset;
+        StandTile *tp_stan = g_CurrentPlayer->prop ? g_CurrentPlayer->prop->stan : NULL;
+
+        bondviewFrozenCameraTick(
+            buttons,
+            (u16) g_CurrentPlayer->buttons_pressed,
+            &tp_campos,
+            &tp_camlook,
+            &tp_camup,
+            &tp_stan,
+            &tp_stanpos);
+
+        if (get_cur_playernum() == 0)
+        {
+            mission_timer += g_ClockTimer;
+        }
+
+        MoveBond(stick_x, stick_y, buttons, (u16) g_CurrentPlayer->buttons_pressed);
+    }
+    else
+#endif
     if ((g_CameraMode == CAMERAMODE_NONE) || ((g_CameraMode == CAMERAMODE_FP) && (is_timer_active != 0)) || (g_CameraMode == CAMERAMODE_FADE_TO_TITLE))
     {
         if (get_cur_playernum() == 0)
@@ -8333,7 +9067,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 #ifdef GE_MODDED_CHEATS
             && !(gamemode != GAMEMODE_MULTI
                 && (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM)
-                && camera_mode != CAMERAMODE_FADESWIRL)
+                && camera_mode != CAMERAMODE_SWIRL)
 #endif
         )
         {
@@ -8345,6 +9079,13 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     {
         bossRunTitleStage();
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* If a persistent Third Person option crossed a stage load, wait until the
+     * retail intro/body teardown and force-disarm transient are finished, then
+     * rebuild the live presentation body automatically. */
+    bondviewThirdPersonTryAutoRearm();
+#endif
 
     g_CurrentPlayer->buttons_pressed = buttons;
 }
@@ -8468,6 +9209,704 @@ void bondviewUpdateCameraMatrices(coord3d* cam_pos, coord3d* cam_look_dir, coord
 }
 
 
+#ifdef GE_MODDED_CHEATS
+/*
+ * Third Person is a gameplay presentation mode, not a replacement for
+ * GoldenEye's pause/watch camera.  While any pause/watch UI owns the current
+ * viewport, temporarily suspend the chase-camera/body presentation and let
+ * the stock pause path render normally.  The option itself remains enabled,
+ * so Third Person resumes automatically on unpause.
+ */
+s32 bondviewThirdPersonPresentationActive(s32 player)
+{
+    struct player *p;
+
+    if (!modThirdPersonActive(player))
+    {
+        return FALSE;
+    }
+
+    /* Plus keeps Third Person presentation active while the local player is
+     * manning the tank.  bondviewGetThirdPersonCamera() supplies a dedicated
+     * vehicle spring arm, while the normal tank simulation remains authoritative. */
+
+    p = g_playerPointers[player];
+
+    if (p == NULL || (p->bonddead && !modStayInTpOnDeath(player)))
+    {
+        return FALSE;
+    }
+
+    /* A new stage allocates a fresh Player with bodyModel == NULL, and retail
+     * also removes the intro Bond body during the SWIRL -> FP handoff.  Do not
+     * let the chase-camera presentation turn on around that half-initialised
+     * state. bondviewThirdPersonTryAutoRearm() will rebuild it once the stock
+     * force-disarm/intro cleanup has completed. */
+    if (p->bodyModel == NULL || p->prop == NULL || p->prop->chr == NULL)
+    {
+        return FALSE;
+    }
+
+    /* End-of-mission/cinematic cameras must retain GoldenEye's stock first-
+     * person/scripted presentation.  Keep the user's Third Person option set,
+     * but temporarily suspend the chase camera until ordinary gameplay resumes. */
+    if (stop_time_flag != 0
+        || (g_CameraMode != CAMERAMODE_NONE
+            && g_CameraMode != CAMERAMODE_FP
+            && g_CameraMode != CAMERAMODE_MP))
+    {
+        return FALSE;
+    }
+
+    /* Multiplayer/co-op pause menu. */
+    if (p->mpmenuon != 0)
+    {
+        return FALSE;
+    }
+
+    /* Single-player watch pause transition / fully paused / unpause
+     * transition.  Keep the chase presentation out until the stock camera has
+     * completely returned to gameplay. */
+    if (p->pause_state != 0)
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* Late HUD/body occlusion pass state.  The normal world body has already
+ * populated the depth buffer by this point, so a second depth-tested draw at
+ * exactly the same coordinates can fail the equal-depth test and leave the
+ * 2D reticle painted over Bond.  Only the explicit reticle-occlusion redraw
+ * disables model Z testing; normal character rendering is unchanged. */
+static void bondviewGetThirdPersonCamera(coord3d *campos, coord3d *camlook, coord3d *camup);
+
+static s32 g_ModThirdPersonReticleOcclusionPass = FALSE;
+
+/* Exact Third Person camera origin used to build each player's current view
+ * matrix. Sky and room/portal visibility must consume this cached endpoint
+ * instead of recalculating the spring arm later in the same render pass.
+ *
+ * Re-running the obstacle pull-in after bondviewUpdateCameraMatrices() can
+ * occasionally choose a slightly different endpoint while turning near
+ * railings/room boundaries. The view rays then belong to camera A while the
+ * sky/water plane intersection is anchored to camera B, producing a thin
+ * one-to-few-frame horizon strip. Caching also removes a duplicate STAN
+ * collision search from every TP sky/visibility pass on N64 hardware. */
+static coord3d g_ModThirdPersonRenderedCameraPos[4];
+static u8 g_ModThirdPersonRenderedCameraValid[4];
+static u8 g_ModThirdPersonShoulderSwapped[4];
+static u8 g_ModThirdPersonShoulderBlendValid[4];
+static f32 g_ModThirdPersonShoulderBlend[4];
+
+static void bondviewSetThirdPersonShoulder(s32 player, s32 leftshoulder)
+{
+    if (player < PLAYER_1 || player > PLAYER_4
+        || !bondviewThirdPersonPresentationActive(player))
+    {
+        return;
+    }
+
+    if (!g_ModThirdPersonShoulderBlendValid[player])
+    {
+        g_ModThirdPersonShoulderBlend[player] = 1.0f;
+        g_ModThirdPersonShoulderBlendValid[player] = TRUE;
+    }
+
+    g_ModThirdPersonShoulderSwapped[player] = leftshoulder ? TRUE : FALSE;
+}
+
+static void bondviewToggleThirdPersonShoulder(s32 player)
+{
+    if (player < PLAYER_1 || player > PLAYER_4
+        || !bondviewThirdPersonPresentationActive(player))
+    {
+        return;
+    }
+
+    bondviewSetThirdPersonShoulder(player, !g_ModThirdPersonShoulderSwapped[player]);
+}
+
+s32 bondviewThirdPersonReticleOcclusionPassActive(void)
+{
+    return g_ModThirdPersonReticleOcclusionPass;
+}
+
+/* Export the exact Third Person camera origin that built this viewport's
+ * current view-to-world matrix. Gameplay systems continue to use Bond's
+ * authoritative position; only presentation visibility/sky code consumes
+ * this cached camera-space origin. */
+s32 bondviewGetThirdPersonVisibilityCamera(coord3d *outpos)
+{
+    s32 player = get_cur_playernum();
+
+    if (outpos == NULL
+        || player < PLAYER_1
+        || player > PLAYER_4
+        || !bondviewThirdPersonPresentationActive(player)
+        || !g_ModThirdPersonRenderedCameraValid[player])
+    {
+        return FALSE;
+    }
+
+    *outpos = g_ModThirdPersonRenderedCameraPos[player];
+    return TRUE;
+}
+
+/*
+ * Return a viewport-local alpha for the current player's Third Person body.
+ * This is presentation-only: chr->fadealpha is never modified, so another
+ * player's viewport still renders this character at the normal opacity.
+ *
+ * The distance is measured from the final chase-camera endpoint (including
+ * obstacle pull-in) to the same upper-body pivot used by the TP spring arm.
+ * At the normal chase distance the body is fully opaque.  Once collision
+ * pulls the camera within 100 units, fade smoothly toward 0x40 (25% opacity,
+ * 75% translucent) at 45 units.
+ */
+/* Set only when the horizontal Third Person spring arm was shortened by
+ * actual world/door/path-blocker collision.  Pitch/orbit compression alone
+ * must never make the local body translucent. */
+static s32 g_ThirdPersonCameraPulledInByCollision = FALSE;
+
+s32 bondviewGetThirdPersonLocalBodyAlpha(void)
+{
+    coord3d campos;
+    coord3d look;
+    coord3d up;
+    coord3d pivot;
+    f32 eyeheight;
+    f32 dx;
+    f32 dz;
+    f32 distxz;
+    f32 frac;
+    s32 alpha = 0xFF;
+    s32 collisionalpha;
+
+    if (g_CurrentPlayer == NULL
+        || g_CurrentPlayer->prop == NULL
+        || !bondviewThirdPersonPresentationActive(get_cur_playernum()))
+    {
+        return 0xFF;
+    }
+
+    /* TP Sight Translucency is presentation-only and follows GoldenEye's
+     * semantic manual-aim state, so Hold and Toggle aim controls both behave
+     * correctly regardless of which physical shoulder button is mapped to
+     * Aim.  0x40 is the requested 25% body opacity (75% translucent). */
+    if (g_ModTpSightTranslucencyEnabled
+        && g_CurrentPlayer->insightaimmode)
+    {
+        alpha = 0x40;
+    }
+
+    bondviewGetThirdPersonCamera(&campos, &look, &up);
+
+    /* Fade is an obstruction aid, not a generic camera-distance effect.
+     * Looking up/down intentionally compresses the 3D orbit and must leave the
+     * body at its normal/sight-requested alpha.  Only a spring arm physically
+     * shortened by the horizontal wall/door/path-blocker test may fade it
+     * farther. */
+    if (!g_ThirdPersonCameraPulledInByCollision)
+    {
+        return alpha;
+    }
+
+    eyeheight = (g_playerPerm->player_perspective_height * 185.0f) - 10.0f;
+    if (eyeheight < 30.0f)
+    {
+        eyeheight = 30.0f;
+    }
+
+    pivot.f[0] = g_CurrentPlayer->field_488.collision_position.f[0];
+    pivot.f[1] = g_CurrentPlayer->field_70 + eyeheight
+        + ((f32)TP_CAM_HEIGHT_DEFAULT + (f32)g_ModThirdPersonCameraHeightAdjust);
+    pivot.f[2] = g_CurrentPlayer->field_488.collision_position.f[2];
+
+    dx = campos.f[0] - pivot.f[0];
+    dz = campos.f[2] - pivot.f[2];
+    distxz = sqrtf(dx * dx + dz * dz);
+
+    /* Use X/Z separation again so vertical orbit motion cannot affect opacity.
+     * Collision is already required above, so this curve now measures only how
+     * severely a wall has crowded the camera into the local player. */
+    if (distxz >= 100.0f)
+    {
+        return alpha;
+    }
+    if (distxz <= 45.0f)
+    {
+        collisionalpha = 0x40;
+    }
+    else
+    {
+        frac = (distxz - 45.0f) / 55.0f;
+        collisionalpha = 0x40 + (s32)(frac * (f32)(0xFF - 0x40));
+        if (collisionalpha < 0x40) collisionalpha = 0x40;
+        if (collisionalpha > 0xFF) collisionalpha = 0xFF;
+    }
+
+    /* Camera obstruction may make Bond even more transparent than the
+     * requested sight fade, but aiming must never make an obstruction fade
+     * less transparent. */
+    if (collisionalpha < alpha)
+        alpha = collisionalpha;
+
+    return alpha;
+}
+
+
+/*
+ * The TP spring arm historically used stanTestLineUnobstructed as both a wall
+ * test and a path to camera pull-in.  That function also treats the edge of
+ * walkable STAN as blocked.  On Frigate this means simply orbiting the camera
+ * over the side of the ship can look like a wall hit even though there is only
+ * open air behind the railing, snapping the chase camera into Bond for a few
+ * frames.
+ *
+ * STAN is still used for doors/props/path blockers, but walkability alone is
+ * not a complete 3D camera test: a steep spring arm can cross a ceiling, floor
+ * or overhang while its X/Z projection remains entirely inside valid STAN.
+ * Therefore the real rendered-BG segment test is also run for every TP spring
+ * arm update.  Open ledges remain valid camera space, while actual walls,
+ * ceilings and floors shorten the arm.
+ */
+static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *to, f32 *outfrac)
+{
+    u8 startrooms[8];
+    u8 finalrooms[8];
+    s32 rooms[16];
+    s32 roomcount = 0;
+    s32 i;
+    s32 room;
+    struct HitThing hit;
+    coord3d delta;
+    coord3d hitworld;
+    f32 len2;
+    f32 scale;
+    f32 frac;
+    f32 best = 2.0f;
+
+    if (g_CurrentPlayer == NULL
+        || g_CurrentPlayer->prop == NULL
+        || g_CurrentPlayer->prop->stan == NULL
+        || outfrac == NULL)
+    {
+        return FALSE;
+    }
+
+    room = g_CurrentPlayer->prop->stan->room;
+    if (room <= 0)
+    {
+        return FALSE;
+    }
+
+    delta.f[0] = to->f[0] - from->f[0];
+    delta.f[1] = to->f[1] - from->f[1];
+    delta.f[2] = to->f[2] - from->f[2];
+    len2 = delta.f[0] * delta.f[0]
+        + delta.f[1] * delta.f[1]
+        + delta.f[2] * delta.f[2];
+
+    if (len2 <= 0.0001f)
+    {
+        return FALSE;
+    }
+
+    startrooms[0] = (u8)room;
+    for (i = 1; i < 8; i++)
+    {
+        startrooms[i] = 0xff;
+    }
+    finalrooms[0] = 0xff;
+
+    bgFindRoomsAlongSegment(from, to, startrooms, finalrooms,
+        rooms, &roomcount, 16);
+
+    if (roomcount <= 0)
+    {
+        rooms[0] = room;
+        roomcount = 1;
+    }
+
+    scale = get_room_data_float2();
+
+    for (i = 0; i < roomcount; i++)
+    {
+        s32 j;
+        s32 duplicate = FALSE;
+
+        if (rooms[i] <= 0)
+        {
+            continue;
+        }
+
+        for (j = 0; j < i; j++)
+        {
+            if (rooms[j] == rooms[i])
+            {
+                duplicate = TRUE;
+                break;
+            }
+        }
+
+        if (duplicate)
+        {
+            continue;
+        }
+
+        if (bgTestBulletHitBackground(from, to, rooms[i], &hit))
+        {
+            hitworld.f[0] = hit.hitpos.f[0] * scale;
+            hitworld.f[1] = hit.hitpos.f[1] * scale;
+            hitworld.f[2] = hit.hitpos.f[2] * scale;
+
+            frac = ((hitworld.f[0] - from->f[0]) * delta.f[0]
+                + (hitworld.f[1] - from->f[1]) * delta.f[1]
+                + (hitworld.f[2] - from->f[2]) * delta.f[2]) / len2;
+
+            if (frac >= 0.0f && frac <= 1.0f && frac < best)
+            {
+                best = frac;
+            }
+        }
+    }
+
+    if (best <= 1.0f)
+    {
+        *outfrac = best;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * Build a third-person chase camera without changing Player.cameramode.
+ *
+ * Keeping cameramode at the normal gameplay value is critical: GoldenEye's
+ * cameramode == 1 path is an external/spot-camera state and owns different
+ * control semantics.  Using that mode just to make Bond visible caused the
+ * live Third Person option to orbit around a fixed point and prevented normal
+ * player movement.  Perfect Dark likewise keeps player simulation/position
+ * authoritative and treats presentation as a separate per-viewport concern.
+ */
+static void bondviewGetThirdPersonCamera(coord3d *campos, coord3d *camlook, coord3d *camup)
+{
+    coord3d anchor;
+    coord3d desired;
+    f32 boom;
+    f32 theta;
+    f32 pitch;
+    f32 eyeheight;
+    f32 pitchcos;
+    f32 pitchsin;
+    f32 pitchfactor;
+    f32 blend;
+    f32 minboom;
+    f32 pivotshift;
+    f32 bodyclearance;
+    f32 downframelift;
+    f32 horizontaloffset;
+    f32 shouldertarget;
+    f32 shoulderstep;
+    s32 shoulderplayer;
+    s32 tankcamera;
+    coord3d forward;
+    StandTile *tile;
+
+    g_ThirdPersonCameraPulledInByCollision = FALSE;
+    tankcamera = (g_PlayerIsInTank != 0 && g_PlayerTankProp != NULL);
+
+    /* Build the camera from the same yaw/pitch that drives Bond's gameplay
+     * view.  This is the key difference from the earlier Plus revisions:
+     * the chase camera is now positioned backwards along the FULL 3D look
+     * vector, not along an X/Z-only boom.  A proper orbit/spring-arm camera
+     * therefore moves naturally above Bond when looking down and below/behind
+     * him when looking up, while its horizontal separation tends toward zero
+     * as pitch approaches +/-90 degrees. */
+    theta = (g_CurrentPlayer->vv_theta * M_PI_F) / 180.0f;
+    pitch = bondviewGetPlayerPitchRadians();
+    pitchcos = cosf(pitch);
+    pitchsin = sinf(pitch);
+
+    forward.f[0] = -sinf(theta) * pitchcos;
+    forward.f[1] = pitchsin;
+    forward.f[2] = cosf(theta) * pitchcos;
+
+    pitchfactor = (pitch < 0.0f ? -pitch : pitch) / (M_PI_F * 0.5f);
+    if (pitchfactor > 1.0f) pitchfactor = 1.0f;
+
+    /* Keep the roomy Max-Payne-like chase distance through ordinary aiming,
+     * then ease toward a compact over-body/under-body orbit at steep pitch.
+     * The actual X/Z collapse now comes from cos(pitch), so the minimum boom
+     * only controls how far above/below the pivot the camera sits at vertical.
+     * This avoids the foot-level/top-edge framing produced by the old manual
+     * horizontal-collapse curves. */
+    blend = (pitchfactor - 0.36f) / 0.64f;
+    if (blend < 0.0f) blend = 0.0f;
+    if (blend > 1.0f) blend = 1.0f;
+    blend = blend * blend * (3.0f - 2.0f * blend);
+
+    if (pitch >= 0.0f)
+    {
+        /* Looking up: keep the same orbit whether Bond is standing or crouched. */
+        minboom = 54.0f;
+    }
+    else
+    {
+        /* Looking down: the camera should sit above Bond and fairly close,
+         * not hang high enough that only his feet occupy the top edge. */
+        minboom = 48.0f;
+    }
+
+    if (tankcamera)
+    {
+        /* Vehicle-combat framing: pull farther behind the tank than the normal
+         * on-foot chase camera.  Keep the view centred laterally so turret aim
+         * and reticle remain intuitive while the hull turns underneath it. */
+        boom = 384.0f;
+    }
+    else
+    {
+        f32 maxboom = (f32)TP_CAM_DISTANCE_DEFAULT + (f32)g_ModThirdPersonCameraDistanceAdjust;
+        boom = maxboom - (maxboom - minboom) * blend;
+    }
+
+    /* Stable standing-height eye/upper-torso pivot. Third Person crouching
+     * changes Bond's body pose, not the chase camera altitude. Keep first-person
+     * bob/head-roll and crouch eye-height changes out of this camera pivot,
+     * while retaining real player/Fly/No-Clipping Y movement through field_70. */
+    eyeheight = (g_playerPerm->player_perspective_height * 185.0f) - 10.0f;
+
+    if (eyeheight < 30.0f)
+    {
+        eyeheight = 30.0f;
+    }
+
+    anchor.f[0] = g_CurrentPlayer->field_488.collision_position.f[0];
+    anchor.f[2] = g_CurrentPlayer->field_488.collision_position.f[2];
+
+    if (tankcamera)
+    {
+        /* Use the tank/player collision centre for X/Z because it is the
+         * authoritative simulation point, then lift the camera pivot above the
+         * turret deck.  This avoids tying the view to transient model matrices. */
+        anchor.f[1] = g_CurrentPlayer->field_70 + 105.0f;
+    }
+    else
+    {
+        anchor.f[1] = g_CurrentPlayer->field_70 + eyeheight;
+    }
+
+    /* Optional TP Crouch Cam follows GoldenEye's already-smoothed crouch
+     * offset instead of snapping between posture states.  The configured
+     * crouched-camera height is scaled by that live posture fraction. */
+    if (!tankcamera && (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM))
+    {
+        f32 crouchfraction = 0.0f;
+
+        /* V40: define the tuner as the actual full-crouch camera drop instead
+         * of adding it on top of the first-person eye-height drop.  The old
+         * additive formulation made the authored default 54 almost cancel the
+         * crouch movement, which made the control appear ineffective.  Keep
+         * GoldenEye's smooth posture fraction, but apply one unambiguous value. */
+        if (FULL_CROUCH_OFFSET != 0.0f)
+            crouchfraction = g_CurrentPlayer->ducking_height_offset / FULL_CROUCH_OFFSET;
+        if (crouchfraction < 0.0f) crouchfraction = 0.0f;
+        if (crouchfraction > 1.0f) crouchfraction = 1.0f;
+        anchor.f[1] -= ((f32)TP_CROUCH_CAM_HEIGHT_DEFAULT
+            + (f32)g_ModThirdPersonCrouchCameraHeightAdjust) * crouchfraction;
+    }
+
+    /* Small pitch-dependent pivot trim only.  The orbit itself now supplies the
+     * large vertical motion.  Upward aim pivots slightly toward the shoulders;
+     * downward aim pivots a little above the head so Bond remains in frame. */
+    if (pitch >= 0.0f)
+    {
+        pivotshift = -6.0f * blend;
+    }
+    else
+    {
+        pivotshift = 7.0f * blend;
+    }
+
+    if (!tankcamera)
+    {
+        anchor.f[1] += (f32)TP_CAM_HEIGHT_DEFAULT + (f32)g_ModThirdPersonCameraHeightAdjust + pivotshift;
+    }
+
+    /* True 3D orbit/spring arm: camera = pivot - forward * boom. */
+    desired.f[0] = anchor.f[0] - forward.f[0] * boom;
+    desired.f[1] = anchor.f[1] - forward.f[1] * boom;
+    desired.f[2] = anchor.f[2] - forward.f[2] * boom;
+
+    /* TP Cam Horizontal is the saved/base shoulder value. B-then-L flips only
+     * its runtime sign and eases between shoulders; the EEPROM preference is
+     * never rewritten by the temporary swap. */
+    shoulderplayer = get_cur_playernum();
+    if (tankcamera)
+    {
+        horizontaloffset = 0.0f;
+    }
+    else if (shoulderplayer >= PLAYER_1 && shoulderplayer <= PLAYER_4)
+    {
+        if (!g_ModThirdPersonShoulderBlendValid[shoulderplayer])
+        {
+            g_ModThirdPersonShoulderBlend[shoulderplayer] = 1.0f;
+            g_ModThirdPersonShoulderBlendValid[shoulderplayer] = TRUE;
+        }
+
+        shouldertarget = g_ModThirdPersonShoulderSwapped[shoulderplayer] ? -1.0f : 1.0f;
+        shoulderstep = 0.12f * g_GlobalTimerDelta;
+        if (shoulderstep > 1.0f) shoulderstep = 1.0f;
+
+        if (g_ModThirdPersonShoulderBlend[shoulderplayer] < shouldertarget)
+        {
+            g_ModThirdPersonShoulderBlend[shoulderplayer] += shoulderstep;
+            if (g_ModThirdPersonShoulderBlend[shoulderplayer] > shouldertarget)
+                g_ModThirdPersonShoulderBlend[shoulderplayer] = shouldertarget;
+        }
+        else if (g_ModThirdPersonShoulderBlend[shoulderplayer] > shouldertarget)
+        {
+            g_ModThirdPersonShoulderBlend[shoulderplayer] -= shoulderstep;
+            if (g_ModThirdPersonShoulderBlend[shoulderplayer] < shouldertarget)
+                g_ModThirdPersonShoulderBlend[shoulderplayer] = shouldertarget;
+        }
+
+        horizontaloffset = ((f32)TP_CAM_HORIZONTAL_DEFAULT + (f32)g_ModThirdPersonCameraHorizontalAdjust)
+            * g_ModThirdPersonShoulderBlend[shoulderplayer];
+    }
+    else
+    {
+        horizontaloffset = (f32)TP_CAM_HORIZONTAL_DEFAULT + (f32)g_ModThirdPersonCameraHorizontalAdjust;
+    }
+
+    desired.f[0] += cosf(theta) * horizontaloffset;
+    desired.f[2] += sinf(theta) * horizontaloffset;
+
+    /* At a perfectly vertical look, the correct 3D orbit has zero horizontal
+     * X/Z separation from Bond.  That is geometrically correct but places the
+     * camera on the character body's centreline, where the near plane can enter
+     * Bond's head/torso.  Keep the true orbit, but fade in a small yaw-relative
+     * rear clearance only at steep pitch.  This behaves like a spring-arm socket
+     * offset: vertical aiming still moves the camera above/below Bond, while the
+     * endpoint stays just behind the visible body instead of inside it. */
+    /* Upward-only body clearance.  The true 3D orbit already produced the
+     * desired straight-down framing in the previous checkpoint.  Applying a
+     * yaw-relative socket offset while looking down displaced that otherwise
+     * correct overhead view, so preserve the original downward orbit exactly.
+     * Only steep upward pitch needs this extra rear clearance to keep the
+     * camera out of Bond's head/torso. */
+    if (tankcamera)
+    {
+        bodyclearance = 0.0f;
+        downframelift = 0.0f;
+    }
+    else if (pitch >= 0.0f)
+    {
+        bodyclearance = 28.0f * blend;
+        desired.f[0] += sinf(theta) * bodyclearance;
+        desired.f[2] -= cosf(theta) * bodyclearance;
+    }
+    else
+    {
+        /* Downward-only framing trim.  Near a vertical downward look, changing
+         * world Y mostly moves the camera along its viewing axis and therefore
+         * does very little to keep Bond inside the viewport.  Move the camera
+         * instead along its roll-free screen-up basis.  This lowers Bond in
+         * the rendered frame without changing the authoritative look vector,
+         * and fades in only with the existing steep-pitch blend so ordinary
+         * aiming is unaffected. */
+        downframelift = ((f32)TP_CAM_DOWN_FRAME_DEFAULT + (f32)g_ModThirdPersonCameraDownFrameAdjust) * blend;
+        desired.f[0] += sinf(theta) * pitchsin * downframelift;
+        desired.f[1] += pitchcos * downframelift;
+        desired.f[2] -= cosf(theta) * pitchsin * downframelift;
+    }
+
+    *campos = desired;
+
+    /* Camera pull-in must distinguish a real occluder from merely leaving
+     * walkable STAN.  Frigate's open deck edge is a valid place for the chase
+     * camera even though Bond cannot walk there.  Use the normal STAN/object
+     * query first because it is cheap and catches doors/props; if the failure
+     * is only a STAN edge, confirm it against actual 3D BG triangles. */
+    tile = g_CurrentPlayer->prop->stan;
+
+    if (tile != NULL)
+    {
+        s32 lineclear;
+        f32 hitfrac = 1.0f;
+        s32 realblock = FALSE;
+
+        lineclear = stanTestLineUnobstructed(&tile,
+            anchor.f[0], anchor.f[2], desired.f[0], desired.f[2],
+            CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER,
+            anchor.f[1], anchor.f[1], desired.f[1], desired.f[1]);
+
+        if (!lineclear && stanSavedColl_posData != NULL)
+        {
+            /* A prop/door/path blocker really intersects the 3D camera
+             * segment. stanSavedColl_someMin already contains the nearest
+             * segment fraction, so avoid the old eight-query binary search. */
+            hitfrac = stanSavedColl_someMin;
+            realblock = TRUE;
+        }
+
+        /* STAN collision is fundamentally X/Z walkability plus object tests.
+         * A steep Third Person spring arm can hit a ceiling, floor, overhang or
+         * wall even when its X/Z projection never leaves the current STAN.
+         * Therefore always trace the real 3D segment through rendered BG, not
+         * only after STAN reports a topology failure.  If both a door/prop and
+         * BG geometry block the arm, keep the nearest fraction. */
+        {
+            f32 bgfrac;
+
+            if (bondviewThirdPersonFindBackgroundHitFraction(&anchor, &desired, &bgfrac))
+            {
+                if (!realblock || bgfrac < hitfrac)
+                {
+                    hitfrac = bgfrac;
+                }
+                realblock = TRUE;
+            }
+        }
+
+        if (realblock)
+        {
+            /* Keep roughly the same safety margin as the previous spring-arm
+             * binary search, but apply it to the actual collision fraction. */
+            hitfrac -= 0.14f;
+
+            if (hitfrac < 0.18f)
+            {
+                hitfrac = 0.18f;
+            }
+            else if (hitfrac > 1.0f)
+            {
+                hitfrac = 1.0f;
+            }
+
+            g_ThirdPersonCameraPulledInByCollision = TRUE;
+
+            campos->f[0] = anchor.f[0] + (desired.f[0] - anchor.f[0]) * hitfrac;
+            campos->f[1] = anchor.f[1] + (desired.f[1] - anchor.f[1]) * hitfrac;
+            campos->f[2] = anchor.f[2] + (desired.f[2] - anchor.f[2]) * hitfrac;
+        }
+    }
+
+    camlook->f[0] = forward.f[0];
+    camlook->f[1] = forward.f[1];
+    camlook->f[2] = forward.f[2];
+
+    /* Roll-free up vector valid across the full pitch range. */
+    camup->f[0] = sinf(theta) * pitchsin;
+    camup->f[1] = pitchcos;
+    camup->f[2] = -cosf(theta) * pitchsin;
+}
+#endif
+
 /**
  * Address: 7F087A08
  */
@@ -8486,6 +9925,9 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
     f32 angle;
     f32 vertical_rot;
     f32 ft4;
+#ifdef GE_MODDED_CHEATS
+    s32 thirdpersonplayer;
+#endif
 
 #if defined(VERSION_EU)
     if (bossGetStageNum() == LEVELID_CUBA)
@@ -8511,6 +9953,29 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
     }
 #endif
 
+#ifdef GE_MODDED_CHEATS
+    thirdpersonplayer = get_cur_playernum();
+
+    if (thirdpersonplayer >= PLAYER_1 && thirdpersonplayer <= PLAYER_4)
+    {
+        /* Invalidate before deciding which camera owns this viewport so no
+         * stale TP endpoint can leak into a pause/cutscene/FP frame. */
+        g_ModThirdPersonRenderedCameraValid[thirdpersonplayer] = FALSE;
+    }
+
+    if (bondviewThirdPersonPresentationActive(thirdpersonplayer)) {
+        bondviewGetThirdPersonCamera(&cam_pos, &cam_look, &cam_up);
+
+        if (thirdpersonplayer >= PLAYER_1 && thirdpersonplayer <= PLAYER_4)
+        {
+            /* Save the exact endpoint BEFORE building the matrices below.
+             * skyRender/bg visibility occur later in this same viewport pass
+             * and must use the identical camera origin. */
+            g_ModThirdPersonRenderedCameraPos[thirdpersonplayer] = cam_pos;
+            g_ModThirdPersonRenderedCameraValid[thirdpersonplayer] = TRUE;
+        }
+    } else
+#endif
     if (g_CurrentPlayer->cameramode == 1) {
         cam_pos.x = g_CurrentPlayer->pos.x;
         cam_pos.y = g_CurrentPlayer->pos.y;
@@ -8563,13 +10028,46 @@ Gfx *bondviewRenderDebugBondView(Gfx *gdl)
     if (ft4 >= M_PI_F) {
         ft4 -= M_TAU_F;
     }
-    g_CurrentPlayer->field_2A08 = ft4;
+#ifdef GE_MODDED_CHEATS
+    if (bondviewThirdPersonPresentationActive(get_cur_playernum()))
+    {
+        f32 manualx = g_CurrentPlayer->crosshair_x_pos;
+        f32 manualy = g_CurrentPlayer->crosshair_y_pos;
 
-    angle = atan2f(-vec.x, -vec.z);
-    if (angle >= M_PI_F) {
-        angle -= M_TAU_F;
+        /* Do not derive the visible body's local twist from the chase-camera
+         * world ray.  The camera is intentionally offset behind Bond, so that
+         * ray can differ from Bond's facing by a very large angle and
+         * aimendsideback will fold the entire torso sideways.
+         *
+         * Third Person instead uses Bond's authoritative look pitch plus a
+         * small, bounded manual-aim contribution from the screen reticle.
+         * Horizontal manual aim is likewise a bounded local body offset.
+         * GoldenEye's chr aim code expects these to be modest local angles. */
+        if (manualx > 1.0f) manualx = 1.0f;
+        if (manualx < -1.0f) manualx = -1.0f;
+        if (manualy > 1.0f) manualy = 1.0f;
+        if (manualy < -1.0f) manualy = -1.0f;
+
+        ft4 = bondviewGetPlayerPitchRadians() - manualy * 0.35f;
+        if (ft4 > 1.40f) ft4 = 1.40f;
+        if (ft4 < -1.40f) ft4 = -1.40f;
+
+        angle = -manualx * 0.35f;
+
+        g_CurrentPlayer->field_2A08 = ft4;
+        g_CurrentPlayer->field_2A0C = angle;
     }
-    g_CurrentPlayer->field_2A0C = angle;
+    else
+#endif
+    {
+        g_CurrentPlayer->field_2A08 = ft4;
+
+        angle = atan2f(-vec.x, -vec.z);
+        if (angle >= M_PI_F) {
+            angle -= M_TAU_F;
+        }
+        g_CurrentPlayer->field_2A0C = angle;
+    }
 
     return gdl;
 }
@@ -8918,10 +10416,19 @@ void mp_respawn_handler(void)
 
     intro_record = g_CurrentSetup.intro;
 
+#ifdef GE_MODDED_CHEATS
+    /* Respawn is a new life.  Drop every per-life tank pointer/latch before
+     * reinitialising Bond so a destroyed/reconfigured Runway tank cannot be
+     * reached through stale sidecar state on the first spawn tick. */
+    playerCoopTankResetCurrentPlayerForRespawn();
+#endif
     init_player_BONDdata();
     bondviewPlayerBeginLife();
 
     g_CurrentPlayer->bonddead = 0;
+#ifdef GE_MODDED_CHEATS
+    playerCoopTankShowDriverCurrentPlayer();
+#endif
     g_CurrentPlayer->deathanimfinished = 0;
     g_CurrentPlayer->redbloodfinished = 0;
     g_CurrentPlayer->startnewbonddie = 1;
@@ -9222,6 +10729,30 @@ Gfx *bondviewRenderCredits(Gfx *gdl)
 }
 
 
+#ifdef GE_MODDED_CHEATS
+static Gfx *bondviewThirdPersonPrepareHud2D(Gfx *gdl)
+{
+    if (bondviewThirdPersonPresentationActive(get_cur_playernum()))
+    {
+        /* Third Person renders real world-space body/weapon/casing geometry
+         * immediately before the HUD.  Do not let any Z-buffered RSP/RDP state
+         * from that world pass leak into screen-space HUD rendering. */
+        gDPPipeSync(gdl++);
+        /* Background/portal and world-effect renderers use temporary scissor
+         * rectangles.  Third Person can finish its chase-camera world pass
+         * with one of those room/portal clips still active, which cuts the HUD
+         * off at a doorway/wall-shaped screen boundary.  Restore the complete
+         * current-player viewport before every TP HUD phase. */
+        gdl = bgScissorCurrentPlayerViewDefault(gdl);
+        gSPClearGeometryMode(gdl++, G_ZBUFFER);
+        gdl = microcode_constructor(gdl);
+    }
+
+    return gdl;
+}
+#endif
+
+
 Gfx *maybe_mp_interface(Gfx *gdl)
 {
     s32 ulx;
@@ -9251,8 +10782,34 @@ Gfx *maybe_mp_interface(Gfx *gdl)
 
     gunUpdateAndFireBothHands();
     gunRenderCasings(&gdl);
+#ifdef GE_MODDED_CHEATS
+    /* Third Person's sight is real world geometry.  Render it at the end of
+     * the world/effects phase while the scene Z buffer is still authoritative.
+     * The local Bond body has already contributed depth, so Bond/weapon/world
+     * geometry naturally cover the reticle without a late body redraw. */
+    if (bondviewThirdPersonPresentationActive(get_cur_playernum()))
+    {
+        /* Portal traversal may leave a room-sized RDP scissor active.  The TP
+         * world reticle belongs to the full player viewport, while its actual
+         * visibility is decided by Z rather than by the last portal rectangle. */
+        gdl = bgScissorCurrentPlayerViewDefault(gdl);
+        gunRenderThirdPersonWorldSight(&gdl);
+    }
+    else
+#endif
     gunRenderFirstPersonGunModels(&gdl);
+#ifdef GE_MODDED_CHEATS
+    /* Everything after the world-space casing/gun/reticle phase is HUD/foreground.
+     * Establish TP's depth-independent HUD state before the Watch/gauges, not
+     * only at the much later reticle/ammo pass. */
+    gdl = bondviewThirdPersonPrepareHud2D(gdl);
+#endif
     gdl = bondviewRenderWatch(gdl);
+#ifdef GE_MODDED_CHEATS
+    /* The Watch itself renders a foreground 3D model and can change pipeline
+     * state.  Reassert 2D HUD state before gauges/objective/status overlays. */
+    gdl = bondviewThirdPersonPrepareHud2D(gdl);
+#endif
 
     if (g_CurrentPlayer->mpmenuon != 0)
     {
@@ -9410,6 +10967,11 @@ Gfx *maybe_mp_interface(Gfx *gdl)
         }
     }
 
+#ifdef GE_MODDED_CHEATS
+    /* Death/blood/watch presentation above can also touch render state.  Make
+     * the text/message phase explicitly depth-independent in TP. */
+    gdl = bondviewThirdPersonPrepareHud2D(gdl);
+#endif
     bondviewIntroCameraTextTick();
     gdl = hudmsgBottomRender(gdl);
     bondviewUpperTextWindowTimerTick();
@@ -9421,7 +10983,19 @@ Gfx *maybe_mp_interface(Gfx *gdl)
     if (!(get_scenario() == SCENARIO_COOP && g_CurrentPlayer->mpmenuon))
     {
 #endif
-        gunDrawSight(&gdl);
+#ifdef GE_MODDED_CHEATS
+        if (bondviewThirdPersonPresentationActive(get_cur_playernum()))
+        {
+            /* The TP sight was already rendered as Z-tested world geometry.
+             * Do not draw a second HUD reticle or redraw Bond here.  Retain the
+             * V60 scissor/Z reset so ammo/radar remain pure screen-space HUD. */
+            gdl = bondviewThirdPersonPrepareHud2D(gdl);
+        }
+        else
+#endif
+        {
+            gunDrawSight(&gdl);
+        }
         gdl = generate_ammo_total_microcode(gdl);
         gdl = display_red_blue_on_radar(gdl);
 #ifdef GE_MODDED_CHEATS
@@ -9534,6 +11108,19 @@ void bondviewKillCurrentPlayer(void)
         }
 #endif
         g_CurrentPlayer->bonddead = 1;
+
+#ifdef GE_MODDED_CHEATS
+        /* Campaign Co-Op: a dead tank driver must stop owning/driving the
+         * shared tank immediately, but the body must remain hidden until the
+         * actual respawn so no corpse/legs appear through the vehicle. */
+        if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP
+            && g_PlayerIsInTank != 0)
+        {
+            playerCoopTankHideDriverUntilRespawnCurrentPlayer();
+            g_PlayerIsInTank = 0;
+            playerCoopTankReleaseCurrentPlayer();
+        }
+#endif
 
 #ifdef GE_MODDED_CHEATS
         /* RC5: Real-Time Collapse changes only animation playback speed.
@@ -9766,12 +11353,15 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 #undef ZERO_7F08991C
 
 #if defined(VERSION_EU) || defined(VERSION_JP)
-                if (!lvlGetControlsLockedFlag())
+                if (!lvlGetControlsLockedFlag() && cur_player_get_damage_sound_setting())
                 {
                     sndPlaySfx(g_musicSfxBufferPtr, BOND_GET_HIT1_SFX, 0);
                 }
 #else
-                sndPlaySfx(g_musicSfxBufferPtr, BOND_GET_HIT1_SFX, 0);
+                if (cur_player_get_damage_sound_setting())
+                {
+                    sndPlaySfx(g_musicSfxBufferPtr, BOND_GET_HIT1_SFX, 0);
+                }
 #endif
             }
         }
@@ -10679,18 +12269,30 @@ s32 playerTick(PropRecord *prop)
     s32 i;
     s32 found;
     s32 cur;
+#ifdef GE_MODDED_CHEATS
+    s32 tpdeathanim;
+    s32 tpdeathflip;
+#endif
     PropRecord *rightprop;
     struct WeaponObjRecord *leftobj;
     struct WeaponObjRecord *rightobj;
     s32 setanim;
     struct player **ppointers;
+#ifdef GE_MODDED_CHEATS
+    s32 tp_use_player_y;
+    s32 tp_use_supported_y;
+#endif
  
     index = getPlayerPointerIndex(prop);
     chr = prop->chr;
  
     if (chr != NULL)
     {
-        if (get_player_position_in_shuffled(get_cur_playernum()) == 0)
+        if (get_player_position_in_shuffled(get_cur_playernum()) == 0
+#ifdef GE_MODDED_CHEATS
+            || (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+#endif
+        )
         {
             chr->hidden &= ~CHRHIDDEN_FREEZE;
         }
@@ -10698,7 +12300,17 @@ s32 playerTick(PropRecord *prop)
  
     if (chr != NULL)
     {
-        if ((g_playerPointers[index]->bodyModel != NULL) && (!(get_debug_render_raster() && (g_playerPointers[index]->cameramode != 1))))
+        if ((g_playerPointers[index]->bodyModel != NULL)
+#ifdef GE_MODDED_CHEATS
+            /* A live local Third Person body must be presentation-only.
+             * Do not enter GoldenEye's external/current-player chr-body path
+             * here: that path copies prop->pos back into field_488 and can
+             * undo the movement that MoveBond just committed.  Instead let
+             * the local Third Person player fall through to the same visible
+             * body path used for remote multiplayer players below. */
+            && !bondviewThirdPersonPresentationActive(index)
+#endif
+            && (!(get_debug_render_raster() && (g_playerPointers[index]->cameramode != 1))))
         {
             g_playerPointers[index]->field_AC = 0;
             ret = chrTick(prop);
@@ -10733,20 +12345,81 @@ s32 playerTick(PropRecord *prop)
         goto clear_and_return;
     }
 
-    if (getPlayerCount() < 2)
+    if (getPlayerCount() < 2
+#ifdef GE_MODDED_CHEATS
+        && !bondviewThirdPersonPresentationActive(index)
+#endif
+    )
     {
         goto clear_and_return;
     }
 
-    if (get_cur_playernum() == index)
+    if (get_cur_playernum() == index
+#ifdef GE_MODDED_CHEATS
+        && !bondviewThirdPersonPresentationActive(index)
+#endif
+    )
     {
         goto clear_and_return;
     }
  
     anim = 0;
+#ifdef GE_MODDED_CHEATS
+    tpdeathanim = 0;
+    tpdeathflip = 0;
+#endif
     firingtable = NULL;
     local90 = -1.0f;
     frame = -1;
+#ifdef GE_MODDED_CHEATS
+    /* The stock multiplayer path normally keeps remote player chr weapon props
+     * in sync during the first-person gun raise/lower sequence.  A local player
+     * rendered through the remote-body path for Plus Third Person can enter with
+     * the weapon that was attached when the body was created and then miss a
+     * later attachment update.  Reconcile the visible body's held props against
+     * the authoritative per-hand weapon ids.  Removal is deferred through the
+     * normal RUNTIMEBITFLAG_REMOVE path; creation happens once the old prop has
+     * actually been released. */
+    if (modThirdPersonActive(index) && get_cur_playernum() == index)
+    {
+        s32 hand;
+
+        for (hand = GUNRIGHT; hand <= GUNLEFT; hand++)
+        {
+            ITEM_IDS desireditem = getCurrentPlayerWeaponId(hand);
+            PROP desiredprop = getPropForHeldItem(desireditem);
+            PropRecord *heldprop = chrGetEquippedWeaponProp(chr, hand);
+
+            if (heldprop != NULL)
+            {
+                if (desiredprop < 0
+                    || heldprop->weapon == NULL
+                    || heldprop->weapon->weaponnum != desireditem)
+                {
+                    chrSetWeaponFlag4(chr, hand);
+                }
+            }
+            else if (desiredprop >= 0)
+            {
+                s32 flags = hand == GUNLEFT ? PROPFLAG_WEAPON_LEFTHANDED : 0;
+#if defined(GE_PHYSICAL_FASTPATHS)
+                if (getPlayerCount() == 1)
+                {
+                    bondviewCreateThirdPersonCachedWeapon(chr, hand, desiredprop, desireditem, flags);
+                }
+                else
+#endif
+                {
+                    /* Split-screen bodies are simultaneously live.  Keep the
+                     * stock persistent path there until a per-player TP cache
+                     * reservation is added; sharing these two slots would let
+                     * one viewport overwrite another player's live model. */
+                    something_with_generating_object(chr, desiredprop, desireditem, flags, NULL, NULL);
+                }
+            }
+        }
+    }
+#endif
     leftprop = chrGetEquippedWeaponProp(chr, GUNLEFT);
     rightprop = chrGetEquippedWeaponProp(chr, GUNRIGHT);
     leftobj = NULL;
@@ -10764,8 +12437,49 @@ s32 playerTick(PropRecord *prop)
     }
  
     ppointers = g_playerPointers;
+#ifdef GE_MODDED_CHEATS
+    /* Perfect Dark-style player-body vertical ownership.  The later Rare
+     * engine does not let a visible multiplayer body independently resample
+     * its own floor: player movement owns both detected support and smoothed
+     * feet height continuously, and the chr body consumes those two values.
+     *
+     * GoldenEye's old remote-body path forcing CHRFLAG_INIT every frame is
+     * normally harmless because the game was not designed around sustained
+     * verticality.  At a ledge edge, however, the body STAN can switch to the
+     * lower polygon one frame before/after MoveBond's collision-radius support
+     * state.  Reinitialising manground from that raw body STAN creates the
+     * one-frame upper/lower-floor teleport seen while hanging over an edge.
+     *
+     * Make player movement the sole Y authority for every live split-screen
+     * body (and the local Third Person presentation body), not only while the
+     * two heights happen to differ. */
+    tp_use_player_y = FALSE;
+    tp_use_supported_y = FALSE;
+
+    /* Standing on the tank remains a distinct grounded support state. */
+    if (playerCoopTankStandingOnTank(index))
+    {
+        tp_use_supported_y = TRUE;
+    }
+    else if ((g_CameraMode == CAMERAMODE_NONE
+            || g_CameraMode == CAMERAMODE_FP
+            || g_CameraMode == CAMERAMODE_MP)
+        && (getPlayerCount() >= 2 || bondviewThirdPersonPresentationActive(index)))
+    {
+        /* This vertical ownership is for live gameplay bodies only.  A TP
+         * option can remain latched while POSEND/intro cameras own a freshly
+         * rebuilt cinematic Bond body; letting the live-body ground/manground
+         * override leak into that first cinematic tick is what made Bond begin
+         * some cutscenes visibly suspended above the floor. */
+        tp_use_player_y = TRUE;
+    }
+#endif
  
-    if (get_player_position_in_shuffled(get_cur_playernum()) == 0)
+    if (get_player_position_in_shuffled(get_cur_playernum()) == 0
+#ifdef GE_MODDED_CHEATS
+        || (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+#endif
+    )
     {
         g_PlayerTickCount = g_PlayerTickCount + 1;
     }
@@ -10785,26 +12499,67 @@ s32 playerTick(PropRecord *prop)
         if (ppointers[index]->bonddead != FALSE)
         {
             found = 0;
- 
-            for (i = 0; i < g_bondviewBondDeathAnimationsCount; i++)
+#ifdef GE_MODDED_CHEATS
+            /* V30D: In single-player Stay-In-TP death, the visible chase-body
+             * must replay the exact death animation already chosen by Bond's
+             * authoritative first-person/head model.  The stock remote-body
+             * path below otherwise rolls a second random death animation, so
+             * the live TP collapse can visibly disagree with the later retail
+             * death-camera replay (which copies g_CurrentPlayer->model). */
+            if (gamemode != GAMEMODE_MULTI
+                && getPlayerCount() == 1
+                && get_cur_playernum() == index
+                && modThirdPersonActive(index)
+                && modStayInTpOnDeath(index))
             {
-                cur = ppointers[index]->players_cur_animation;
- 
-                if (cur == (g_bondviewBondDeathAnimations[i] + ((s32) ptr_animation_table)))
+                tpdeathanim = (s32)objecthandlerGetModelAnim((Model *)&ppointers[index]->model);
+
+                for (i = 0; i < g_bondviewBondDeathAnimationsCount; i++)
                 {
-                    found = 1;
+                    if (tpdeathanim == (g_bondviewBondDeathAnimations[i] + (s32)ptr_animation_table))
+                    {
+                        found = 1;
+                        break;
+                    }
+                }
+
+                if (found)
+                {
+                    anim = tpdeathanim;
+                    tpdeathflip = objecthandlerGetModelGunhand((Model *)&ppointers[index]->model);
+                    /* Mirror the authoritative head model's *actual* animation
+                     * speed as well as its animation/flip.  bheadSetSpeed(0.5)
+                     * maps to Model.speed 0.25 in retail, while Real-Time
+                     * Collapse maps to 0.5.  Using remote-player speeds here
+                     * (0.5/1.0) makes the visible TP collapse run exactly 2x
+                     * too fast. */
+                    angle = modelGetAnimSpeed((Model *)&ppointers[index]->model);
                 }
             }
- 
-            if (found)
+#endif
+
+            if (!found)
             {
-                anim = ppointers[index]->players_cur_animation;
-                angle = 0.5f;
-            }
-            else
-            {
-                anim = g_bondviewBondDeathAnimations[randomGetNext() % g_bondviewBondDeathAnimationsCount] + ((s32) ptr_animation_table);
-                angle = 0.5f;
+                for (i = 0; i < g_bondviewBondDeathAnimationsCount; i++)
+                {
+                    cur = ppointers[index]->players_cur_animation;
+
+                    if (cur == (g_bondviewBondDeathAnimations[i] + ((s32) ptr_animation_table)))
+                    {
+                        found = 1;
+                    }
+                }
+
+                if (found)
+                {
+                    anim = ppointers[index]->players_cur_animation;
+                    angle = 0.5f;
+                }
+                else
+                {
+                    anim = g_bondviewBondDeathAnimations[randomGetNext() % g_bondviewBondDeathAnimationsCount] + ((s32) ptr_animation_table);
+                    angle = 0.5f;
+                }
             }
  
             cur = ppointers[index]->players_cur_animation;
@@ -11040,7 +12795,13 @@ join_768:
             if (ppointers[index]->bodyModel->anim2 == NULL)
             {
                 startframe = (0.0f <= frame) ? (frame) : (0.0f);
-                modelSetAnimation(ppointers[index]->bodyModel, (ModelAnimation *) anim, 0, startframe, angle, 16.0f);
+                modelSetAnimation(ppointers[index]->bodyModel, (ModelAnimation *) anim,
+#ifdef GE_MODDED_CHEATS
+                    tpdeathflip,
+#else
+                    0,
+#endif
+                    startframe, angle, 16.0f);
                 ppointers[index]->players_cur_animation = anim;
                 ppointers[index]->field_1288 = angle;
  
@@ -11074,13 +12835,13 @@ join_768:
             {
                 chr->hidden &= ~CHRHIDDEN_0400;
 #ifdef GE_MODDED_CHEATS
-                /* R5: retail multiplayer aiming is authored for one visible gun:
-                 * the right shoulder receives the full vertical aim while the
-                 * left shoulder receives a scaled companion value.  With two
-                 * equipped guns that makes the left gun lag/diverge when the
-                 * player looks far up or down.  In the dual-wield group feed
-                 * the same full aim value to both shoulders so the left gun
-                 * follows the right gun exactly. */
+                /* GoldenEye multiplayer already has the correct authored
+                 * two-handed support-arm behaviour here.  Feed Third Person's
+                 * safe local pitch into the stock firing-table solver rather
+                 * than overriding the shoulder joints manually.  This keeps
+                 * rifles/shotguns latched to the support hand exactly like
+                 * unmodified multiplayer.  Preserve the R5 dual-wield extension
+                 * by requesting equal shoulder pitch only for group 3. */
                 chrlvUpdateAimendbackShoulders(chr, firingtable, group == 3, 1, local8c);
 #else
                 chrlvUpdateAimendbackShoulders(chr, firingtable, 0, 1, local8c);
@@ -11106,18 +12867,61 @@ join_768:
  
     getsuboffset(chr->model, &off);
     off.x = prop->pos.x;
+#ifdef GE_MODDED_CHEATS
+    /* Perfect Dark's player_tick_third_person preserves the model root Y and
+     * updates only root X/Z.  Vertical placement is then expressed through
+     * the separate player-owned ground/manground pair consumed by chrTick.
+     *
+     * Do the same for ordinary live player bodies here.  Forcing root Y to
+     * field_70 as well as supplying manground=field_70 applies the vertical
+     * solution twice around landing/support transitions and can put the model
+     * through the floor.  The tank deck remains the one explicit support case
+     * where the model root is positioned directly on the moving platform. */
+    if (tp_use_supported_y)
+    {
+        off.y = ppointers[index]->field_70;
+    }
+#endif
     off.z = prop->pos.z;
     setsuboffset(chr->model, &off);
     setsubroty(chr->model, (((360.0f - ppointers[index]->vv_theta) + ppointers[index]->field_1280) * M_TAU_F) / 360.0f);
  
-    chr->chrflags |= CHRFLAG_INIT;
+#ifdef GE_MODDED_CHEATS
+    if (tp_use_player_y)
+    {
+        /* Player movement owns vertical state continuously.  Never re-arm the
+         * stock remote-body INIT snap just because the two player heights have
+         * temporarily converged. */
+        chr->chrflags &= ~CHRFLAG_INIT;
+        chr->ground = ppointers[index]->stanHeight;
+        chr->manground = ppointers[index]->field_70;
+        chr->sumground = chr->manground / 0.100000024f;
+    }
+    else
+#endif
+    {
+        chr->chrflags |= CHRFLAG_INIT;
+    }
+
     chr->actiontype = ACT_BONDMULTI;
     chr->act_bondmulti.unk2c = (f32 *) firingtable;
  
     chrSetFiring(chr, GUNRIGHT, ppointers[index]->hands[GUNRIGHT].field_87D);
     chrSetFiring(chr, GUNLEFT, ppointers[index]->hands[GUNLEFT].field_87D);
- 
+
     tailret = chrTick(prop);
+
+#ifdef GE_MODDED_CHEATS
+    if (tp_use_player_y)
+    {
+        /* chrTick may animate attachments, but it must not become a second
+         * floor solver for a player body.  Reassert the two movement-owned
+         * vertical values for the next viewport/tick. */
+        chr->ground = ppointers[index]->stanHeight;
+        chr->manground = ppointers[index]->field_70;
+        chr->sumground = chr->manground / 0.100000024f;
+    }
+#endif
  
     for (i = 0; i != 2; i++)
     {
@@ -11167,6 +12971,17 @@ Gfx * bondviewRemoved7F08BCB8(Gfx *arg0)
  */
 Gfx *bondviewRenderProp(PropRecord *arg0, Gfx *arg1, s32 arg2)
 {
+#ifdef GE_MODDED_CHEATS
+    /* Campaign Co-Op tank drivers are physically inside the vehicle.  Do not
+     * submit their character model at all while driving (or after a tank-death
+     * until respawn).  This is cheaper and more deterministic than drawing a
+     * fully transparent model, and it applies identically from every viewport. */
+    if (arg0 != NULL && playerCoopTankBodyHidden(getPlayerPointerIndex(arg0)))
+    {
+        return arg1;
+    }
+#endif
+
     if (arg0->chr != NULL)
     {
         arg1 = chrRenderProp(arg0, arg1, arg2);

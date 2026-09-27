@@ -2,6 +2,7 @@
 #include <ultra64.h>
 #include <bondgame.h>
 #include <bondconstants.h>
+#include <boss.h>
 #include <joy.h>
 #include <music.h>
 #include <snd.h>
@@ -15,9 +16,13 @@
 #include "gun.h"
 #include "language.h"
 #include "objecthandler.h"
+#include "objective_status.h"
 #include "player.h"
 #include "assets/obseg/text/LmiscE.h"
 #include "model.h"
+#ifdef GE_MODDED_CHEATS
+#include "mirroredlevels.h"
+#endif
 
 //#include "chraicommands.h" /* needed for ai list commands, remove when moving global ai lists to chraicommands/chrai */
 // bss
@@ -764,11 +769,64 @@ CheatInfo g_CheatInfo[] = {
     /* R17 No Reload: toggleable globally in SP/MP; no button-code sequence. */
     {              CHEAT_NO_RELOAD,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
     {             CHEAT_RAPID_FIRE,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {            CHEAT_NO_CLIPPING,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {               CHEAT_FLY_MODE,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {     CHEAT_KINETIC_EXPLOSIONS,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {             CHEAT_SUPER_TANK,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {        CHEAT_MIRRORED_LEVELS,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
 #endif
     {0}
 };
 
 
+
+#ifdef GE_MODDED_CHEATS
+void cheatModRunInGameAction(s32 action)
+{
+    if (action == 0)
+    {
+        g_CurrentPlayer->bondhealth = 1.0f;
+    }
+    else if (action == 1)
+    {
+        g_CurrentPlayer->bondarmour = 1.0f;
+    }
+    else if (action == 2)
+    {
+        g_CheatActivated[CHEAT_FAST_ANIMATION] = g_CheatActivated[CHEAT_SLOW_ANIMATION] = 0;
+        setAnimationRate(1.0f);
+    }
+    else if (action == 3)
+    {
+        /* Action-style in-game cheat, matching Full Health/Full Armor/
+         * Normal Animation.  It is deliberately not an On/Off toggle: one
+         * activation completes all applicable objectives for this mission. */
+        set_debug_all_obj_complete_flag(TRUE);
+
+        /* The override itself is mission-global.  Refresh the shared objective
+         * cache immediately so a Co-Op activation from P2/P3/P4 updates every
+         * player's objective HUD/watch state in the same frame rather than
+         * waiting for P1's next objective-status tick. */
+        display_objective_status_text_on_status_change();
+    }
+    else if (action == 4)
+    {
+        /* Complete Mission: ACTIVATE-style shortcut.  Make the mission a
+         * clean success and intentionally preserve the normal progression and
+         * target-time reward path.  Zero the mission timer so the ordinary
+         * end-of-mission code can award the stage's target-time cheat. */
+        if (gamemode != GAMEMODE_MULTI || get_scenario() == SCENARIO_COOP)
+        {
+            set_debug_all_obj_complete_flag(TRUE);
+            mission_failed_or_aborted = FALSE;
+            g_isBondKIA = FALSE;
+            g_AppendCheatSinglePlayer = FALSE;
+            mission_timer = 0;
+            bossReturnTitleStage();
+        }
+    }
+}
+#endif
 
 // rodata
 
@@ -1137,6 +1195,12 @@ void cheatButtonHandleCheatsTurnedOn(CHEAT_ID cheat_id)
             /* Magazine consumption is suppressed at the firing/throwing sites. */
             return;
         case CHEAT_RAPID_FIRE:
+        case CHEAT_FLY_MODE:
+        case CHEAT_KINETIC_EXPLOSIONS:
+        case CHEAT_SUPER_TANK:
+            return;
+        case CHEAT_MIRRORED_LEVELS:
+            mirrorLevelsSetEnabled(TRUE);
             return;
 #endif
 
@@ -1520,6 +1584,12 @@ void cheatButtonHandleCheatsTurnedOff(CHEAT_ID cheat_id)
         case CHEAT_NO_RELOAD:
             return;
         case CHEAT_RAPID_FIRE:
+        case CHEAT_FLY_MODE:
+        case CHEAT_KINETIC_EXPLOSIONS:
+        case CHEAT_SUPER_TANK:
+            return;
+        case CHEAT_MIRRORED_LEVELS:
+            mirrorLevelsSetEnabled(FALSE);
             return;
 #endif
 
@@ -1700,7 +1770,11 @@ char *cheatGetMenuTextPointer(CHEAT_ID cheat_id)
  */
 bool cheatIsActive(CHEAT_ID cheat)
 {
+#ifdef GE_PHYSICAL_FASTPATHS
+    return ((bool) (u8) g_CheatPlayerTextRelated[cheat] >> (modMicroOptimizationsEnabled() ? player_num : get_cur_playernum())) & 1;
+#else
     return ((bool) (u8) g_CheatPlayerTextRelated[cheat] >> get_cur_playernum()) & 1;
+#endif
 }
 
 

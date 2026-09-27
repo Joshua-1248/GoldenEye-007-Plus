@@ -14,6 +14,14 @@
 static s16 g_MissionItemQueuedItem[4];
 static s16 g_MissionItemQueuedIndex[4];
 static u8 g_MissionItemQueueValid[4];
+/* True while the player is logically browsing the mission-item tail, including
+ * the short weapon-switch window after pressing A to leave a gadget. This lets
+ * A-then-B reclaim that switch and continue from the gadget that was actually
+ * selected instead of restarting from the weapon-list cursor after SWITCH_SWAP. */
+static u8 g_MissionItemModeActive[4];
+#define MISSION_ITEM_QUEUE_NONE      0
+#define MISSION_ITEM_QUEUE_REDIRECT  1
+#define MISSION_ITEM_QUEUE_WAIT_DRAW 2
 
 /* Campaign Co-Op mission inventory is team-owned.  Keep prop references in
  * stage lifetime storage so a death/respawn inventory rebuild cannot lose a
@@ -31,9 +39,18 @@ void bondinvResetCoopSharedProps(void)
 
 void bondinvShareCoopItem(ITEM_IDS item)
 {
-    s32 savedplayer = get_cur_playernum();
+    s32 savedplayer;
     s32 i;
 
+    /* Mission gadgets/keys are team state in campaign Co-Op.  Keep this
+     * operation idempotent because the central inventory grant path calls it
+     * as well as a few older pickup-specific paths. */
+    if (item < 0 || item >= ITEM_IDS_MAX || g_CoopSharedItems[item])
+    {
+        return;
+    }
+
+    savedplayer = get_cur_playernum();
     g_CoopSharedItems[item] = TRUE;
 
     for (i = 0; i < getPlayerCount(); i++)
@@ -102,6 +119,22 @@ static s32 bondinvHandIsSwitching(enum GUNHAND hand)
         || state == GUN_ANIM_STATE_SWITCH_HOLD
         || state == GUN_ANIM_STATE_SWITCH_RAISE;
 }
+
+s32 bondinvWeaponSwitchInProgress(void)
+{
+    return bondinvHandIsSwitching(GUNRIGHT) || bondinvHandIsSwitching(GUNLEFT);
+}
+
+static s32 bondinvHandHasPassedRedirectWindow(enum GUNHAND hand)
+{
+    s32 state = g_CurrentPlayer->hands[hand].weapon_action_state;
+
+    /* Once SWITCH_HOLD has installed the newly selected weapon, preserve the
+     * normal draw. A gadget request arriving this late waits until that draw
+     * completes instead of replacing the weapon out from under the raise. */
+    return state == GUN_ANIM_STATE_SWITCH_HOLD
+        || state == GUN_ANIM_STATE_SWITCH_RAISE;
+}
 #endif
 
 void bondinvReinitInv(void)
@@ -121,6 +154,7 @@ void bondinvReinitInv(void)
     if (get_cur_playernum() >= 0 && get_cur_playernum() < 4)
     {
         g_MissionItemQueueValid[get_cur_playernum()] = FALSE;
+        g_MissionItemModeActive[get_cur_playernum()] = FALSE;
     }
 
     /* On a Co-Op respawn, restore every team-owned mission prop.  At initial
@@ -450,8 +484,32 @@ int bondinvAddInvItem(ITEM_IDS item)
             return FALSE;
 #endif
         }
+#ifdef GE_MODDED_CHEATS
+        /* Do not rely on a particular pickup/setup path to remember Co-Op
+         * sharing.  A mission script can grant gadgets directly through this
+         * function (Facility's Door Decoder is the important regression case).
+         * The share helper marks the item before granting it to teammates, so
+         * the recursive bondinvAddInvItem calls stop here safely. */
+        if (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1
+            && item >= ITEM_BOMBCASE && item <= ITEM_KEYBOLT
+            && !g_CoopSharedItems[item])
+        {
+            bondinvShareCoopItem(item);
+        }
+#endif
         return TRUE;
     }
+#ifdef GE_MODDED_CHEATS
+    /* A setup can grant an item the current player already owns.  Still make
+     * that grant authoritative team state so another active Co-Op player
+     * cannot miss the mission gadget. */
+    if (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1
+        && item >= ITEM_BOMBCASE && item <= ITEM_KEYBOLT
+        && !g_CoopSharedItems[item])
+    {
+        bondinvShareCoopItem(item);
+    }
+#endif
     return FALSE;
 }
 
@@ -852,17 +910,42 @@ void bondinvCycleBackward(s32 *nextright, s32 *nextleft, s32 requireammo)
 }
 
 #ifdef GE_MODDED_CHEATS
-/* R19: B+Z cycles only the equipment/mission-item tail of the same inventory
+/* R19: A+B cycles only the equipment/mission-item tail of the same inventory
  * list used by the solo watch.  Normal weapon cycling remains unchanged and
  * returns the player to guns. */
 s32 bondinvCycleMissionItem(void);
+
+s32 bondinvMissionItemModeActive(void)
+{
+    s32 playernum = get_cur_playernum();
+
+    return playernum >= 0 && playernum < 4
+        && g_MissionItemModeActive[playernum]
+        && getCurrentPlayerWeaponId(GUNRIGHT) >= ITEM_BOMBCASE;
+}
 
 void bondinvProcessMissionItemQueue(void)
 {
     s32 playernum = get_cur_playernum();
     ITEM_IDS item;
 
-    if (playernum < 0 || playernum >= 4 || !g_MissionItemQueueValid[playernum])
+    if (playernum < 0 || playernum >= 4)
+    {
+        return;
+    }
+
+    /* Gadget context survives only until a return-to-weapon switch has really
+     * completed. During LOWER/SWAP/HOLD/RAISE, A-then-B can still reclaim that
+     * transition and continue from the last gadget. */
+    if (g_MissionItemModeActive[playernum]
+        && !g_MissionItemQueueValid[playernum]
+        && getCurrentPlayerWeaponId(GUNRIGHT) < ITEM_BOMBCASE
+        && !bondinvWeaponSwitchInProgress())
+    {
+        g_MissionItemModeActive[playernum] = FALSE;
+    }
+
+    if (!g_MissionItemQueueValid[playernum])
     {
         return;
     }
@@ -879,9 +962,21 @@ void bondinvProcessMissionItemQueue(void)
         return;
     }
 
+    /* If B arrived after the A-selected weapon has already reached HOLD/RAISE,
+     * finish that draw completely before starting the gadget switch. */
+    if (g_MissionItemQueueValid[playernum] == MISSION_ITEM_QUEUE_WAIT_DRAW)
+    {
+        if (bondinvHandIsSwitching(GUNRIGHT) || bondinvHandIsSwitching(GUNLEFT))
+        {
+            return;
+        }
+
+        g_MissionItemQueueValid[playernum] = MISSION_ITEM_QUEUE_REDIRECT;
+    }
+
     /* An empty clip with reserve ammo is allowed to enter the game's normal
-     * automatic reload first.  In dual wield, both relevant hands must finish
-     * their reload sequence before either hand begins the holster transition. */
+     * automatic reload first. In dual wield, both relevant hands must finish
+     * their reload sequence before a fresh gadget holster begins. */
     if (bondinvHandIsReloading(GUNRIGHT)
         || bondinvHandIsReloading(GUNLEFT)
         || bondinvHandNeedsAutomaticReload(GUNRIGHT)
@@ -890,27 +985,45 @@ void bondinvProcessMissionItemQueue(void)
         return;
     }
 
-    if (bondinvHandIsSwitching(GUNRIGHT) || bondinvHandIsSwitching(GUNLEFT))
+    /* Before the newly selected weapon reaches SWITCH_HOLD/RAISE, retarget the
+     * in-progress switch itself. This prevents the intermediate gun from ever
+     * being drawn. If the switch crossed into HOLD/RAISE before this point,
+     * fall back to the wait-for-full-draw rule above. */
+    if (bondinvHandHasPassedRedirectWindow(GUNRIGHT)
+        || bondinvHandHasPassedRedirectWindow(GUNLEFT))
     {
+        g_MissionItemQueueValid[playernum] = MISSION_ITEM_QUEUE_WAIT_DRAW;
         return;
     }
 
     gunRequestHandWeaponChange(GUNRIGHT, item, 1);
     gunRequestHandWeaponChange(GUNLEFT, ITEM_UNARMED, 1);
+    g_MissionItemQueueValid[playernum] = MISSION_ITEM_QUEUE_WAIT_DRAW;
 }
 
 s32 bondinvCycleMissionItem(void)
 {
     s32 count = bondinvCountTotalItemsInInv();
-    s32 index = bondinvGetCurEquippedItem();
-    s32 remaining = count;
     s32 playernum = get_cur_playernum();
+    s32 index;
+    s32 remaining = count;
 
-    /* A queued reload/holster/item change is one logical B+Z press.  Further
-     * presses while it is pending remain consumed but do not skip ahead. */
-    if (playernum >= 0 && playernum < 4 && g_MissionItemQueueValid[playernum])
+    /* If a previous B press already has a gadget queued, advance from that
+     * logical target rather than from the not-yet-updated watch cursor. This
+     * makes repeated B presses while A is held deterministic even if the hand
+     * animation for the previous gadget has not completed yet. */
+    if (playernum >= 0 && playernum < 4
+        && (g_MissionItemQueueValid[playernum]
+            || (g_MissionItemModeActive[playernum] && bondinvWeaponSwitchInProgress())))
     {
-        return TRUE;
+        /* While a gadget request is pending, or while A is trying to leave an
+         * already-selected gadget, continue from the last logical gadget index.
+         * SWITCH_SWAP may already have changed equipcuritem back to a gun. */
+        index = g_MissionItemQueuedIndex[playernum];
+    }
+    else
+    {
+        index = bondinvGetCurEquippedItem();
     }
 
     while (remaining-- > 0)
@@ -926,22 +1039,48 @@ s32 bondinvCycleMissionItem(void)
 
         if (item >= ITEM_BOMBCASE && item < ITEM_IDS_MAX)
         {
-            /* R20: if a real weapon is still up, use the ordinary weapon-change
-             * state machine so it visibly lowers all the way before the mission
-             * item becomes current. Once already in the mission-item tail there
-             * is no gun left to holster, so keep the fast item-to-item browse. */
-            if (getCurrentPlayerWeaponId(GUNRIGHT) < ITEM_BOMBCASE)
+            if (playernum >= 0 && playernum < 4)
+            {
+                /* Keep a logical gadget cursor even when SWITCH_SWAP has
+                 * temporarily installed a gun while A is trying to leave mode. */
+                g_MissionItemQueuedItem[playernum] = item;
+                g_MissionItemQueuedIndex[playernum] = index;
+                g_MissionItemModeActive[playernum] = TRUE;
+            }
+
+            /* There are three cases which must use the normal hand switch
+             * state machine rather than the old instantaneous gadget browse:
+             *
+             * 1. Entering gadget mode from a gun.
+             * 2. A gadget change is already queued/in flight.
+             * 3. We are currently on a gadget, A has started the normal return
+             *    to weapons, and B arrives during that switch window. In case
+             *    3, retarget LOWER/SWAP back to the next gadget so weapon mode
+             *    never wins the race. If the gun has already reached HOLD/RAISE,
+             *    preserve its draw and switch to the gadget immediately after. */
+            if (getCurrentPlayerWeaponId(GUNRIGHT) < ITEM_BOMBCASE
+                || bondinvWeaponSwitchInProgress()
+                || (playernum >= 0 && playernum < 4 && g_MissionItemQueueValid[playernum]))
             {
                 if (playernum >= 0 && playernum < 4)
                 {
-                    g_MissionItemQueuedItem[playernum] = item;
-                    g_MissionItemQueuedIndex[playernum] = index;
-                    g_MissionItemQueueValid[playernum] = TRUE;
+                    if (bondinvHandHasPassedRedirectWindow(GUNRIGHT)
+                        || bondinvHandHasPassedRedirectWindow(GUNLEFT))
+                    {
+                        g_MissionItemQueueValid[playernum] = MISSION_ITEM_QUEUE_WAIT_DRAW;
+                    }
+                    else
+                    {
+                        g_MissionItemQueueValid[playernum] = MISSION_ITEM_QUEUE_REDIRECT;
+                    }
+
                     bondinvProcessMissionItemQueue();
                 }
             }
             else
             {
+                /* Already settled on a mission item with no weapon switch in
+                 * progress: item-to-item browsing stays immediate and cheap. */
                 currentPlayerUnEquipWeaponWrapper(GUNRIGHT, item);
                 currentPlayerUnEquipWeaponWrapper(GUNLEFT, ITEM_UNARMED);
                 bondinvSetCurEquippedItem(index);
@@ -1054,9 +1193,18 @@ bool bondinvHasGoldenGun(void)
     return bondinvHasInvItem(ITEM_GOLDENGUN);
 }
 
-bool bondinvHasPropInInv(PropRecord *prop)
+static bool bondinvPlayerHasPropInInv(struct player *player, PropRecord *prop)
 {
-    InvItem *item = g_CurrentPlayer->ptr_inventory_first_in_cycle;
+    InvItem *first;
+    InvItem *item;
+
+    if (player == NULL || prop == NULL)
+    {
+        return FALSE;
+    }
+
+    first = player->ptr_inventory_first_in_cycle;
+    item = first;
 
     while (item)
     {
@@ -1067,7 +1215,7 @@ bool bondinvHasPropInInv(PropRecord *prop)
 
         item = item->next;
 
-        if (item == g_CurrentPlayer->ptr_inventory_first_in_cycle)
+        if (item == first)
         {
             break;
         }
@@ -1075,6 +1223,33 @@ bool bondinvHasPropInInv(PropRecord *prop)
 
     return FALSE;
 }
+
+bool bondinvHasPropInInv(PropRecord *prop)
+{
+    return bondinvPlayerHasPropInInv(g_CurrentPlayer, prop);
+}
+
+#ifdef GE_MODDED_CHEATS
+bool bondinvCoopAnyPlayerHasPropInInv(PropRecord *prop)
+{
+    s32 player;
+
+    /* Campaign objectives are team state.  Some retail objective criteria
+     * query Bond's inventory directly, which becomes viewport/player-local in
+     * Co-Op.  Inspect each live player's inventory without changing
+     * g_CurrentPlayer so a pickup by P2/P3/P4 is immediately visible to P1's
+     * objective tick, every Watch page and the final mission report. */
+    for (player = 0; player < getPlayerCount(); player++)
+    {
+        if (bondinvPlayerHasPropInInv(g_playerPointers[player], prop))
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+#endif
 
 s32 bondinvCountTotalItemsInInv(void)
 {
@@ -1265,6 +1440,18 @@ s32 bondinvGetTextbyInvIndex(s32 index)
             {
                 return override->weapon;
             }
+#ifdef GE_MODDED_CHEATS
+            /* R22: Aztec's launch-protocol DAT is a generic PROP_CHRDATTAPE
+             * inventory prop, not an INV_ITEM_WEAPON. In Co-Op the setup
+             * rename/text-override node belongs to the player context that
+             * loaded it, so another player's shared DAT can otherwise resolve
+             * to ITEM_UNARMED here and get skipped by A+B. Resolve the DAT
+             * directly from its canonical prop model as a safe fallback. */
+            if (prop->obj && prop->obj->obj == PROP_CHRDATTAPE)
+            {
+                return ITEM_DATTAPE;
+            }
+#endif
         }
         else if (inv_item->type == INV_ITEM_WEAPON)
         {
@@ -1319,6 +1506,14 @@ u16 *bondinvGetNameByIndex(s32 index)
 
                 weaponnum = override->weapon;
             }
+#ifdef GE_MODDED_CHEATS
+            else if (prop->obj && prop->obj->obj == PROP_CHRDATTAPE)
+            {
+                /* Match bondinvGetTextbyInvIndex's Co-Op DAT fallback so the
+                 * A+B HUD/watch name remains "Dat Tape" for shared copies. */
+                weaponnum = ITEM_DATTAPE;
+            }
+#endif
         }
         else if (item->type == INV_ITEM_WEAPON)
         {

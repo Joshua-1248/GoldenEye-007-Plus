@@ -252,6 +252,15 @@ s32 texGetWidthAtLod(struct tex *tex, s32 lod)
                 return g_TexCacheItems[i].widths[lod - 1];
             }
         }
+#ifdef GE_PHYSICAL_FASTPATHS
+        for (i = 0; i < g_PersistentTexCacheCount; i++)
+        {
+            if (tex->texturenum == g_PersistentTexCacheItems[i].texturenum)
+            {
+                return g_PersistentTexCacheItems[i].widths[lod - 1];
+            }
+        }
+#endif
 
         return 1;
     }
@@ -284,6 +293,15 @@ s32 texGetHeightAtLod(struct tex *tex, s32 lod)
                 return g_TexCacheItems[i].heights[lod - 1];
             }
         }
+#ifdef GE_PHYSICAL_FASTPATHS
+        for (i = 0; i < g_PersistentTexCacheCount; i++)
+        {
+            if (tex->texturenum == g_PersistentTexCacheItems[i].texturenum)
+            {
+                return g_PersistentTexCacheItems[i].heights[lod - 1];
+            }
+        }
+#endif
 
         return 1;
     }

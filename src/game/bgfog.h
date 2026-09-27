@@ -190,6 +190,9 @@ s32 fogPositionIsVisibleThroughFog(coord3d *pos, f32 range);
 Gfx *fogSetRenderFogColor(Gfx *arg0, s32 arg1);
 Gfx *fogRenderClearFogMode(Gfx *gdl);
 s32 fogGetPropDistColor(PropRecord *prop, struct rgba_f32 *color);
+#ifdef GE_PHYSICAL_FASTPATHS
+extern NearFogRecord *g_NearFogValuesP;
+#endif
 void fogSwitchToSolosky2(f32 arg0);
 void fogRemoved7F0BAA5C(s32 a);
 struct NearFogRecord *fogGetNearFogValuesP(void);

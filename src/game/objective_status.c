@@ -7,6 +7,7 @@
 #include "PR/os.h"
 #include "str.h"
 #include "bondview.h"
+#include "bondinv.h"
 #include "front.h"
 #include "player.h"
 
@@ -212,22 +213,58 @@ OBJECTIVESTATUS get_status_of_objective(s32 objectiveNum) //#MATCH
                         case PROPDEF_OBJECTIVE_COLLECT_OBJECT:
                         {
                             ObjectRecord *obj = objFindByTagId(objective->ObjRefID);
+                            bool hasprop = FALSE;
+
                             if (!obj || !obj->prop || !objIsHealthy(obj))
                             {
                                 currentstatus = OBJECTIVESTATUS_FAILED;
                             }
-                            else if (!bondinvHasPropInInv(obj->prop))
+                            else
                             {
-                                currentstatus = OBJECTIVESTATUS_INCOMPLETE;
+#ifdef GE_MODDED_CHEATS
+                                if (gamemode == GAMEMODE_MULTI
+                                    && get_scenario() == SCENARIO_COOP
+                                    && getPlayerCount() > 1)
+                                {
+                                    hasprop = bondinvCoopAnyPlayerHasPropInInv(obj->prop);
+                                }
+                                else
+#endif
+                                {
+                                    hasprop = bondinvHasPropInInv(obj->prop);
+                                }
+
+                                if (!hasprop)
+                                {
+                                    currentstatus = OBJECTIVESTATUS_INCOMPLETE;
+                                }
                             }
                             break;
                         }
                         case PROPDEF_OBJECTIVE_DEPOSIT_OBJECT:
                         {
                             ObjectRecord *obj = objFindByTagId(objective->ObjRefID);
-                            if (obj && obj->prop && bondinvHasPropInInv(obj->prop))
+                            bool hasprop = FALSE;
+
+                            if (obj && obj->prop)
                             {
-                                currentstatus = OBJECTIVESTATUS_INCOMPLETE;
+#ifdef GE_MODDED_CHEATS
+                                if (gamemode == GAMEMODE_MULTI
+                                    && get_scenario() == SCENARIO_COOP
+                                    && getPlayerCount() > 1)
+                                {
+                                    hasprop = bondinvCoopAnyPlayerHasPropInInv(obj->prop);
+                                }
+                                else
+#endif
+                                {
+                                    hasprop = bondinvHasPropInInv(obj->prop);
+                                }
+
+                                if (hasprop)
+                                {
+                                    currentstatus = OBJECTIVESTATUS_INCOMPLETE;
+                                }
                             }
                             break;
                         }

@@ -73,6 +73,13 @@ extern struct texcacheitem g_TexCacheItems[];
 extern struct texpool *ptr_texture_alloc_start;
 extern struct image_entry g_Textures[];
 extern s32 g_TexCacheCount;
+#ifdef GE_PHYSICAL_FASTPATHS
+#define PERSISTENT_TEX_LOD_CACHE_CAPACITY 256
+extern struct texcacheitem g_PersistentTexCacheItems[PERSISTENT_TEX_LOD_CACHE_CAPACITY];
+extern s32 g_PersistentTexCacheCount;
+void texResetPersistentLodCache(void);
+void texSetPersistentLodCacheMode(s32 enabled);
+#endif
 extern u32 bytes;
 
 void nullsub_41(s32 arg0);
@@ -92,6 +99,7 @@ s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct tex
 s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpool *arg4);
 void texLoad(s32 *updateword, struct texpool *pool);
 void texInitPool(struct texpool *arg0, u8 *arg1, s32 arg2);
+void texResetStageOverflowPool(void);
 void texLoadFromTextureNum(s32 texturenum, struct texpool *arg1);
 void texLoadFromModelFileHeader(ModelFileHeader* arg0, struct texpool* arg1);
 

@@ -11,6 +11,9 @@
 #include "game/front.h"
 #include "game/gun.h"
 #include "game/language.h"
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 #include "game/player.h"
 #include "game/ramromreplay.h"
 #include "game/stan.h"
@@ -293,6 +296,15 @@ void bondviewLoadSetupIntroSection(void)
                         ((struct SetupIntroCamera*)intro_record)->unk0C.fval = ((struct SetupIntroCamera*)intro_record)->unk0C.ival / 100.0f;
                         ((struct SetupIntroCamera*)intro_record)->unk10.fval = ((struct SetupIntroCamera*)intro_record)->unk10.ival / M_U16_MAX_VALUE_F;
                         ((struct SetupIntroCamera*)intro_record)->unk14.fval = ((struct SetupIntroCamera*)intro_record)->unk14.ival / M_U16_MAX_VALUE_F;
+#ifdef GE_MODDED_CHEATS
+                        if (mirrorLevelsIsEnabled())
+                        {
+                            ((struct SetupIntroCamera*)intro_record)->unk04.fval =
+                                -((struct SetupIntroCamera*)intro_record)->unk04.fval;
+                            ((struct SetupIntroCamera*)intro_record)->unk10.fval =
+                                -((struct SetupIntroCamera*)intro_record)->unk10.fval;
+                        }
+#endif
 
                         ((struct SetupIntroCamera*)intro_record)->lang1c.lang_ptr = langGet(((struct SetupIntroCamera*)intro_record)->lang1c.lang_index[1]);
 

@@ -32,6 +32,9 @@
 #include "textrelated.h"
 #include "initmenus.h"
 #include "cheat.h"
+#ifdef GE_MODDED_CHEATS
+#include "mirroredlevels.h"
+#endif
 #include "bg.h"
 #include "objective.h"
 #include "mpmenu.h"
@@ -60,6 +63,13 @@
 #include "unk_092E50.h"
 #include "frametiming.h"
 #include "chr.h"
+#include "options.h"
+#ifdef GE_MAP_MAKER
+#include "mapmaker.h"
+#endif
+#ifdef GE_MODDED_CHEATS
+#include "dyn.h"
+#endif
 
 /* Used by the Co-Op stage bootstrap before the first gameplay tick. */
 void bondviewUpdatePlayerCollisionBounds(void);
@@ -361,7 +371,12 @@ void lvlStageLoad(s32 stage)
     g_MpSoundStateRelated = 0;
 
     sndSetScalerApplyVolumeAllSfxSlot(1.0f);
+#ifndef GE_MODDED_CHEATS
     musicTrack1ApplySeqpVol(VOLUME_MAX);
+#endif
+    /* Plus keeps Track 1 at the save-backed frontend volume until the old
+     * frontend sequence is stopped below.  Forcing it to VOLUME_MAX here was
+     * the one-frame menu-music burst heard when Music Volume was 0%. */
     musicTrack2ApplySeqpVol(VOLUME_MAX);
     musicTrack3ApplySeqpVol(VOLUME_MAX);
     sub_GAME_7F0C1364();
@@ -500,6 +515,13 @@ void lvlStageLoad(s32 stage)
     init_guards();
     bodiesReset(stage);
     proplvreset2(stage);
+#ifdef GE_MAP_MAKER
+    if (g_CurrentStageToLoad == LEVELID_MAP_MAKER && mapmakerNativeTestRequested())
+    {
+        mapmakerNativeTestMarkStageEntered();
+        mapmakerNativeTestStagePrepare();
+    }
+#endif
     alloc_explosion_smoke_casing_scorch_impact_buffers();
     alloc_shattered_window_pieces();
     sub_GAME_7F007290();
@@ -525,6 +547,13 @@ void lvlStageLoad(s32 stage)
             bondviewLoadSetupIntroSection();
             bondviewPlayerBeginLife();
             sets_a_bunch_of_BONDdata_values_to_default();
+#ifdef GE_MAP_MAKER
+            /* Native Test is a post-load handoff. Let the dedicated setup,
+             * pad/STAN and normal player initialization finish first, then
+             * anchor the authored map onto the private bootstrap spawn. */
+            if (g_CurrentStageToLoad == LEVELID_MAP_MAKER && mapmakerNativeTestRequested())
+                mapmakerNativeTestPlaceCurrentPlayer(s0);
+#endif
             disableOnscreenCheatText();
         }
 
@@ -803,6 +832,16 @@ Gfx* lvlRender(Gfx* DL)
 
         gSPClipRatio(DL++, FRUSTRATIO_2);
 
+#ifdef GE_MODDED_CHEATS
+        /*
+         * Room background data is referenced directly by the master display
+         * list.  Keep one pin generation per double-buffered graphics buffer
+         * so Co-Op room GC can never reclaim geometry that the RSP/RDP may
+         * still be consuming from this or the previous submitted frame.
+         */
+        bgModBeginRoomRenderFrame(g_GfxActiveBufferIndex);
+#endif
+
         for(i = 0; i < pcount; i++)
         {
 #ifdef GE_MODDED_CHEATS
@@ -823,6 +862,14 @@ Gfx* lvlRender(Gfx* DL)
 
             DL = viClearZBufCurrentPlayer(DL);
             DL = viSetupCurrentPlayerView(DL);
+
+#ifdef GE_MODDED_CHEATS
+            /* R22 third-person chase presentation is applied by
+             * bondviewRenderDebugBondView while cameramode remains in the
+             * normal gameplay state.  Do not switch into GoldenEye's native
+             * external/spot-camera mode here; that mode owns orbit controls
+             * and suppresses ordinary player movement. */
+#endif
 
             if (get_debug_render_raster() == DEB_MOVE_VIEW)
             {
@@ -875,7 +922,12 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             propsTickPlayer();
-            DL = bgLevelRender(DL);
+#ifdef GE_MAP_MAKER
+            if (mapmakerNativeTestActive())
+                DL = mapmakerNativeRenderWorld(DL);
+            else
+#endif
+                DL = bgLevelRender(DL);
 
             if (get_debug_portal_flag())
             {
@@ -1805,6 +1857,13 @@ void lvlUnloadStageTextData(void)
         frontStoreCoopMissionReportStats();
 #endif
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* bossMainloop reaches stage teardown only after pendingGfx has drained
+     * to zero. Restore canonical world state while every stage pointer is
+     * still valid, before cheatDisableAllCheats/cleanupObjects tear it down. */
+    mirrorLevelsPrepareStageUnload();
+#endif
 
     cheatDisableAllCheats();
     cleanupGuardData();

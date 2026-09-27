@@ -34,7 +34,12 @@ SHN_UNDEF = 0
 
 RETAIL_CRC1 = 0xDCBC50D1
 RETAIL_CRC2 = 0x09FD1AA3
-NATIVE_ROM_SIZE = 0x00C00000
+SUPPORTED_ROM_SIZES = {
+    0x00C00000: "12 MiB",
+    0x01000000: "16 MiB",
+    0x02000000: "32 MiB",
+    0x04000000: "64 MiB",
+}
 
 # Runtime regions deliberately used by the physical architecture.
 KSEG0_RDRAM_START = 0x80000000
@@ -478,7 +483,20 @@ def audit_stale_pointer_words(elf: Elf32, audit: Audit) -> None:
                         blob[off - 4:off] == bytes.fromhex("7f5f7f34")
                         and blob[off + 4:off + 8] == bytes.fromhex("7e977e58")
                     )
-                if not is_eqpower_coeff_pair:
+                # libultra's gu sine table also contains adjacent signed-16
+                # entries 0x7F0E,0x7F14.  In a physical build those four bytes
+                # can numerically equal the retail virtual address of
+                # mpFindMaxInt (0x7F0E7F14).  Require the exact neighboring
+                # sine coefficients so a genuine stale pointer with the same
+                # value is still rejected everywhere else.
+                is_sintable_coeff_pair = False
+                if sec.name == ".csegment" and word == 0x7F0E7F14 and off >= 4 and off + 8 <= len(blob):
+                    is_sintable_coeff_pair = (
+                        blob[off - 4:off] == bytes.fromhex("7f017f08")
+                        and blob[off + 4:off + 8] == bytes.fromhex("7f1a7f20")
+                    )
+
+                if not is_eqpower_coeff_pair and not is_sintable_coeff_pair:
                     names = ", ".join(sorted(set(old_to_symbols[word]))[:4])
                     hits.append((sec, off, word, names))
             if word in LEGACY_EXACT_WORDS:
@@ -615,10 +633,11 @@ def audit_executable_instructions(elf: Elf32, audit: Audit) -> None:
 
 def audit_rom(path: Path, audit: Audit) -> None:
     data = path.read_bytes()
-    if len(data) != NATIVE_ROM_SIZE:
-        audit.error(f"ROM size is 0x{len(data):X}; expected native 12 MiB (0x{NATIVE_ROM_SIZE:X})")
+    if len(data) not in SUPPORTED_ROM_SIZES:
+        allowed = ", ".join(f"{name} (0x{size:X})" for size, name in SUPPORTED_ROM_SIZES.items())
+        audit.error(f"ROM size is 0x{len(data):X}; supported cartridge sizes are {allowed}")
     else:
-        audit.note("ROM size: 12 MiB (0xC00000)")
+        audit.note(f"ROM size: {SUPPORTED_ROM_SIZES[len(data)]} (0x{len(data):X})")
 
     if len(data) >= 0x18:
         crc1, crc2 = struct.unpack_from(">II", data, 0x10)

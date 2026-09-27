@@ -218,6 +218,10 @@ Gfx *bgScissorCurrentPlayerView(Gfx *arg0, s32 left, s32 top, s32 width, s32 hei
 Gfx* bgScissorCurrentPlayerViewDefault(Gfx* arg0);
 Gfx* bgScissorCurrentPlayerViewF(Gfx* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4);
 f32 get_room_data_float1(void);
+#ifdef GE_MODDED_CHEATS
+void bgMirrorLevelsToggle(s32 enabled);
+#endif
+
 u8 getROOMID_isRendered(int roomID);
 s32 bgGet2dBboxByRoomId(s32 room_id, struct bbox2d *result);
 f32 bgGetLevelVisibilityScale(void);
@@ -230,5 +234,10 @@ void sub_GAME_7F0BA2D4(coord3d *, coord3d *, s32 *, s32 *, s32);
 void bgFindRoomsAlongSegment(coord3d *pos1, coord3d *pos2, u8 *initialRooms, u8 *outRoomSet, s32 *outRoomNums, s32 *outRoomNumsCount, s32 outRoomNumsMax);
 s32 sub_GAME_7F0B9E04(coord3d *arg0, coord3d *arg1);
 void bgRoomCalcBB(s32 room);
+#ifdef GE_MODDED_CHEATS
+void bgModBeginRoomRenderFrame(s32 bufferindex);
+void bgModPinRoomForFrame(s32 room);
+void bgModGarbageCollectRoomsForLoad(s32 bytesneeded);
+#endif
 
 #endif

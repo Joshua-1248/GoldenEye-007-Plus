@@ -5,7 +5,12 @@
 #include <fr.h>
 #include "bg.h"
 #include "bondview.h"
+#include "front.h"
 #include "bgfog.h"
+#include "file2.h"
+#ifdef GE_PHYSICAL_FASTPATHS
+#include "player.h"
+#endif
 #include <limits.h>
 
 /**
@@ -226,6 +231,9 @@ EnvironmentRecord fog_tables[] = {
 
 
 EnvironmentFoglessRecord fog_tables2[] = {
+#ifdef GE_MAP_MAKER
+    {LEVELID_MAP_MAKER,    0,       0x10,    0x40,    0,        10000.0,       0,        0,        0.0,          0.0,          0.0,          0,        0,        0,        0,           0.0,        0,        0,          0.0,          0.0,          0.0,        0.0},
+#endif
     {LEVELID_NONE   ,    0,       0x10,    0x40,    0,        5000.0,        0,        0,        255.0,        255.0,        255.0,        0,        0,        0,        0,           0.0,        0,        0,          0.0,          0.0,          0.0,        0.0},
     {LEVELID_FRIGATE,    0x10,    0x30,    0x60,    1,        3000.0,        0,        0,        230.0,        230.0,        230.0,        1,        0,        0,        0,        -150.0,        2,        0,        255.0,        255.0,        150.0,        0.0},
     {LEVELID_CUBA   ,    0x30,    0x40,    0x10,    0,        5000.0,        0,        0,        255.0,        255.0,        255.0,        0,        0,        0,        0,           0.0,        0,        0,          0.0,          0.0,          0.0,        0.0},
@@ -416,6 +424,21 @@ void fogLoadLevelEnvironment(s32 level_id, s32 arg1)
 
     num_players = getPlayerCount();
 
+#ifdef GE_MODDED_CHEATS
+    /* Campaign Co-Op runs single-player mission stages through the multiplayer
+     * player framework.  Retail's environment lookup interprets player count as
+     * a request for a multiplayer-specific fog/sky record (stage + N * 100).
+     * Most campaign stages have no such record, so the lookup falls back to the
+     * generic multiplayer environment: black sky and no mission fog.
+     *
+     * Co-Op must inherit the mission's normal single-player environment instead.
+     * Keep competitive multiplayer's per-player environment records unchanged. */
+    if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)
+    {
+        num_players = 0;
+    }
+    else
+#endif
     if (num_players == 1)
     {
         num_players = 0;
@@ -622,8 +645,16 @@ s32 fogPositionIsVisibleThroughFog(coord3d *pos, f32 range)
         return 1;
     }
 
-    player_pos = bondviewGetCurrentPlayersPosition();
-    player_mtx = camGetWorldToScreenMtxf();
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled()) {
+        player_pos = g_CurrentPlayer->cameramode == 1 ? &g_CurrentPlayer->pos : &g_CurrentPlayer->field_488.pos;
+        player_mtx = g_CurrentPlayer->field_10CC;
+    } else
+#endif
+    {
+        player_pos = bondviewGetCurrentPlayersPosition();
+        player_mtx = camGetWorldToScreenMtxf();
+    }
 
     sp24.f[0] = pos->f[0] - player_pos->f[0];
     sp24.f[1] = pos->f[1] - player_pos->f[1];
@@ -661,9 +692,23 @@ s32 fogGetPropDistColor(PropRecord *prop, rgba_f32 *color)
         return 2; // Prop is behind the camera
     }
 
-    color->rgba[0] = (f32) g_CurrentEnvironment.Red / 255.0f;
-    color->rgba[1] = (f32) g_CurrentEnvironment.Green / 255.0f;
-    color->rgba[2] = (f32) g_CurrentEnvironment.Blue / 255.0f;
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled())
+    {
+        s32 red = g_CurrentEnvironment.Red;
+        s32 green = g_CurrentEnvironment.Green;
+        s32 blue = g_CurrentEnvironment.Blue;
+        color->rgba[0] = (f32) red / 255.0f;
+        color->rgba[1] = (f32) green / 255.0f;
+        color->rgba[2] = (f32) blue / 255.0f;
+    }
+    else
+#endif
+    {
+        color->rgba[0] = (f32) g_CurrentEnvironment.Red / 255.0f;
+        color->rgba[1] = (f32) g_CurrentEnvironment.Green / 255.0f;
+        color->rgba[2] = (f32) g_CurrentEnvironment.Blue / 255.0f;
+    }
     color->rgba[3] = (g_CurFogDetails.far_fog_dist_scaled / prop->zDepth) + g_CurFogDetails.near_fog_dist_scaled;
 
     if (color->rgba[3] < 0.0f)

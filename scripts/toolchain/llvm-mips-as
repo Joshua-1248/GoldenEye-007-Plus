@@ -10,9 +10,9 @@ for ((i=0; i<${#argv[@]}; i++)); do
     -march=vr4300) args+=(-march=mips3) ;;
     --defsym)
       ((++i))
-      args+=(-Wa,--defsym,"${argv[i]}")
+      args+=(-Wa,-defsym,"${argv[i]}")
       ;;
-    --defsym=*) args+=(-Wa,--defsym,"${a#--defsym=}") ;;
+    --defsym=*) args+=(-Wa,-defsym,"${a#--defsym=}") ;;
     -o)
       args+=(-o)
       ((++i))

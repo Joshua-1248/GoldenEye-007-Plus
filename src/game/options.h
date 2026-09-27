@@ -140,6 +140,39 @@ extern struct game_options game_options_entries[];
 
 extern u8 g_MpPlayerOptions[MAX_PLAYER_COUNT];
 extern u8 g_MpPlayerCrosshair[MAX_PLAYER_COUNT];
+extern u8 g_PlayerThirdPerson[MAX_PLAYER_COUNT];
+extern u8 g_PlayerStayInTpOnDeath[MAX_PLAYER_COUNT];
+extern u8 g_ModStayInTpOnDeathDefault;
+extern u8 g_ModTpSightTranslucencyEnabled;
+extern u8 g_MpViewportLock; /* 0=None, 1=1st Person, 2=3rd Person */
+extern u8 g_MpKillCountMessageEnabled; /* global MP/Co-Op HUD message toggle; default On */
+/* R22 camera-tuning controls.  These are session-local signed offsets from
+ * the current defaults (distance 300, neutral height -12, horizontal -24,
+ * downward screen-up framing 6). */
+/* GoldenEye Plus authored Third Person camera defaults.  These are release
+ * behavior, not EEPROM encoding parameters.  Persistence stores only the
+ * signed adjustments around these exact bases. */
+#define TP_CAM_DISTANCE_DEFAULT 300
+#define TP_CAM_HEIGHT_DEFAULT (-12)
+#define TP_CAM_HORIZONTAL_DEFAULT (-24)
+#define TP_CAM_DOWN_FRAME_DEFAULT 24
+#define TP_CROSSHAIR_RANGE_DEFAULT 500
+#define TP_CROSSHAIR_RANGE_MIN 500
+#define TP_CROSSHAIR_RANGE_MAX 10000
+#define TP_CROSSHAIR_RANGE_STEP 250
+#define TP_CAM_DISTANCE_MIN 100
+#define TP_CAM_DISTANCE_MAX 600
+#define TP_CAM_DISTANCE_STEP 5
+#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46
+
+extern s16 g_ModThirdPersonCameraDistanceAdjust;
+extern s8 g_ModThirdPersonCameraHeightAdjust;
+extern s8 g_ModThirdPersonCameraHorizontalAdjust;
+extern s8 g_ModThirdPersonCameraDownFrameAdjust;
+extern s8 g_ModThirdPersonCrouchCameraHeightAdjust;
+extern s16 g_ModThirdPersonCrosshairRange;
+s32 modThirdPersonActive(s32 player);
+s32 modStayInTpOnDeath(s32 player);
 #endif
 
 void reset_controller_options_index(void);

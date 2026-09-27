@@ -51,6 +51,10 @@ void init_load_objpos_table(void)
     g_LastOnScreenProp = (PropRecord *) g_OnScreenPropList;
     g_FreeProps = g_Props;
 
+#ifdef GE_MODDED_CHEATS
+    autogunCoopResetTargetCache();
+#endif
+
     for (i = 0; i < (MAX_PROPS - 1); i++)
     {
         g_Props[i].prev = &g_Props[i + 1];

@@ -1,12 +1,13 @@
 GOLDENEYE 007 PLUS — CLEAN SOURCE LAYOUT
 ========================================
 
-This repository intentionally contains only the current project source,
-required build/toolchain material, and public release documentation.
+This package is the GitHub-ready current source snapshot through internal
+checkpoint V83 (2026-09-27).
 
 Kept:
-- assets/   Current build-time asset source/definitions required by the project
+- assets/   Public build-time asset source/definitions
 - bin/      Upstream build support binaries/scripts tracked by the source tree
+- docs/     Project documentation
 - include/  Headers
 - ld/       Linker inputs
 - rsp/      RSP source
@@ -17,15 +18,12 @@ Kept:
 - build_geplus.sh
 - README / licensing / credits / references / upstream README
 
-Intentionally removed from this GitHub-ready source package:
-- historical R3-R21 addenda and status notes
-- RC/test matrices and build logs
-- old release/hash summaries
-- superseded patch files
-- temporary source-file copies from development
-- old build_r13.sh through build_r21.sh scripts
-- packaging/debug manifests
-- stale GitHub CI workflows tied to upstream/private secrets
-- generated ROMs and retail baserom files
+Intentionally excluded:
+- local build/ directories and compiled object/ELF/map outputs
+- generated N64 ROMs
+- retail baserom files
+- generated/extracted retail-only binary assets ignored by the public tree
+- development-session backup files (*.orig, *.rej, *.bak, pre-* copies)
+- historical patch/addendum/test-log clutter from the working directory
 
 No retail ROM is included.

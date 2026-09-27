@@ -2,7 +2,7 @@
 set -euo pipefail
 
 EXPECTED_SHA1="abe01e4aeb033b6c0836819f549c791b26cfde83"
-JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+JOBS="${JOBS:-2}"
 
 if [[ ! -f Makefile ]]; then
   echo "ERROR: Run this script from the GoldenEye 007 Plus source root." >&2
@@ -25,9 +25,7 @@ fi
 
 echo "Base ROM hash OK."
 
-# These model directories contain GoldenEye 007 Plus customizations. Preserve
-# them across forced retail-asset extraction so extraction cannot silently
-# replace their generated companion files with retail versions.
+# Preserve Plus-specific model directories across forced retail extraction.
 assettmp="$(mktemp -d)"
 custom_asset_dirs=(
   assets/obseg/prop/chrsilverwppk
@@ -63,17 +61,18 @@ echo "Extracting required US assets from local baserom.u.z64..."
 make force_extract_u
 restore_custom_assets
 
-echo "Building GoldenEye 007 Plus..."
+echo "Building GoldenEye 007 Plus with $JOBS job(s)..."
 make \
   VERSION=US \
   PHYSICAL_CODE=YES \
   PHYSICAL_FASTPATHS=YES \
   MODDED_CHEATS=YES \
+  MAP_MAKER=YES \
   OPT_USE_LLVM=YES \
   COMPARE=0 \
-  -j"$JOBS" all
+  -j"$JOBS"
 
-ROM="build/u-phys-opt-mod/ge007.u-phys-opt-mod.z64"
+ROM="build/u-phys-opt-mod-eep16/ge007.u-phys-opt-mod-eep16.z64"
 if [[ ! -f "$ROM" ]]; then
   echo "ERROR: Build completed without expected ROM output: $ROM" >&2
   exit 1

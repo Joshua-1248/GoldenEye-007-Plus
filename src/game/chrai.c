@@ -4012,7 +4012,41 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondYPosLessThanRecord *ai      = AiListp + Offset;
                     f32                         bondpos = (s16)ntohs(ai->Y_POS);
-                    if (getCurrentPlayerProp()->pos.y < bondpos)
+                    bool                        condition = getCurrentPlayerProp()->pos.y < bondpos;
+#ifdef GE_MODDED_CHEATS
+                    s32                         playerIndex;
+
+                    /*
+                     * Background stage AI (chrnum 0xfe) owns shared spatial
+                     * triggers.  In Co-Op, any living player crossing a Y
+                     * threshold must activate the same trigger P1 can.  Keep
+                     * guard-local Bond checks untouched because those already
+                     * run in the guard's persistent target-player context.
+                     */
+                    if (getPlayerCount() > 1
+                        && get_scenario() == SCENARIO_COOP
+                        && ChrEntityp != NULL
+                        && ChrEntityp->chrnum == 0xfe)
+                    {
+                        condition = FALSE;
+
+                        for (playerIndex = 0; playerIndex < getPlayerCount(); playerIndex++)
+                        {
+                            struct player *player = g_playerPointers[playerIndex];
+
+                            if (player != NULL
+                                && player->prop != NULL
+                                && player->prop->stan != NULL
+                                && player->bonddead == FALSE
+                                && player->prop->pos.y < bondpos)
+                            {
+                                condition = TRUE;
+                                break;
+                            }
+                        }
+                    }
+#endif
+                    if (condition)
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -4103,6 +4137,55 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                             chrDetectRooms(chr);
                             if (chr->prop == g_CurrentPlayer->prop)
                             {
+#ifdef GE_MODDED_CHEATS
+                                if (g_CameraMode == CAMERAMODE_POSEND)
+                                {
+                                    coord3d teleportDelta;
+
+                                    /* V80: scripted cinematic teleports move the Bond chr/prop,
+                                     * but retail only refreshed collision_position here.  Plus'
+                                     * sustained TP body/camera work keeps additional player-space
+                                     * caches alive, and Dam cameras 0x0a/0x0b/0x0c use the
+                                     * look-at-Bond path which reads field_3C4/3C8/3CC.  After the
+                                     * first and third Dam teleports those caches could still point
+                                     * at Bond's pre-teleport/falling position, making the camera
+                                     * aim at empty space while the cinematic body was correctly
+                                     * back on its authored pad.
+                                     *
+                                     * Translate every position cache by the exact teleport delta
+                                     * instead of replacing it with the raw pad coordinate.  This
+                                     * preserves the existing eye/model offset while making the
+                                     * discontinuous cinematic move atomic from the camera's point
+                                     * of view.  Fixed-angle POSEND cameras are unchanged. */
+                                    teleportDelta.x = pos.x - g_CurrentPlayer->field_488.collision_position.x;
+                                    teleportDelta.y = pos.y - g_CurrentPlayer->field_488.collision_position.y;
+                                    teleportDelta.z = pos.z - g_CurrentPlayer->field_488.collision_position.z;
+
+                                    g_CurrentPlayer->field_488.pos.x += teleportDelta.x;
+                                    g_CurrentPlayer->field_488.pos.y += teleportDelta.y;
+                                    g_CurrentPlayer->field_488.pos.z += teleportDelta.z;
+                                    g_CurrentPlayer->field_488.pos3.x += teleportDelta.x;
+                                    g_CurrentPlayer->field_488.pos3.y += teleportDelta.y;
+                                    g_CurrentPlayer->field_488.pos3.z += teleportDelta.z;
+                                    g_CurrentPlayer->field_488.current_tile_ptr_for_portals = stan;
+
+                                    g_CurrentPlayer->field_3C4 += teleportDelta.x;
+                                    g_CurrentPlayer->field_3C8 += teleportDelta.y;
+                                    g_CurrentPlayer->field_3CC += teleportDelta.z;
+#if defined(VERSION_EU)
+                                    g_CurrentPlayer->field_3B8.x = g_CurrentPlayer->field_3C4 / 0.118799984455f;
+                                    g_CurrentPlayer->field_3B8.y = g_CurrentPlayer->field_3C8 / 0.118799984455f;
+                                    g_CurrentPlayer->field_3B8.z = g_CurrentPlayer->field_3CC / 0.118799984455f;
+#else
+                                    g_CurrentPlayer->field_3B8.x = g_CurrentPlayer->field_3C4 / 0.100000024f;
+                                    g_CurrentPlayer->field_3B8.y = g_CurrentPlayer->field_3C8 / 0.100000024f;
+                                    g_CurrentPlayer->field_3B8.z = g_CurrentPlayer->field_3CC / 0.100000024f;
+#endif
+                                    g_CurrentPlayer->bondprevpos.x += teleportDelta.x;
+                                    g_CurrentPlayer->bondprevpos.y += teleportDelta.y;
+                                    g_CurrentPlayer->bondprevpos.z += teleportDelta.z;
+                                }
+#endif
                                 g_CurrentPlayer->field_488.collision_position.x = pos.x;
                                 g_CurrentPlayer->field_488.collision_position.y = pos.y;
                                 g_CurrentPlayer->field_488.collision_position.z = pos.z;

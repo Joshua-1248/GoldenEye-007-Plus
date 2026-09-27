@@ -14,11 +14,13 @@
 #include "dyn.h"
 #include "explosion.h"
 #include "fr.h"
+#include "file2.h"
 #include "image_bank.h"
 #include "othermodemicrocode.h"
 #include "lv.h"
 #include "matrixmath.h"
 #include "music.h"
+#include "options.h"
 #include "player.h"
 #include "random.h"
 #include "snd.h"
@@ -26,6 +28,9 @@
 #include "bgroomtrans.h"
 #include <assets/oddtextures.h>
 
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 // bss
 //CODE.bss:8007A100
 // possibly   printf("Allocating %d bytes for glass data (%d bits)\n",DAT_83bd5fb0 * 0x88 + 0xf & 0xfffffff0,         DAT_83bd5fb0);
@@ -406,6 +411,8 @@ void explosionScreenShake(coord3d* source_pos, coord3d* source_mag, coord3d* res
     f32 diff_z;
     f32 mag_scalar_x;
     f32 mag_scalar_z;
+    f32 angle_cos;
+    f32 angle_sin;
     f32 diff_y;
     f32 explosion_mag;
 
@@ -420,8 +427,21 @@ void explosionScreenShake(coord3d* source_pos, coord3d* source_mag, coord3d* res
     }
 
     angle = 0.8f;
-    mag_scalar_x = (cosf(angle) * source_mag->x) - (sinf(angle) * source_mag->f[2]);
-    mag_scalar_z = (sinf(angle) * source_mag->x) + (cosf(angle) * source_mag->f[2]);
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled())
+    {
+        angle_cos = cosf(angle);
+        angle_sin = sinf(angle);
+        mag_scalar_x = (angle_cos * source_mag->x) - (angle_sin * source_mag->f[2]);
+        mag_scalar_z = (angle_sin * source_mag->x) + (angle_cos * source_mag->f[2]);
+    }
+    else
+#endif
+    {
+        /* Faithful retail call sequence when micro-optimizations are disabled. */
+        mag_scalar_x = (cosf(angle) * source_mag->x) - (sinf(angle) * source_mag->f[2]);
+        mag_scalar_z = (sinf(angle) * source_mag->x) + (cosf(angle) * source_mag->f[2]);
+    }
 
     explosion_mag = 0.0f;
 
@@ -516,41 +536,88 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                         f32 xfrac;
                         f32 yfrac;
                         f32 zfrac;
+#ifdef GE_PHYSICAL_FASTPATHS
+                        f32 xabs;
+                        f32 zabs;
+#endif
                         f32 minfrac;
 
-                        xfrac = xdist / horiz_range;
-                        yfrac = ydist / vert_range;
-                        zfrac = zdist / horiz_range;
-
-                        if (xfrac < 0.0f)
+#ifdef GE_PHYSICAL_FASTPATHS
+                        if (modMicroOptimizationsEnabled())
                         {
-                            xfrac = -xfrac;
+                            /*
+                             * MicroOpt 02/03: the live explosionTick caller passes
+                             * the same vrange for horizontal and vertical damage.
+                             * Select the largest absolute axis first, then perform
+                             * the one original divide which can determine minfrac.
+                             */
+                            xabs = xdist;
+                            zabs = zdist;
+
+                            if (xabs < 0.0f)
+                            {
+                                xabs = -xabs;
+                            }
+
+                            if (zabs < 0.0f)
+                            {
+                                zabs = -zabs;
+                            }
+
+                            xfrac = (xabs > zabs) ? xabs : zabs;
+                            yfrac = ydist;
+
+                            if (yfrac < 0.0f)
+                            {
+                                yfrac = -yfrac;
+                            }
+
+                            if (yfrac > xfrac)
+                            {
+                                xfrac = yfrac;
+                            }
+
+                            xfrac = xfrac / horiz_range;
+                            minfrac = 1.0f - xfrac;
                         }
-
-                        if (yfrac < 0.0f)
+                        else
+#endif
                         {
-                            yfrac = -yfrac;
-                        }
+                            /* Faithful retail three-axis falloff when disabled. */
+                            xfrac = xdist / horiz_range;
+                            yfrac = ydist / vert_range;
+                            zfrac = zdist / horiz_range;
 
-                        if (zfrac < 0.0f)
-                        {
-                            zfrac = -zfrac;
-                        }
+                            if (xfrac < 0.0f)
+                            {
+                                xfrac = -xfrac;
+                            }
 
-                        xfrac = 1.0f - xfrac;
-                        yfrac = 1.0f - yfrac;
-                        zfrac = 1.0f - zfrac;
+                            if (yfrac < 0.0f)
+                            {
+                                yfrac = -yfrac;
+                            }
 
-                        minfrac = xfrac;
+                            if (zfrac < 0.0f)
+                            {
+                                zfrac = -zfrac;
+                            }
 
-                        if (yfrac < minfrac)
-                        {
-                            minfrac = yfrac;
-                        }
+                            xfrac = 1.0f - xfrac;
+                            yfrac = 1.0f - yfrac;
+                            zfrac = 1.0f - zfrac;
 
-                        if (zfrac < minfrac)
-                        {
-                            minfrac = zfrac;
+                            minfrac = xfrac;
+
+                            if (yfrac < minfrac)
+                            {
+                                minfrac = yfrac;
+                            }
+
+                            if (zfrac < minfrac)
+                            {
+                                minfrac = zfrac;
+                            }
                         }
 
                         minfrac = minfrac * EXPLOSION_DAMAGE_SCALER * temp_s6->damage;
@@ -587,41 +654,88 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                         f32 xfrac;
                         f32 yfrac;
                         f32 zfrac;
+#ifdef GE_PHYSICAL_FASTPATHS
+                        f32 xabs;
+                        f32 zabs;
+#endif
                         f32 minfrac;
 
-                        xfrac = xdist / horiz_range;
-                        yfrac = ydist / vert_range;
-                        zfrac = zdist / horiz_range;
-
-                        if (xfrac < 0.0f)
+#ifdef GE_PHYSICAL_FASTPATHS
+                        if (modMicroOptimizationsEnabled())
                         {
-                            xfrac = -xfrac;
+                            /*
+                             * MicroOpt 02/03: the live explosionTick caller passes
+                             * the same vrange for horizontal and vertical damage.
+                             * Select the largest absolute axis first, then perform
+                             * the one original divide which can determine minfrac.
+                             */
+                            xabs = xdist;
+                            zabs = zdist;
+
+                            if (xabs < 0.0f)
+                            {
+                                xabs = -xabs;
+                            }
+
+                            if (zabs < 0.0f)
+                            {
+                                zabs = -zabs;
+                            }
+
+                            xfrac = (xabs > zabs) ? xabs : zabs;
+                            yfrac = ydist;
+
+                            if (yfrac < 0.0f)
+                            {
+                                yfrac = -yfrac;
+                            }
+
+                            if (yfrac > xfrac)
+                            {
+                                xfrac = yfrac;
+                            }
+
+                            xfrac = xfrac / horiz_range;
+                            minfrac = 1.0f - xfrac;
                         }
-
-                        if (yfrac < 0.0f)
+                        else
+#endif
                         {
-                            yfrac = -yfrac;
-                        }
+                            /* Faithful retail three-axis falloff when disabled. */
+                            xfrac = xdist / horiz_range;
+                            yfrac = ydist / vert_range;
+                            zfrac = zdist / horiz_range;
 
-                        if (zfrac < 0.0f)
-                        {
-                            zfrac = -zfrac;
-                        }
+                            if (xfrac < 0.0f)
+                            {
+                                xfrac = -xfrac;
+                            }
 
-                        xfrac = 1.0f - xfrac;
-                        yfrac = 1.0f - yfrac;
-                        zfrac = 1.0f - zfrac;
+                            if (yfrac < 0.0f)
+                            {
+                                yfrac = -yfrac;
+                            }
 
-                        minfrac = xfrac;
+                            if (zfrac < 0.0f)
+                            {
+                                zfrac = -zfrac;
+                            }
 
-                        if (yfrac < minfrac)
-                        {
-                            minfrac = yfrac;
-                        }
+                            xfrac = 1.0f - xfrac;
+                            yfrac = 1.0f - yfrac;
+                            zfrac = 1.0f - zfrac;
 
-                        if (zfrac < minfrac)
-                        {
-                            minfrac = zfrac;
+                            minfrac = xfrac;
+
+                            if (yfrac < minfrac)
+                            {
+                                minfrac = yfrac;
+                            }
+
+                            if (zfrac < minfrac)
+                            {
+                                minfrac = zfrac;
+                            }
                         }
 
                         minfrac *= minfrac;
@@ -629,7 +743,31 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
 
                         if (temp_s0->type == PROP_TYPE_CHR)
                         {
+#ifdef GE_MODDED_CHEATS
+                            /* Campaign Co-Op explosions already carry the player who
+                             * caused them in Explosion.player.  chrlvExplosionDamage()
+                             * records a guard kill against g_CurrentPlayer, so shared
+                             * simulation used to credit whichever viewport happened to
+                             * own this explosion tick (often P1).  Temporarily select
+                             * the real explosion owner for kill/stat bookkeeping, then
+                             * restore the simulation owner. */
+                            s32 savedplayer = get_cur_playernum();
+                            s32 ownerplayer = (s32)temp_s2->player;
+
+                            if ((u32)ownerplayer < (u32)getPlayerCount())
+                            {
+                                set_cur_player(ownerplayer);
+                            }
+
                             chrlvExplosionDamage(temp_s0->chr, &arg0->pos, minfrac, 1);
+
+                            if (get_cur_playernum() != savedplayer)
+                            {
+                                set_cur_player(savedplayer);
+                            }
+#else
+                            chrlvExplosionDamage(temp_s0->chr, &arg0->pos, minfrac, 1);
+#endif
                         }
                         else
                         {
@@ -931,13 +1069,13 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
 
     s32 i;
 #ifdef GE_PHYSICAL_FASTPATHS
-    s32 partbucket[EXPLOSION_PARTS_LEN];
     s8 buckethead[15];
     s8 buckettail[15];
     s8 bucketnext[EXPLOSION_PARTS_LEN];
     s_explosiontype *explosiontype;
     Mtxf *fastviewtoworld;
     struct coord3d *fastplayerpos;
+    struct coord3d fastviewerpos;
     f32 fastroomscale;
 #endif
 
@@ -978,6 +1116,24 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
         explosiontype = &g_ExplosionTypes[temp_s5->explosion_type];
         fastviewtoworld = currentPlayerGetViewToWorldMtxf();
         fastplayerpos = bondviewGetCurrentPlayersPosition();
+
+#ifdef GE_MODDED_CHEATS
+        /* Retail pulls explosion billboards toward Bond's FP position to keep
+         * them out of the near plane.  In Third Person the actual camera is
+         * behind Bond, so using Bond as that origin makes the whole blast look
+         * displaced as if it were still being viewed from FP.  The current
+         * view-to-world matrix already contains the final chase-camera origin;
+         * use it only for TP presentation while leaving retail FP arithmetic
+         * untouched. */
+        if (modThirdPersonActive(get_cur_playernum()))
+        {
+            fastviewerpos.f[0] = fastviewtoworld->m[3][0];
+            fastviewerpos.f[1] = fastviewtoworld->m[3][1];
+            fastviewerpos.f[2] = fastviewtoworld->m[3][2];
+            fastplayerpos = &fastviewerpos;
+        }
+#endif
+
         fastroomscale = get_room_data_float1();
 
         /*
@@ -998,7 +1154,6 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
             if (temp_s5->parts[i].frame > 0)
             {
                 s32 bucket = (s32)((f32)(temp_s5->parts[i].frame - 1) / explosiontype->flareanimspeed);
-                partbucket[i] = bucket;
                 bucketnext[i] = -1;
 
                 if ((u32)bucket < 15U)
@@ -1016,21 +1171,16 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
             }
             else
             {
-                partbucket[i] = -1;
                 bucketnext[i] = -1;
             }
         }
 
         for (var_s2 = 14; var_s2 >= 0; var_s2--)
         {
-            /* R9: empty animation buckets draw no geometry.  Retail still
-             * executes their texture/state display list.  Skip those redundant
-             * state changes, but always execute bucket 0 so the post-explosion
-             * RSP/RDP state remains exactly what retail leaves behind. */
-            if (buckethead[var_s2] >= 0 || var_s2 == 0)
-            {
-                gSPDisplayList(gdl++, g_ExplosionDisplayLists[var_s2]);
-            }
+            /* Preserve retail's exact RSP/RDP state stream.  Even an empty
+             * animation bucket executes its frame display list in retail;
+             * only the CPU-side 15 x 40 classification work is eliminated. */
+            gSPDisplayList(gdl++, g_ExplosionDisplayLists[var_s2]);
 
             for (i = buckethead[var_s2]; i >= 0; i = bucketnext[i])
             {
@@ -1153,6 +1303,9 @@ Gfx *explosionRenderPartFast(struct ExplosionPart *part, Gfx *gdl, struct coord3
     vertices[1] = base;
     vertices[2] = base;
     vertices[3] = base;
+    /* Retail writes one vertex beyond the four requested from the dynamic
+     * allocator. Preserve that exact allocator-side memory effect. */
+    vertices[4] = base;
 
     vertices[0].v.ob[0] = (cx - size_x.f[0] - rot_y.f[0]) * roomscale - roompos->f[0];
     vertices[0].v.ob[1] = (cy - size_x.f[1] - rot_y.f[1]) * roomscale - roompos->f[1];
@@ -1218,6 +1371,9 @@ Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *c
 
     f32 temp_f0;
     f32 var_f12;
+#ifdef GE_MODDED_CHEATS
+    struct coord3d tpviewerpos;
+#endif
 #ifdef GE_PHYSICAL_FASTPATHS
     f32 roomscale;
 #endif
@@ -1229,6 +1385,16 @@ Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *c
 
     sp9C = currentPlayerGetViewToWorldMtxf();
     sp98 = bondviewGetCurrentPlayersPosition();
+
+#ifdef GE_MODDED_CHEATS
+    if (modThirdPersonActive(get_cur_playernum()))
+    {
+        tpviewerpos.f[0] = sp9C->m[3][0];
+        tpviewerpos.f[1] = sp9C->m[3][1];
+        tpviewerpos.f[2] = sp9C->m[3][2];
+        sp98 = &tpviewerpos;
+    }
+#endif
 
     sp64 = arg0->pos.f[0] - sp98->f[0];
     sp60 = arg0->pos.f[1] - sp98->f[1];
@@ -1329,7 +1495,11 @@ Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *c
 #define GE_SMOKE_TYPE()       g_SmokeTypes[smoke->smoke_type]
 #endif
 
-Gfx *explosionSmokeRenderPart(struct Smoke *smoke, struct SmokePart *smoke_part, Gfx *gdl, struct coord3d *arg3)
+Gfx *explosionSmokeRenderPart(struct Smoke *smoke, struct SmokePart *smoke_part, Gfx *gdl, struct coord3d *arg3
+#ifdef GE_PHYSICAL_FASTPATHS
+    , Mtxf *fastmtx, struct coord3d *fastviewerpos, f32 roomscale, s_smoketype *smoketype
+#endif
+)
 {
     Vtx *vertices;
     Vtx spC0;
@@ -1354,19 +1524,33 @@ Gfx *explosionSmokeRenderPart(struct Smoke *smoke, struct SmokePart *smoke_part,
     f32 sp54;
     f32 sp50;
     f32 sp4C;
+#if defined(GE_MODDED_CHEATS) && !defined(GE_PHYSICAL_FASTPATHS)
+    struct coord3d tpviewerpos;
+#endif
 #ifdef GE_PHYSICAL_FASTPATHS
-    f32 roomscale;
-    s_smoketype *smoketype;
 #endif
 
     spC0 = g_SmokeRenderPartDefaultVertex;
 #ifdef GE_PHYSICAL_FASTPATHS
-    roomscale = get_room_data_float1();
-    smoketype = &g_SmokeTypes[smoke->smoke_type];
-#endif
-
+    mtx = fastmtx;
+    sp70 = fastviewerpos;
+#else
     mtx = currentPlayerGetViewToWorldMtxf();
     sp70 = bondviewGetCurrentPlayersPosition();
+
+#ifdef GE_MODDED_CHEATS
+    /* Smoke uses the same near-plane pull-to-viewer trick as explosion
+     * flares.  Use the actual chase-camera origin in TP so both smoke and the
+     * blast stay registered to their real world position. */
+    if (modThirdPersonActive(get_cur_playernum()))
+    {
+        tpviewerpos.f[0] = mtx->m[3][0];
+        tpviewerpos.f[1] = mtx->m[3][1];
+        tpviewerpos.f[2] = mtx->m[3][2];
+        sp70 = &tpviewerpos;
+    }
+#endif
+#endif
 
     if (GE_SMOKE_TYPE().rateappear >= smoke_part->count)
     {
@@ -1763,6 +1947,13 @@ Gfx *explosionRenderPropSmoke(PropRecord *arg0, Gfx *gdl, s32 withalpha)
     struct bbox2d sp78;
     struct coord3d *temp_s5;
     s32 temp_s1;
+#ifdef GE_PHYSICAL_FASTPATHS
+    Mtxf *fastmtx;
+    struct coord3d *fastviewerpos;
+    struct coord3d fasttpviewerpos;
+    f32 fastroomscale;
+    s_smoketype *fastsmoketype;
+#endif
 
 
     temp_s1 = arg0->rooms[0];
@@ -1797,11 +1988,33 @@ Gfx *explosionRenderPropSmoke(PropRecord *arg0, Gfx *gdl, s32 withalpha)
 
     gDPSetColorDither(gdl++, G_CD_NOISE);
 
+#ifdef GE_PHYSICAL_FASTPATHS
+    /* Smoke parts all use the same camera/room/type state.  Retail looked up
+     * that state again for every cloud.  Cache it once per smoke prop, and in
+     * TP use the actual view-matrix camera origin for the near-plane pull. */
+    fastmtx = currentPlayerGetViewToWorldMtxf();
+    fastviewerpos = bondviewGetCurrentPlayersPosition();
+    if (modThirdPersonActive(get_cur_playernum()))
+    {
+        fasttpviewerpos.f[0] = fastmtx->m[3][0];
+        fasttpviewerpos.f[1] = fastmtx->m[3][1];
+        fasttpviewerpos.f[2] = fastmtx->m[3][2];
+        fastviewerpos = &fasttpviewerpos;
+    }
+    fastroomscale = get_room_data_float1();
+    fastsmoketype = &g_SmokeTypes[smoke->smoke_type];
+#endif
+
     for (i = 0; i < SMOKE_PARTS_LEN; i++)
     {
         if (smoke->parts[i].size > 0.0f)
         {
+#ifdef GE_PHYSICAL_FASTPATHS
+            gdl = explosionSmokeRenderPart(smoke, &smoke->parts[i], gdl, temp_s5,
+                fastmtx, fastviewerpos, fastroomscale, fastsmoketype);
+#else
             gdl = explosionSmokeRenderPart(smoke, &smoke->parts[i], gdl, temp_s5);
+#endif
         }
         else
         {

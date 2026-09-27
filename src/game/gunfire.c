@@ -28,6 +28,8 @@
 #include "assets/obseg/text/LgunE.h"
 #include "textrelated.h"
 #include "chrai.h"
+#include "chr.h"
+#include "file2.h"
 #ifdef GE_MODDED_CHEATS
 #include "cheat.h"
 #endif
@@ -39,7 +41,9 @@
 #include "bondinv.h"
 #include "stan.h"
 #include "gbi_extension.h"
-
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 
 #ifdef REFRESH_PAL
 #define THROWN_ITEM_REFRESH_RATE 50
@@ -103,6 +107,17 @@ extern Weapon1PTransformKeyframe taserFireKeyFrames[];
 extern Weapon1PTransformKeyframe taserRaiseKeyframes[];
 extern struct ModelSkeleton skeleton_gun_kf7;
 
+#ifdef GE_MODDED_CHEATS
+/*
+ * Third Person beams are rendered later than hitscan resolution.  Cache the
+ * exact authoritative physical ray for this firing tick so the later beam
+ * cannot accidentally combine a new muzzle with a stale FP endpoint.
+ */
+static coord3d g_TpResolvedBeamOrigin[MAX_PLAYER_COUNT][2];
+static coord3d g_TpResolvedBeamTarget[MAX_PLAYER_COUNT][2];
+static u8 g_TpResolvedBeamValid[MAX_PLAYER_COUNT][2];
+#endif
+
 typedef struct ModelHeader {
     s16 unk00;
     s16 Type;
@@ -116,6 +131,9 @@ typedef struct ModelHeader {
 } ModelHeader;
 
 void gunCreateBeamForHand(enum GUNHAND hand);
+#ifdef GE_MODDED_CHEATS
+static s32 gunGetThirdPersonResolvedBeam(GUNHAND handnum, coord3d *origin, coord3d *target);
+#endif
 void bullet_path_from_screen_center(coord3d *arg0, coord3d *arg1, enum GUNHAND arg2);
 void gunInitProjectileFromPlayer(ObjectRecord *obj, coord3d *targetpos, Mtxf *arg2, coord3d *velocity, Mtxf *arg4);
 s32 gunSample1PTransform(Weapon1PTransformKeyframe *keyframes, f32 time, Mtxf *matrix, GUNHAND hand);
@@ -233,9 +251,14 @@ void gunFireTankShell(s32 handnum)
         bullet_path_from_screen_center(&screenpos, &aimdir, handnum);
         mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &aimdir);
 
-        spawnpos.x = hand->field_B58.x;
-        spawnpos.y = hand->field_B58.y;
-        spawnpos.z = hand->field_B58.z;
+#ifdef GE_MODDED_CHEATS
+        if (!gunGetThirdPersonMuzzleOrigin(handnum, &spawnpos))
+#endif
+        {
+            spawnpos.x = hand->field_B58.x;
+            spawnpos.y = hand->field_B58.y;
+            spawnpos.z = hand->field_B58.z;
+        }
 
         if (1);
 
@@ -306,6 +329,22 @@ void gunFireTankShell(s32 handnum)
             }
         }
     }
+
+#ifdef GE_MODDED_CHEATS
+    /*
+     * In First Person, gunRenderFirstPersonGunModels clears hand->rocket after
+     * the attached rocket has been fired.  Third Person intentionally skips
+     * that foreground render pass, so leaving the pointer intact makes the
+     * next shot reuse an already-live projectile object (and can crash).
+     * The launched object remains alive through its prop/projectile ownership;
+     * only detach the hand's staging pointer here.
+     */
+    if (weaponid == ITEM_ROCKETLAUNCH && modThirdPersonActive(get_cur_playernum()) &&
+        hand->firedrocket != 0)
+    {
+        hand->rocket = NULL;
+    }
+#endif
 }
 
 
@@ -1126,8 +1165,55 @@ void gunCreateBeamForHand(enum GUNHAND hand)
     f32 diff2_y;
     f32 diff2_x;
     BeamRecord *weapon_beam;
+#ifdef GE_MODDED_CHEATS
+    coord3d tpbeamorigin;
+    coord3d tpbeamtarget;
+#endif
 
     hand_ptr = &g_CurrentPlayer->hands[hand];
+
+#ifdef GE_MODDED_CHEATS
+    /*
+     * Third Person uses the character/world beam instead of the foreground
+     * hand beam.  Do this before any first-person near-plane/depth rejection:
+     * the Watch Laser's foreground hand data is intentionally unusual and can
+     * fail that FP-only test even though its world-space wrist beam is valid.
+     */
+    if (modThirdPersonActive(get_cur_playernum()))
+    {
+        if (g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->chr != NULL)
+        {
+            chr = g_CurrentPlayer->prop->chr;
+
+            if (gunGetThirdPersonResolvedBeam(hand, &tpbeamorigin, &tpbeamtarget))
+            {
+                f32 dx = tpbeamtarget.x - tpbeamorigin.x;
+                f32 dy = tpbeamtarget.y - tpbeamorigin.y;
+                f32 dz = tpbeamtarget.z - tpbeamorigin.z;
+
+                if (dx * dx + dy * dy + dz * dz > 0.0001f)
+                {
+                    CapBeamLengthAndDecideIfRendered(
+                        &chr->beams[hand],
+                        getCurrentPlayerWeaponId(hand),
+                        &tpbeamorigin,
+                        &tpbeamtarget);
+                }
+                else
+                {
+                    chr->beams[hand].unk00 = -1;
+                }
+            }
+            else
+            {
+                chr->beams[hand].unk00 = -1;
+            }
+        }
+
+        return;
+    }
+#endif
+
     player_matrix = camGetWorldToScreenMtxf();
 
     val = -((((hand_ptr->item_related.x * player_matrix->m[0][2]) + (hand_ptr->item_related.y * player_matrix->m[1][2])) + (hand_ptr->item_related.z * player_matrix->m[2][2])) + player_matrix->m[3][2]);
@@ -1141,12 +1227,17 @@ void gunCreateBeamForHand(enum GUNHAND hand)
 
     CapBeamLengthAndDecideIfRendered(weapon_beam, getCurrentPlayerWeaponId(hand), &hand_ptr->field_B58, &hand_ptr->item_related);
 
-    if ((g_CurrentPlayer->prop->chr == NULL) || (getPlayerCount() < 2)) 
+    if (g_CurrentPlayer->prop->chr == NULL)
     { 
         return; 
     }
 
     chr = g_CurrentPlayer->prop->chr;
+
+    if (getPlayerCount() < 2)
+    {
+        return;
+    }
 
     diff1_x = hand_ptr->item_related.x - g_CurrentPlayer->field_2A18[hand].x;
     diff1_y = hand_ptr->item_related.y - g_CurrentPlayer->field_2A18[hand].y;
@@ -4985,8 +5076,495 @@ extern const f32 g_RifleCasingRotationScaleZ;
 extern const f32 g_RifleCasingRotationOffsetZ;
 extern const f32 g_RifleCasingRandomDivisor;
 extern const f32 g_RifleCasingGravity;
- 
- 
+
+#ifdef GE_MODDED_CHEATS
+#define TP_CASING_MAX_BODY_MATRICES 0x20
+#define TP_CASING_MAX_WEAPON_MATRICES 0x04
+
+static RenderPosView g_TpCasingBodyMatrices[TP_CASING_MAX_BODY_MATRICES];
+static RenderPosView g_TpCasingWeaponMatrices[TP_CASING_MAX_WEAPON_MATRICES];
+
+extern void chrHandleJointPositioned(enum CHR_RENDER_PART bodypart, Mtxf *matrix);
+extern ModelRoData_BoundingBoxRecord *chrobjGetBboxFromObjFile(ModelFileHeader *obj);
+
+/**
+ * Rebuild the local player's visible third-person body pose and return the
+ * world-space hand attachment point.  Character models attach the right-hand
+ * weapon to Switches[3] and the left-hand weapon to Switches[5].
+ *
+ * Do not use bodymodel->render_pos directly here.  Those matrices live in
+ * transient render-frame memory and may belong to the previous viewport or
+ * graphics buffer.  Reconstructing into our scratch array is the same safety
+ * rule used by the third-person casing path below.
+ */
+s32 gunGetThirdPersonHandOrigin(GUNHAND handnum, coord3d *out)
+{
+    ChrRecord *chr;
+    Model *bodymodel;
+    ModelNode *handnode;
+    Mtxf *handmtx;
+    Mtxf handworld;
+    RenderPosView *savedbodyrenderpos;
+    ModelRenderData renderdata;
+    void (*savedjointfunc)(s32, Mtxf *);
+    ChrRecord *savedmodelchr;
+    s32 switchindex;
+
+    if (out == NULL || !modThirdPersonActive(get_cur_playernum()) ||
+        g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL ||
+        g_CurrentPlayer->prop->chr == NULL)
+    {
+        return FALSE;
+    }
+
+    chr = g_CurrentPlayer->prop->chr;
+    bodymodel = chr->model;
+
+    if (bodymodel == NULL || bodymodel->obj == NULL ||
+        bodymodel->obj->numMatrices > TP_CASING_MAX_BODY_MATRICES)
+    {
+        return FALSE;
+    }
+
+    switchindex = handnum == GUNLEFT ? 5 : 3;
+
+    if (bodymodel->obj->Switches == NULL ||
+        bodymodel->obj->numSwitches <= switchindex)
+    {
+        return FALSE;
+    }
+
+    handnode = bodymodel->obj->Switches[switchindex];
+
+    if (handnode == NULL)
+    {
+        return FALSE;
+    }
+
+    savedbodyrenderpos = bodymodel->render_pos;
+    savedjointfunc = g_ModelJointPositionedFunc;
+    savedmodelchr = g_CurModelChr;
+
+    renderdata.basemtx = camGetWorldToScreenMtxf();
+    renderdata.zbufferenabled = TRUE;
+    renderdata.flags = 3;
+    renderdata.gdl = NULL;
+    renderdata.mtxlist = (Mtxf *) g_TpCasingBodyMatrices;
+    renderdata.unk14 = 0;
+    renderdata.unk18 = 0;
+    renderdata.unk1c = 0;
+    renderdata.unk20 = 0;
+    renderdata.unk24 = 0;
+    renderdata.unk28 = 0;
+    renderdata.unk2c = 0;
+    renderdata.PropType = 0;
+    renderdata.envcolour.r = 0;
+    renderdata.envcolour.g = 0;
+    renderdata.envcolour.b = 0;
+    renderdata.envcolour.a = 0;
+    renderdata.fogcolour.r = 0;
+    renderdata.fogcolour.g = 0;
+    renderdata.fogcolour.b = 0;
+    renderdata.fogcolour.a = 0;
+    renderdata.cullmode = CULLMODE_BOTH;
+
+    g_ModelJointPositionedFunc = (void (*)(s32, Mtxf *)) chrHandleJointPositioned;
+    g_CurModelChr = chr;
+    subcalcmatrices(&renderdata, bodymodel);
+    g_ModelJointPositionedFunc = savedjointfunc;
+    g_CurModelChr = savedmodelchr;
+
+    handmtx = modelFindNodeMtx(bodymodel, handnode, 0);
+
+    if (handmtx == NULL)
+    {
+        bodymodel->render_pos = savedbodyrenderpos;
+        return FALSE;
+    }
+
+    matrix_4x4_multiply_homogeneous(currentPlayerGetViewToWorldMtxf(), handmtx, &handworld);
+
+    out->x = handworld.m[3][0];
+    out->y = handworld.m[3][1];
+    out->z = handworld.m[3][2];
+
+    bodymodel->render_pos = savedbodyrenderpos;
+    return TRUE;
+}
+
+/**
+ * Return the visible third-person weapon's muzzle position when one exists.
+ * bondview already maintains field_2A18 from the character-held PROP_CHR gun
+ * socket every body tick.  Weapons without a PROP_CHR representation (notably
+ * the Watch Laser) fall back to the reconstructed wrist/hand attachment point.
+ */
+#ifdef GE_MODDED_CHEATS
+void gunClearThirdPersonResolvedBeam(GUNHAND handnum)
+{
+    s32 playernum = get_cur_playernum();
+
+    if (playernum >= 0 && playernum < MAX_PLAYER_COUNT
+            && handnum >= GUNRIGHT && handnum <= GUNLEFT)
+    {
+        g_TpResolvedBeamValid[playernum][handnum] = FALSE;
+    }
+}
+
+void gunSetThirdPersonResolvedBeam(GUNHAND handnum, const coord3d *origin,
+        const coord3d *target)
+{
+    s32 playernum = get_cur_playernum();
+
+    if (origin != NULL && target != NULL
+            && playernum >= 0 && playernum < MAX_PLAYER_COUNT
+            && handnum >= GUNRIGHT && handnum <= GUNLEFT)
+    {
+        g_TpResolvedBeamOrigin[playernum][handnum] = *origin;
+        g_TpResolvedBeamTarget[playernum][handnum] = *target;
+        g_TpResolvedBeamValid[playernum][handnum] = TRUE;
+    }
+}
+
+static s32 gunGetThirdPersonResolvedBeam(GUNHAND handnum, coord3d *origin,
+        coord3d *target)
+{
+    s32 playernum = get_cur_playernum();
+
+    if (origin == NULL || target == NULL
+            || playernum < 0 || playernum >= MAX_PLAYER_COUNT
+            || handnum < GUNRIGHT || handnum > GUNLEFT
+            || !g_TpResolvedBeamValid[playernum][handnum])
+    {
+        return FALSE;
+    }
+
+    *origin = g_TpResolvedBeamOrigin[playernum][handnum];
+    *target = g_TpResolvedBeamTarget[playernum][handnum];
+    return TRUE;
+}
+#endif
+
+s32 gunGetThirdPersonMuzzleOrigin(GUNHAND handnum, coord3d *out)
+{
+    ChrRecord *chr;
+    PropRecord *weaponprop;
+
+    if (out == NULL || !modThirdPersonActive(get_cur_playernum()) ||
+        g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL ||
+        g_CurrentPlayer->prop->chr == NULL)
+    {
+        return FALSE;
+    }
+
+    chr = g_CurrentPlayer->prop->chr;
+    weaponprop = chrGetEquippedWeaponProp(chr, handnum);
+
+    if (weaponprop != NULL)
+    {
+        out->x = g_CurrentPlayer->field_2A18[handnum].x;
+        out->y = g_CurrentPlayer->field_2A18[handnum].y;
+        out->z = g_CurrentPlayer->field_2A18[handnum].z;
+        return TRUE;
+    }
+
+    return gunGetThirdPersonHandOrigin(handnum, out);
+}
+
+/**
+ * Build the exact world-space transform of the visible third-person cartridge
+ * ejection point for the local player.
+ *
+ * GoldenEye already authored two useful reference points:
+ *   - FP Switches[0] is the cartridge-ejection GROUPSIMPLE point.
+ *   - FP Switches[3] is the first-person muzzle position.
+ *   - TP Switches[0] is the third-person GUNFIRE/muzzle point.
+ *
+ * The FP and TP weapons use different local axes and scales.  Convert the
+ * authored FP ejection point into TP model space by matching the FP muzzle
+ * depth to the TP muzzle depth, with this basis mapping:
+ *
+ *     FP +Z (forward) -> TP -X (forward)
+ *     FP +X (lateral) -> TP -Y (lateral)
+ *     FP +Y (up)      -> TP +Z (up)
+ *
+ * Then reconstruct the current character and held-weapon matrices directly
+ * from animation state using scratch matrices.  This deliberately avoids
+ * heldModel->render_pos because that points into transient render-frame memory.
+ */
+static s32 tpCasingBuildEjectMtx(GUNHAND handnum, Mtxf *outmtx)
+{
+    ChrRecord *chr;
+    PropRecord *weaponprop;
+    ObjectRecord *weaponobj;
+    Model *bodymodel;
+    Model *heldmodel;
+    ModelFileHeader *fpheader;
+    ModelNode *fpejectnode;
+    ModelNode *fpmuzzlenode;
+    ModelNode *tpmuzzlenode;
+    coord3d *fpeject;
+    coord3d *fpmuzzle;
+    ModelRoData_GunfireRecord *tpgunfire;
+    ModelRoData_BoundingBoxRecord *tpbbox;
+    coord3d localpos;
+    coord3d worldpos;
+    f32 remapscale;
+    coord3d tpmuzzlepos;
+    Mtxf rootworld;
+    Mtxf leftbase;
+    Mtxf *handmtx;
+    Mtxf *rootmtx;
+    RenderPosView *savedbodyrenderpos;
+    RenderPosView *savedweaponrenderpos;
+    ModelRenderData renderdata;
+    void (*savedjointfunc)(s32, Mtxf *);
+    ChrRecord *savedmodelchr;
+    f32 invlen;
+    f32 len;
+    s32 i;
+    s32 j;
+
+    if (!modThirdPersonActive(get_cur_playernum()) || g_CurrentPlayer == NULL ||
+        g_CurrentPlayer->prop == NULL || g_CurrentPlayer->prop->chr == NULL)
+    {
+        return FALSE;
+    }
+
+    chr = g_CurrentPlayer->prop->chr;
+    bodymodel = chr->model;
+    weaponprop = chrGetEquippedWeaponProp(chr, handnum);
+
+    if (bodymodel == NULL || weaponprop == NULL || weaponprop->obj == NULL)
+    {
+        return FALSE;
+    }
+
+    weaponobj = weaponprop->obj;
+    heldmodel = weaponobj->model;
+
+    if (heldmodel == NULL || heldmodel->obj == NULL || heldmodel->attachedto != bodymodel ||
+        heldmodel->attachedto_objinst == NULL)
+    {
+        return FALSE;
+    }
+
+    if (bodymodel->obj->numMatrices > TP_CASING_MAX_BODY_MATRICES ||
+        heldmodel->obj->numMatrices > TP_CASING_MAX_WEAPON_MATRICES)
+    {
+        return FALSE;
+    }
+
+    fpheader = &g_CurrentPlayer->copy_of_body_obj_header[handnum];
+
+    if (fpheader->Switches == NULL || fpheader->numSwitches <= 3 ||
+        heldmodel->obj->Switches == NULL || heldmodel->obj->numSwitches <= 0)
+    {
+        return FALSE;
+    }
+
+    fpejectnode = fpheader->Switches[0];
+    fpmuzzlenode = fpheader->Switches[3];
+    tpmuzzlenode = heldmodel->obj->Switches[0];
+
+    if (fpejectnode == NULL || fpmuzzlenode == NULL ||
+        (fpejectnode->Opcode & 0xff) != MODELNODE_OPCODE_GROUPSIMPLE)
+    {
+        return FALSE;
+    }
+
+    fpeject = &fpejectnode->Data->GroupSimple.Origin;
+    fpmuzzle = (coord3d *) fpmuzzlenode->Data;
+
+    if (fpmuzzle->z > -0.001f && fpmuzzle->z < 0.001f)
+    {
+        return FALSE;
+    }
+
+    /*
+     * Most visible PROP_CHR guns provide an authored GUNFIRE node.  The
+     * sniper-rifle PROP_CHR model is the retail exception: its switch table
+     * has no gunfire node, but its authored BBOX xmin is the same forward
+     * endpoint convention used by the other held-gun models.  Use that
+     * geometry endpoint only as this data-driven fallback rather than leaving
+     * the sniper casing on the invisible first-person transform.
+     */
+    if (tpmuzzlenode != NULL &&
+        (tpmuzzlenode->Opcode & 0xff) == MODELNODE_OPCODE_GUNFIRE)
+    {
+        tpgunfire = &tpmuzzlenode->Data->Gunfire;
+        tpmuzzlepos = tpgunfire->Offset;
+    }
+    else
+    {
+        tpbbox = chrobjGetBboxFromObjFile(heldmodel->obj);
+
+        if (tpbbox == NULL)
+        {
+            return FALSE;
+        }
+
+        /*
+         * The sniper has no TP GUNFIRE node.  Its authored forward endpoint
+         * is still available as BBOX xmin.  Keep the mapped FP lateral/up
+         * muzzle coordinates for this one missing-socket case.
+         */
+        tpmuzzlepos.x = tpbbox->Bounds.xmin;
+        tpmuzzlepos.y = 0.0f;
+        tpmuzzlepos.z = 0.0f;
+    }
+
+    /* Match the authored FP muzzle depth to the authored TP forward extent. */
+    remapscale = -tpmuzzlepos.x / fpmuzzle->z;
+
+    if (tpmuzzlenode == NULL ||
+        (tpmuzzlenode->Opcode & 0xff) != MODELNODE_OPCODE_GUNFIRE)
+    {
+        tpmuzzlepos.y = -fpmuzzle->x * remapscale;
+        tpmuzzlepos.z =  fpmuzzle->y * remapscale;
+    }
+
+    /*
+     * Align the two authored muzzle references exactly, then carry the FP
+     * cartridge socket's muzzle-relative offset into TP model space.  This
+     * avoids assuming that the FP and TP model origins are the same point.
+     */
+    localpos.x = tpmuzzlepos.x - ((fpeject->z - fpmuzzle->z) * remapscale);
+    localpos.y = tpmuzzlepos.y - ((fpeject->x - fpmuzzle->x) * remapscale);
+    localpos.z = tpmuzzlepos.z + ((fpeject->y - fpmuzzle->y) * remapscale);
+
+    savedbodyrenderpos = bodymodel->render_pos;
+    savedweaponrenderpos = heldmodel->render_pos;
+    savedjointfunc = g_ModelJointPositionedFunc;
+    savedmodelchr = g_CurModelChr;
+
+    /* Rebuild the body in the exact matrix space used by chrRender.
+     * chrHandleJointPositioned expects incoming matrices in camera/view space;
+     * using identity here only works accidentally while the arms are level and
+     * breaks badly once aim pitch rotates the shoulder joints. */
+    renderdata.basemtx = camGetWorldToScreenMtxf();
+    renderdata.zbufferenabled = TRUE;
+    renderdata.flags = 3;
+    renderdata.gdl = NULL;
+    renderdata.mtxlist = (Mtxf *) g_TpCasingBodyMatrices;
+    renderdata.unk14 = 0;
+    renderdata.unk18 = 0;
+    renderdata.unk1c = 0;
+    renderdata.unk20 = 0;
+    renderdata.unk24 = 0;
+    renderdata.unk28 = 0;
+    renderdata.unk2c = 0;
+    renderdata.PropType = 0;
+    renderdata.envcolour.r = 0;
+    renderdata.envcolour.g = 0;
+    renderdata.envcolour.b = 0;
+    renderdata.envcolour.a = 0;
+    renderdata.fogcolour.r = 0;
+    renderdata.fogcolour.g = 0;
+    renderdata.fogcolour.b = 0;
+    renderdata.fogcolour.a = 0;
+    renderdata.cullmode = CULLMODE_BOTH;
+
+    g_ModelJointPositionedFunc = (void (*)(s32, Mtxf *)) chrHandleJointPositioned;
+    g_CurModelChr = chr;
+    subcalcmatrices(&renderdata, bodymodel);
+    g_ModelJointPositionedFunc = savedjointfunc;
+    g_CurModelChr = savedmodelchr;
+
+    handmtx = modelFindNodeMtx(bodymodel, heldmodel->attachedto_objinst, 0);
+
+    if (handmtx == NULL)
+    {
+        bodymodel->render_pos = savedbodyrenderpos;
+        heldmodel->render_pos = savedweaponrenderpos;
+        return FALSE;
+    }
+
+    if (handnum == GUNLEFT)
+    {
+        matrix_4x4_set_rotation_around_z(M_PI_F, &leftbase);
+        matrix_4x4_multiply_in_place(handmtx, &leftbase);
+        renderdata.basemtx = &leftbase;
+    }
+    else
+    {
+        renderdata.basemtx = handmtx;
+    }
+
+    renderdata.mtxlist = (Mtxf *) g_TpCasingWeaponMatrices;
+    instcalcmatrices(&renderdata, heldmodel);
+    rootmtx = modelFindNodeMtx(heldmodel, heldmodel->obj->RootNode, 0);
+
+    if (rootmtx == NULL)
+    {
+        bodymodel->render_pos = savedbodyrenderpos;
+        heldmodel->render_pos = savedweaponrenderpos;
+        return FALSE;
+    }
+
+    /* instcalcmatrices has now reproduced the same camera/view-space held-gun
+     * pose that chrRenderHeldWeapon uses. Convert that exact result back to
+     * world space before using it for casing position or ejection direction.
+     * This is what makes the socket follow Bond's pitched arms/gun instead of
+     * drifting toward his body when looking sharply up or down. */
+    matrix_4x4_multiply_homogeneous(currentPlayerGetViewToWorldMtxf(), rootmtx, &rootworld);
+
+    /* Use the scaled visible-weapon matrix for the actual socket position. */
+    matrix_4x4_transform_vector(&rootworld, &localpos, &worldpos);
+
+    /* But strip character/model scale from the casing's orientation/velocity basis. */
+    matrix_4x4_set_identity(outmtx);
+
+    for (i = 0; i < 3; i++)
+    {
+        len = sqrtf((rootworld.m[i][0] * rootworld.m[i][0]) +
+                    (rootworld.m[i][1] * rootworld.m[i][1]) +
+                    (rootworld.m[i][2] * rootworld.m[i][2]));
+
+        if (len > 0.0001f)
+        {
+            invlen = 1.0f / len;
+
+            for (j = 0; j < 3; j++)
+            {
+                outmtx->m[i][j] = rootworld.m[i][j] * invlen;
+            }
+        }
+    }
+
+    outmtx->m[3][0] = worldpos.x;
+    outmtx->m[3][1] = worldpos.y;
+    outmtx->m[3][2] = worldpos.z;
+
+    bodymodel->render_pos = savedbodyrenderpos;
+    heldmodel->render_pos = savedweaponrenderpos;
+
+    return TRUE;
+}
+
+static void tpCasingRotateEjectVelocity(Mtxf *ejectmtx, coord3d *vel)
+{
+    coord3d tpvel;
+
+    /* FP local axes -> TP local axes, matching the socket conversion above. */
+    tpvel.x = vel->z;
+    tpvel.y = -vel->x;
+    tpvel.z = vel->y;
+
+    *vel = tpvel;
+    mtx4RotateVecInPlace(ejectmtx, vel);
+}
+
+static void tpCasingAddPlayerMotion(coord3d *vel)
+{
+    if (g_ClockTimer > 0 && g_GlobalTimerDelta > 0.0f)
+    {
+        vel->x += (g_CurrentPlayer->prop->pos.x - g_CurrentPlayer->bondprevpos.x) / g_GlobalTimerDelta;
+        vel->y += (g_CurrentPlayer->prop->pos.y - g_CurrentPlayer->bondprevpos.y) / g_GlobalTimerDelta;
+        vel->z += (g_CurrentPlayer->prop->pos.z - g_CurrentPlayer->bondprevpos.z) / g_GlobalTimerDelta;
+    }
+}
+#endif /* GE_MODDED_CHEATS */
+
 /**
  * Address: 7F068508
  * 
@@ -5019,6 +5597,9 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
 #endif
     s32 handoffset;
     u32 randval;
+#ifdef GE_MODDED_CHEATS
+    s32 useTpCasing;
+#endif
 #if VERSION_EU
     s32 pad[2];
 #endif
@@ -5033,22 +5614,30 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
     }
  
     handoffset = handnum * sizeof(struct hand);
-    switch0 = g_CurrentPlayer->copy_of_body_obj_header[handnum].Switches[0];
- 
-    if (switch0 != NULL)
+
+#ifdef GE_MODDED_CHEATS
+    useTpCasing = tpCasingBuildEjectMtx(handnum, &mtx);
+
+    if (!useTpCasing)
+#endif
     {
-        switchdata = (coord3d *) switch0->Data;
+        switch0 = g_CurrentPlayer->copy_of_body_obj_header[handnum].Switches[0];
  
-        switchpos.x = switchdata->x * g_CasingSwitchScale;
-        switchpos.y = switchdata->y * g_CasingSwitchScale;
-        switchpos.z = switchdata->z * g_CasingSwitchScale;
+        if (switch0 != NULL)
+        {
+            switchdata = (coord3d *) switch0->Data;
  
-        matrix_4x4_set_identity_and_position(&switchpos, &mtx);
-        matrix_4x4_multiply_in_place(THROWMTX, &mtx);
-    }
-    else
-    {
-        matrix_4x4_copy(THROWMTX, &mtx);
+            switchpos.x = switchdata->x * g_CasingSwitchScale;
+            switchpos.y = switchdata->y * g_CasingSwitchScale;
+            switchpos.z = switchdata->z * g_CasingSwitchScale;
+ 
+            matrix_4x4_set_identity_and_position(&switchpos, &mtx);
+            matrix_4x4_multiply_in_place(THROWMTX, &mtx);
+        }
+        else
+        {
+            matrix_4x4_copy(THROWMTX, &mtx);
+        }
     }
  
     casing = casingCreate(cartridge_header, &mtx);
@@ -5071,7 +5660,16 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->vel.y = ((rand * 2.5f) * 0.0625f) + 2.5f;
         casing->vel.z = frac * 0.0f;
  
-        mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingRotateEjectVelocity(&mtx, &casing->vel);
+        }
+        else
+#endif
+        {
+            mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+        }
  
         rand = ((f32) ((u32) randomGetNext())) * 2.3283064e-10f;
         rot.x = (((rand + rand) * g_PistolCasingRotationScaleX) * newvely) - g_PistolCasingRotationOffsetX;
@@ -5111,6 +5709,13 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->pos.z += frac * casing->vel.z;
  
         // Keep the 0 + 1 for matching.
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingAddPlayerMotion(&casing->vel);
+        }
+        else
+#endif
         if (g_ClockTimer >= (0 + 1))
         {
             casing->vel.x += (THROWPOS(0) - THROWPREV(0)) / g_GlobalTimerDelta;
@@ -5127,7 +5732,16 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->vel.y = ((rand * g_RifleCasingVerticalSpeed) * 0.125f) + g_RifleCasingVerticalSpeed;
         casing->vel.z = 0.0f;
  
-        mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingRotateEjectVelocity(&mtx, &casing->vel);
+        }
+        else
+#endif
+        {
+            mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+        }
  
         rand = ((f32) ((u32) randomGetNext())) * 2.3283064e-10f;
         rot.x = (((rand + rand) * g_RifleCasingRotationScaleX) * 0.0625f) - g_RifleCasingRotationOffsetX;
@@ -5163,6 +5777,13 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->pos.x += frac * casing->vel.x;
         casing->pos.z += frac * casing->vel.z;
  
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingAddPlayerMotion(&casing->vel);
+        }
+        else
+#endif
         if (g_ClockTimer > 0)
         {
             casing->vel.x += (THROWPOS(0) - THROWPREV(0)) / g_GlobalTimerDelta;
@@ -5336,6 +5957,9 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
 #endif
     s32 handoffset;
     u32 randval;
+#ifdef GE_MODDED_CHEATS
+    s32 useTpCasing;
+#endif
 #if VERSION_EU
     s32 pad[2];
 #endif
@@ -5350,22 +5974,30 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
     }
  
     handoffset = handnum * sizeof(struct hand);
-    switch0 = g_CurrentPlayer->copy_of_body_obj_header[handnum].Switches[0];
- 
-    if (switch0 != NULL)
+
+#ifdef GE_MODDED_CHEATS
+    useTpCasing = tpCasingBuildEjectMtx(handnum, &mtx);
+
+    if (!useTpCasing)
+#endif
     {
-        switchdata = (coord3d *) switch0->Data;
+        switch0 = g_CurrentPlayer->copy_of_body_obj_header[handnum].Switches[0];
  
-        switchpos.x = switchdata->x * g_CasingSwitchScale;
-        switchpos.y = switchdata->y * g_CasingSwitchScale;
-        switchpos.z = switchdata->z * g_CasingSwitchScale;
+        if (switch0 != NULL)
+        {
+            switchdata = (coord3d *) switch0->Data;
  
-        matrix_4x4_set_identity_and_position(&switchpos, &mtx);
-        matrix_4x4_multiply_in_place(THROWMTX, &mtx);
-    }
-    else
-    {
-        matrix_4x4_copy(THROWMTX, &mtx);
+            switchpos.x = switchdata->x * g_CasingSwitchScale;
+            switchpos.y = switchdata->y * g_CasingSwitchScale;
+            switchpos.z = switchdata->z * g_CasingSwitchScale;
+ 
+            matrix_4x4_set_identity_and_position(&switchpos, &mtx);
+            matrix_4x4_multiply_in_place(THROWMTX, &mtx);
+        }
+        else
+        {
+            matrix_4x4_copy(THROWMTX, &mtx);
+        }
     }
  
     casing = casingCreate(cartridge_header, &mtx);
@@ -5388,7 +6020,16 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->vel.y = ((rand * 2.5f) * 0.0625f) + 2.5f;
         casing->vel.z = frac * 0.0f;
  
-        mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingRotateEjectVelocity(&mtx, &casing->vel);
+        }
+        else
+#endif
+        {
+            mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+        }
  
         rand = ((f32) ((u32) randomGetNext())) * 2.3283064e-10f;
         rot.x = (((rand + rand) * g_PistolCasingRotationScaleX) * newvely) - g_PistolCasingRotationOffsetX;
@@ -5428,6 +6069,13 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->pos.z += frac * casing->vel.z;
  
         // Keep the 0 + 1 for matching.
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingAddPlayerMotion(&casing->vel);
+        }
+        else
+#endif
         if (g_ClockTimer >= (0 + 1))
         {
             casing->vel.x += (THROWPOS(0) - THROWPREV(0)) / g_GlobalTimerDelta;
@@ -5444,7 +6092,16 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->vel.y = ((rand * g_RifleCasingVerticalSpeed) * 0.125f) + g_RifleCasingVerticalSpeed;
         casing->vel.z = 0.0f;
  
-        mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingRotateEjectVelocity(&mtx, &casing->vel);
+        }
+        else
+#endif
+        {
+            mtx4RotateVecInPlace(THROWMTX, &casing->vel);
+        }
  
         rand = ((f32) ((u32) randomGetNext())) * 2.3283064e-10f;
         rot.x = (((rand + rand) * g_RifleCasingRotationScaleX) * 0.0625f) - g_RifleCasingRotationOffsetX;
@@ -5480,6 +6137,13 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
         casing->pos.x += frac * casing->vel.x;
         casing->pos.z += frac * casing->vel.z;
  
+#ifdef GE_MODDED_CHEATS
+        if (useTpCasing)
+        {
+            tpCasingAddPlayerMotion(&casing->vel);
+        }
+        else
+#endif
         if (g_ClockTimer > 0)
         {
             casing->vel.x += (THROWPOS(0) - THROWPREV(0)) / g_GlobalTimerDelta;
@@ -5632,7 +6296,15 @@ void sub_GAME_7F068EC4(CasingRecord *casing, Gfx **gdl)
 
     if (matrix_translation_in_range)
     {
+#ifdef GE_MODDED_CHEATS
+        /* Retail GE draws casings as a foreground weapon effect with Z disabled.
+         * That is acceptable for the first-person overlay, but a world-space
+         * Third Person casing must be occluded by world geometry. Perfect Dark
+         * made the same evolution and renders its world casings with Z enabled. */
+        render_data.zbufferenabled = modThirdPersonActive(get_cur_playernum()) ? 1 : 0;
+#else
         render_data.zbufferenabled = 0;
+#endif
         render_data.gdl            = savedgdl;
         render_data.mtxlist        = (Mtxf *)model_matrices;
         render_data.PropType       = PROP_TYPE_WEAPON;
@@ -5992,7 +6664,7 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
             }
 
 #ifdef GE_MODDED_CHEATS
-            /* R19: equipment selected through B+Z/the watch has no ammo HUD.
+            /* R19: equipment selected through A+B/the watch has no ammo HUD.
              * Put its watch/inventory name at the normal right-ammo location. */
             if (weapon_right >= ITEM_BOMBCASE && weapon_right < ITEM_IDS_MAX)
             {
@@ -6283,6 +6955,15 @@ void gunDrawSight(s32 *gdl) {
     f32 xypos[2];
     f32 halfedxy[2];
 
+#ifdef GE_MODDED_CHEATS
+    /* Third Person owns a real depth-tested world-space reticle.  Never draw a
+     * second HUD-space sight over it; First Person keeps the retail path below. */
+    if (modThirdPersonActive(get_cur_playernum()))
+    {
+        return;
+    }
+#endif
+
     if ((g_CurrentPlayer->gunsightmode == 0) && (g_CurrentPlayer->mpmenuon == FALSE)) {
         sp54 = *gdl;
         texSelect(&sp54, crosshairimage, 4, 0, 0);
@@ -6301,6 +6982,188 @@ void gunDrawSight(s32 *gdl) {
         *gdl = sp54;
     }
 }
+
+
+#ifdef GE_MODDED_CHEATS
+/*
+ * Render the Third Person crosshair as actual depth-tested world geometry.
+ *
+ * The player's normal movable crosshair still defines the camera ray.  The
+ * visual resolver chooses only a DEPTH along that same ray; it never changes
+ * screen X/Y toward the hand, muzzle, enemy or object.  A camera-facing quad
+ * is then drawn at that world point.  Because it participates in the ordinary
+ * Z buffer, Bond, his held weapon and nearer world geometry naturally cover it.
+ */
+void gunRenderThirdPersonWorldSight(Gfx **gdlptr)
+{
+    Gfx *gdl;
+    Gfx *cmd;
+    Vtx *vtx;
+    Vtx base;
+    Mtx *mtx;
+    Mtxf mtxf;
+    Mtxf *viewtoworld;
+    coord3d point;
+    coord3d viewpoint;
+    coord3d cameraorigin;
+    coord3d delta;
+    coord3d right;
+    coord3d up;
+    f32 dist;
+    f32 depth;
+    f32 halfpixels;
+    f32 halfangle;
+    f32 halfworld;
+    f32 s;
+    f32 c;
+    f32 screenheight;
+
+    if (gdlptr == NULL || !modThirdPersonActive(get_cur_playernum())
+            || g_CurrentPlayer == NULL
+            || g_CurrentPlayer->gunsightmode != 0
+            || g_CurrentPlayer->mpmenuon != FALSE
+            || crosshairimage == NULL
+            || !chrpropGetThirdPersonReticlePoint(GUNRIGHT, &point))
+    {
+        return;
+    }
+
+    viewtoworld = currentPlayerGetViewToWorldMtxf();
+    if (viewtoworld == NULL)
+    {
+        return;
+    }
+
+    /* Compute the billboard's world size at the resolved depth first.  V63
+     * pulled only the centre 1.5 units toward the camera; at an oblique wall,
+     * floor or character that left the outer arms behind the hit surface and
+     * visibly sliced the crosshair.  Pull by the quad's own radius instead.
+     * The movement is still strictly along the same camera ray, so free-aim
+     * screen X/Y cannot move. */
+    cameraorigin.f[0] = 0.0f;
+    cameraorigin.f[1] = 0.0f;
+    cameraorigin.f[2] = 0.0f;
+    mtx4TransformVecInPlace(viewtoworld, &cameraorigin);
+
+    viewpoint = point;
+    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &viewpoint);
+    if (viewpoint.z >= -1.0f) return;
+
+    screenheight = getPlayer_c_screenheight();
+    if (screenheight < 1.0f) return;
+
+    halfpixels = g_CurrentPlayer->insightaimmode ? 16.0f : 10.0f;
+    halfangle = viGetFovY() * (M_TAU_F / 720.0f);
+    s = sinf(halfangle);
+    c = cosf(halfangle);
+    if (c > -0.0001f && c < 0.0001f) return;
+
+    depth = -viewpoint.z;
+    halfworld = depth * (s / c) * ((halfpixels * 2.0f) / screenheight);
+    if (halfworld < 0.5f) halfworld = 0.5f;
+    if (halfworld > 2048.0f) halfworld = 2048.0f;
+
+    delta.x = point.x - cameraorigin.x;
+    delta.y = point.y - cameraorigin.y;
+    delta.z = point.z - cameraorigin.z;
+    dist = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+
+    if (dist > 2.0f)
+    {
+        f32 pull = halfworld * 1.6f + 1.5f;
+        if (pull > dist - 1.0f) pull = dist - 1.0f;
+        if (pull > 0.0f)
+        {
+            point.x -= delta.x / dist * pull;
+            point.y -= delta.y / dist * pull;
+            point.z -= delta.z / dist * pull;
+        }
+    }
+
+    /* Recompute apparent size after the safety pull so the quad keeps the
+     * retail crosshair's screen size. */
+    viewpoint = point;
+    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &viewpoint);
+    if (viewpoint.z >= -1.0f) return;
+    depth = -viewpoint.z;
+    halfworld = depth * (s / c) * ((halfpixels * 2.0f) / screenheight);
+    if (halfworld < 0.5f) halfworld = 0.5f;
+    if (halfworld > 2048.0f) halfworld = 2048.0f;
+
+    right.x = viewtoworld->m[0][0] * halfworld;
+    right.y = viewtoworld->m[0][1] * halfworld;
+    right.z = viewtoworld->m[0][2] * halfworld;
+    up.x = viewtoworld->m[1][0] * halfworld;
+    up.y = viewtoworld->m[1][1] * halfworld;
+    up.z = viewtoworld->m[1][2] * halfworld;
+
+    vtx = dynAllocateVertices(4);
+    mtx = dynAllocateMatrix();
+    if (vtx == NULL || mtx == NULL)
+    {
+        return;
+    }
+
+    base = D_80035C98;
+    vtx[0] = base;
+    vtx[1] = base;
+    vtx[2] = base;
+    vtx[3] = base;
+
+    /* Local offsets are already expressed in world-axis components.  The model
+     * matrix therefore needs only the reticle world's translation. */
+    vtx[0].v.ob[0] = (s16)(-right.x + up.x);
+    vtx[0].v.ob[1] = (s16)(-right.y + up.y);
+    vtx[0].v.ob[2] = (s16)(-right.z + up.z);
+    vtx[0].v.tc[0] = 0;
+    vtx[0].v.tc[1] = 0;
+
+    vtx[1].v.ob[0] = (s16)(right.x + up.x);
+    vtx[1].v.ob[1] = (s16)(right.y + up.y);
+    vtx[1].v.ob[2] = (s16)(right.z + up.z);
+    vtx[1].v.tc[0] = crosshairimage->width << 5;
+    vtx[1].v.tc[1] = 0;
+
+    vtx[2].v.ob[0] = (s16)(right.x - up.x);
+    vtx[2].v.ob[1] = (s16)(right.y - up.y);
+    vtx[2].v.ob[2] = (s16)(right.z - up.z);
+    vtx[2].v.tc[0] = crosshairimage->width << 5;
+    vtx[2].v.tc[1] = crosshairimage->height << 5;
+
+    vtx[3].v.ob[0] = (s16)(-right.x - up.x);
+    vtx[3].v.ob[1] = (s16)(-right.y - up.y);
+    vtx[3].v.ob[2] = (s16)(-right.z - up.z);
+    vtx[3].v.tc[0] = 0;
+    vtx[3].v.tc[1] = crosshairimage->height << 5;
+
+    matrix_4x4_set_identity_and_position(&point, &mtxf);
+    matrix_4x4_multiply_homogeneous_in_place(camGetWorldToScreenMtxf(), &mtxf);
+    matrix_4x4_f32_to_s32(&mtxf, (Mtxf *)mtx);
+
+    gdl = *gdlptr;
+    gDPPipeSync(gdl++);
+    gSPSetGeometryMode(gdl++, G_ZBUFFER);
+    gSPClearGeometryMode(gdl++, G_CULL_BACK);
+
+    cmd = gdl++;
+    cmd->words.w0 = _SHIFTL(G_MTX, 24, 8)
+        | _SHIFTL(G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH, 16, 8)
+        | _SHIFTL(sizeof(Mtx), 0, 16);
+    cmd->words.w1 = osVirtualToPhysical(mtx);
+
+    texSelect(&gdl, crosshairimage, 4, 1, 0);
+    gDPSetEnvColor(gdl++, 0xff, 0xff, 0xff, 0x6e);
+
+    /* Crosshair is an IA texture; the standard fade-alpha combiner preserves
+     * its transparent background while using the environment alpha above. */
+    gDPSetCombineMode(gdl++, G_CC_FADEA, G_CC_FADEA);
+
+    gSPVertex(gdl++, osVirtualToPhysical(vtx), 4, 0);
+    gSP2Triangles(gdl++, 0, 1, 2, 0, 0, 2, 3, 0);
+    *gdlptr = gdl;
+}
+#endif
+
 
 
 void inc_curplayer_hitcount_with_weapon(ITEM_IDS item, SHOT_REGISTER shot_register) {
@@ -6343,13 +7206,19 @@ void increment_num_kills_display_text_in_MP(void)
     if (getPlayerCount() < 2) { return; }
 
     mission_time = getMissiontimer();
-    sprintf(&buffer, aSD, langGet(getStringID(LGUN, GUN_STR_DA_KILLCOUNT)), g_playerPerm->kill_count); // "kill count"
+
+#ifdef GE_MODDED_CHEATS
+    if (g_MpKillCountMessageEnabled)
+#endif
+    {
+        sprintf(&buffer, aSD, langGet(getStringID(LGUN, GUN_STR_DA_KILLCOUNT)), g_playerPerm->kill_count); // "kill count"
 
 #if defined(VERSION_US)
-    hudmsgBottomShow(&buffer);
+        hudmsgBottomShow(&buffer);
 #elif defined(VERSION_JP) || defined(VERSION_EU)
-    jp_hudmsgBottomShow(&buffer);
+        jp_hudmsgBottomShow(&buffer);
 #endif
+    }
 
     if (g_playerPerm->kill_count >= 2)
     {

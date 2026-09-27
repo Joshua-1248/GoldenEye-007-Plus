@@ -11,6 +11,14 @@ if [ -z "${DATASEG_START_HEX}" ]; then
 fi
 DATASEG_START=$((16#${DATASEG_START_HEX}))
 
+# Map Maker/expanded-ROM builds deliberately move the temporary csegment to
+# the requested cartridge end. Catch linker/build-script disagreement before
+# truncating the ROM at the wrong location.
+if [ -n "${GE_ROM_SIZE_BYTES:-}" ] && [ "${DATASEG_START}" -ne "${GE_ROM_SIZE_BYTES}" ]; then
+    echo "ERROR: linker csegment starts at ${DATASEG_START} bytes, expected GE_ROM_SIZE_BYTES=${GE_ROM_SIZE_BYTES}" >&2
+    exit 1
+fi
+
 # LLD map rows are: VMA LMA SIZE ALIGN NAME.  Prefer that explicit .csegment
 # row, then fall back to the legacy GNU-map parser.
 DATASEG_LEN_HEX=$(awk '$5 == ".csegment" { print $3; exit }' "${MAPFILE}")
@@ -30,7 +38,7 @@ echo "truncate $1 to 0x$(printf "%x\n" ${DATASEG_START})"
 cat $1 | head --bytes=${DATASEG_START} > $1.tmp
 
 echo "compress data segment"
-tools/1172compress.sh build/$2/data_seg build/$2/data_seg.rz
+tools/1172compress.sh build/$2/data_seg build/$2/data_seg.rz --cdata-zopfli
 
 
 echo "inject data segment"

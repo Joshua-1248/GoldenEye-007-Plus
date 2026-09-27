@@ -12,6 +12,9 @@
 #include "objective_status.h"
 #include "random.h"
 
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 #define BULLET_SPARKS_MAX 20
 #define BULLET_MOVING_SPARKS_MAX 50
 #define GAUGE_BAR_VERTEX_PAIR_STRIDE (2 * sizeof(struct WatchVertex))

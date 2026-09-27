@@ -10262,7 +10262,34 @@ _AI_CMD(
     {
         AIRecord * ai = AiListp + Offset;
         f32       bondpos = (s16) CharArrayTo16(ai->val,0);
-        if (getCurrentPlayerProp()->pos.y < bondpos)
+        bool      condition = getCurrentPlayerProp()->pos.y < bondpos;
+#ifdef GE_MODDED_CHEATS
+        s32       playerIndex;
+
+        if (getPlayerCount() > 1
+            && get_scenario() == SCENARIO_COOP
+            && ChrEntityp != NULL
+            && ChrEntityp->chrnum == 0xfe)
+        {
+            condition = FALSE;
+
+            for (playerIndex = 0; playerIndex < getPlayerCount(); playerIndex++)
+            {
+                struct player *player = g_playerPointers[playerIndex];
+
+                if (player != NULL
+                    && player->prop != NULL
+                    && player->prop->stan != NULL
+                    && player->bonddead == FALSE
+                    && player->prop->pos.y < bondpos)
+                {
+                    condition = TRUE;
+                    break;
+                }
+            }
+        }
+#endif
+        if (condition)
         {
             Offset = chraiGoToLabel(AiListp, Offset, ai->val[2]);
         }

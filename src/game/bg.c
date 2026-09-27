@@ -20,6 +20,11 @@
 #include "stan.h"
 #include "explosion.h"
 #include "bgroomtrans.h"
+#ifdef GE_MODDED_CHEATS
+#include "front.h"
+#include "mirroredlevels.h"
+#include "cheat.h"
+#endif
 
 
 #define BG_STACK_SIZE 20
@@ -219,6 +224,10 @@ struct levelentry levelinfotable[] = {
     {LEVELID_CUBA,     "bg/bg_len_all_p.seg",  "Tbg_len_all_p_stanZ",  0.094662853, 1.0,        6.6844921},
     {LEVELID_WAX,      "bg/bg_wax_all_p.seg",  "Tbg_wax_all_p_stanZ",  0.94285715,  1.0,        10.123456},
     {LEVELID_PAM,      "bg/bg_pam_all_p.seg",  "Tbg_pam_all_p_stanZ",  0.94285715,  1.0,        10.123456},
+#ifdef GE_MAP_MAKER
+    /* Private one-room bootstrap shell. The authored Map Maker world replaces it after load. */
+    {LEVELID_MAP_MAKER,"bg/bg_mapmaker_all_p.seg", "Tbg_mapmaker_all_p_stanZ", 1.0, 1.0, 100.0},
+#endif
     {LEVELID_MAX,      "bg/bgx.seg",           "TbgxZ",                0.94285715,  1.0,        1.0}
 };
 
@@ -238,6 +247,27 @@ s_specialportal specialportalarray[] = {
  * Address 0x80044838
 */
 s32 g_BgCurrentRoom = 1;
+
+#ifdef GE_MODDED_CHEATS
+/* Third Person background visibility must use a self-consistent camera room
+ * and camera origin.  The previous TP19 experiment changed only
+ * g_BgCurrentRoom while portal side tests still used Bond's position; after
+ * repeated room transitions that could make the portal traversal start on one
+ * side of a portal while testing from the other, producing unloaded/black
+ * rooms. */
+static s32 g_ModThirdPersonBgOriginActive = FALSE;
+static coord3d g_ModThirdPersonBgOrigin;
+
+static coord3d *bgGetVisibilityOrigin(void)
+{
+    if (g_ModThirdPersonBgOriginActive)
+    {
+        return &g_ModThirdPersonBgOrigin;
+    }
+
+    return bondviewGetCurrentPlayersPosition();
+}
+#endif
 
 /**
  * Total number of rooms drawn for the current frame.
@@ -900,6 +930,183 @@ s32 getPointTableBinCount(s32 room)
 /*
  * Address: 0x7F0B4124
 */
+
+#ifdef GE_MODDED_CHEATS
+static s32 g_MirrorLevelsBgEnabled = FALSE;
+
+static void bgMirrorRoomVerticesRaw(s32 roomnum)
+{
+    Vtx *vtx;
+    Vtx *end;
+
+    if (roomnum <= 0 || roomnum >= g_MaxNumRooms || g_BgRoomInfo[roomnum].vertices == NULL)
+    {
+        return;
+    }
+
+    vtx = g_BgRoomInfo[roomnum].vertices;
+    end = (Vtx *)((u8 *)vtx + g_BgRoomInfo[roomnum].usize_point_index_binary);
+
+    for (; vtx < end; vtx++)
+    {
+        vtx->v.ob[0] = -vtx->v.ob[0];
+    }
+}
+
+static void bgMirrorGdlWindingRaw(Gfx *gdl, u32 size)
+{
+    Gfx *end;
+
+    if (gdl == NULL || size == 0)
+    {
+        return;
+    }
+
+    end = (Gfx *)((u8 *)gdl + size);
+
+    for (; gdl < end; gdl++)
+    {
+        u8 op = ((u8 *)gdl)[0];
+
+        if (op == (u8)G_TRI1)
+        {
+            u8 tmp = ((u8 *)gdl)[6];
+            ((u8 *)gdl)[6] = ((u8 *)gdl)[7];
+            ((u8 *)gdl)[7] = tmp;
+        }
+        else if (op == (u8)G_TRI4)
+        {
+            u32 w0 = (u32)gdl->words.w0;
+            u32 w1 = (u32)gdl->words.w1;
+            u32 nw0 = w0 & 0xffff0000u;
+            u32 nw1 = 0;
+            s32 tri;
+
+            for (tri = 0; tri < 4; tri++)
+            {
+                u32 x = (w1 >> (tri * 8)) & 0x0fu;
+                u32 y = (w1 >> (tri * 8 + 4)) & 0x0fu;
+                u32 z = (w0 >> (tri * 4)) & 0x0fu;
+
+                nw0 |= y << (tri * 4);
+                nw1 |= x << (tri * 8);
+                nw1 |= z << (tri * 8 + 4);
+            }
+
+            gdl->words.w0 = nw0;
+            gdl->words.w1 = nw1;
+        }
+    }
+}
+
+static void bgMirrorRoomGdlRaw(s32 roomnum)
+{
+    if (roomnum <= 0 || roomnum >= g_MaxNumRooms || !g_BgRoomInfo[roomnum].model_bin_loaded)
+    {
+        return;
+    }
+
+    bgMirrorGdlWindingRaw(g_BgRoomInfo[roomnum].ptr_expanded_mapping_info,
+                          g_BgRoomInfo[roomnum].usize_primary_DL_binary);
+    bgMirrorGdlWindingRaw(g_BgRoomInfo[roomnum].ptr_secondary_expanded_mapping_info,
+                          g_BgRoomInfo[roomnum].usize_secondary_DL_binary);
+}
+
+static void bgMirrorPortalRaw(bg_portal_entry *portal)
+{
+    coord3d tmp[16];
+    s32 i;
+    s32 count;
+
+    if (portal == NULL)
+    {
+        return;
+    }
+
+    count = portal->numPoints;
+    if (count > 16)
+    {
+        count = 16;
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        tmp[i] = (&portal->point)[i];
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        coord3d src = tmp[count - 1 - i];
+        (&portal->point)[i] = src;
+        (&portal->point)[i].x = -src.x;
+    }
+}
+
+static void bgMirrorRebuildPortalState(void)
+{
+    s32 i;
+
+#ifdef GE_PHYSICAL_FASTPATHS
+    g_BgFastPortalCount = 0;
+#endif
+
+    for (i = 0; g_BgPortals != NULL && g_BgPortals[i].offset_portal != NULL; i++)
+    {
+        D_800443C4[i] = sub_GAME_7F0B993C(i);
+    }
+
+    for (i = 0; g_BgPortals != NULL && g_BgPortals[i].offset_portal != NULL; i++)
+    {
+        bgOrderPortal(i);
+    }
+
+#ifdef GE_PHYSICAL_FASTPATHS
+    bgBuildPortalFastCache();
+    bgBuildPortalMetricCache();
+#endif
+
+    for (i = 0; i < g_MaxNumRooms; i++)
+    {
+        sub_GAME_7F0B95D8(i);
+    }
+
+    sub_GAME_7F0B37EC();
+}
+
+void bgMirrorLevelsToggle(s32 enabled)
+{
+    s32 i;
+
+    enabled = enabled ? TRUE : FALSE;
+
+    if (enabled == g_MirrorLevelsBgEnabled || g_MaxNumRooms <= 1)
+    {
+        return;
+    }
+
+    for (i = 1; i < g_MaxNumRooms; i++)
+    {
+        bg_room_data *roomdata = &ptr_bgdata_room_fileposition_list[i];
+        f32 oldmin = g_BgRoomInfo[i].minbounds.x;
+        f32 oldmax = g_BgRoomInfo[i].maxbounds.x;
+
+        roomdata->pos.x = -roomdata->pos.x;
+        g_BgRoomInfo[i].minbounds.x = -oldmax;
+        g_BgRoomInfo[i].maxbounds.x = -oldmin;
+        bgMirrorRoomVerticesRaw(i);
+        bgMirrorRoomGdlRaw(i);
+    }
+
+    for (i = 0; g_BgPortals != NULL && g_BgPortals[i].offset_portal != NULL; i++)
+    {
+        bgMirrorPortalRaw(g_BgPortals[i].offset_portal);
+    }
+
+    g_MirrorLevelsBgEnabled = enabled;
+    bgMirrorRebuildPortalState();
+}
+#endif
+
 void load_bg_file(LEVEL_INDEX levelid)
 {
     typedef struct bg_envdata_entry_local {
@@ -913,6 +1120,10 @@ void load_bg_file(LEVEL_INDEX levelid)
     s32 *data;
  
     levelentry_index = 0;
+#ifdef GE_MODDED_CHEATS
+    g_MirrorLevelsBgEnabled = FALSE;
+    mirrorLevelsStageReset();
+#endif
 
     for (i = 0; i < MAXROOMCOUNT; i++) 
     {
@@ -945,6 +1156,13 @@ void load_bg_file(LEVEL_INDEX levelid)
     gptr_stan = (s32) _fileNameLoadToBank(levelinfotable[levelentry_index].bg_stan_filename, 2, 0, 4);
  
     stanDetermineEOF((struct StanPrefixRecord *) gptr_stan, 0, (u8 *) gptr_stan);
+#ifdef GE_MODDED_CHEATS
+    /* Mirrored Levels is gameplay-only.  The title/front-end stage is the
+     * mission-report/menu host; reflecting its BG/STAN while the persistent
+     * cheat bit remains enabled can corrupt the transition out of a mission. */
+    stanMirrorLevelsSetEnabled(levelid != LEVELID_TITLE
+            && cheatIsActive(CHEAT_MIRRORED_LEVELS));
+#endif
     stanLoadFile((struct StanPrefixRecord *) gptr_stan);
  
     sub_GAME_7F0B4810(levelinfotable[levelentry_index].levelscale);
@@ -1128,6 +1346,19 @@ void load_bg_file(LEVEL_INDEX levelid)
         }
  
         sub_GAME_7F0B37EC();
+
+#ifdef GE_MODDED_CHEATS
+        {
+            s32 mirrorenabled = levelid != LEVELID_TITLE
+                    && cheatIsActive(CHEAT_MIRRORED_LEVELS);
+            stanMirrorLevelsSetEnabled(mirrorenabled);
+            if (mirrorenabled)
+            {
+                bgMirrorLevelsToggle(TRUE);
+            }
+            mirrorLevelsStageBegin(mirrorenabled);
+        }
+#endif
     }
  
     fogRemoved7F0BAA5C(levelid);
@@ -1171,9 +1402,6 @@ f32 bgGetLevelVisibilityScale(void) {
 
 // defined later in the same file
 extern void bgRoomsTickUnload(void);
-#ifdef GE_MODDED_CHEATS
-extern void bgModGarbageCollectRoomsForLoad(s32 bytesneeded);
-#endif
 
 void bgRoomVisibilityRelated(void)
 {
@@ -1194,7 +1422,11 @@ void bgRoomVisibilityRelated(void)
 
     num_visible_rooms_in_cur_global_vis_packet = 0;
 
-    if (get_player_position_in_shuffled(get_cur_playernum()) == 0) {
+    if (get_player_position_in_shuffled(get_cur_playernum()) == 0
+#ifdef GE_MODDED_CHEATS
+        || (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+#endif
+    ) {
         bgRoomsTickUnload();
     }
 
@@ -1278,6 +1510,54 @@ void bgRoomVisibilityRelated(void)
     }
 
     g_BgCurrentRoom = room;
+
+#ifdef GE_MODDED_CHEATS
+    /* Third Person visibility is camera-space, not player-space.
+     * Resolve the chase camera's room by tracing from Bond's authoritative
+     * room to the camera, then keep BOTH the seed room and the portal side-test
+     * origin in camera space.  Changing only the room (the TP19 approach) was
+     * inconsistent and caused black/unloaded rooms after repeated transitions.
+     * Gameplay room/STAN/collision remain untouched because these globals are
+     * consumed only by the background visibility pass. */
+    g_ModThirdPersonBgOriginActive = FALSE;
+
+    {
+        coord3d thirdcam;
+
+        if (bondviewGetThirdPersonVisibilityCamera(&thirdcam))
+        {
+            u8 startrooms[8];
+            u8 finalrooms[8];
+            s32 traversed[16];
+            s32 traversedcount = 0;
+            s32 j;
+
+            startrooms[0] = (u8) room;
+            for (j = 1; j < 8; j++)
+            {
+                startrooms[j] = 0xff;
+            }
+
+            finalrooms[0] = 0xff;
+            bgFindRoomsAlongSegment(pos, &thirdcam, startrooms, finalrooms,
+                traversed, &traversedcount, 16);
+
+            if (finalrooms[0] != 0xff)
+            {
+                g_BgCurrentRoom = finalrooms[0];
+                g_ModThirdPersonBgOrigin = thirdcam;
+                g_ModThirdPersonBgOriginActive = TRUE;
+
+                /* A chase camera can expose a newly crossed portal before Bond
+                 * reaches it.  Give the visual pass enough load budget to avoid
+                 * a several-frame black room while preserving stock gameplay
+                 * room ownership. */
+                g_RoomLoadBudget = 0xc8;
+            }
+        }
+    }
+#endif
+
     bgDetermineVisibleRooms();
 }
 
@@ -2658,8 +2938,16 @@ void bgLoadRoomModelData(s32 roomID)
     }
 
 #ifdef GE_MODDED_CHEATS
-    /* PD-style room GC: cached-size reloads can fail when mema is fragmented. */
-    if (getPlayerCount() == 1 && g_BgRoomInfo[roomID].cur_room_totalsize > 0)
+    /*
+     * PD-style room GC: cached-size reloads can fail when mema is fragmented.
+     * R21 restricted this recovery to one player after a real split-screen
+     * room lifetime bug.  R22 now pins both in-flight graphics-buffer
+     * generations, so campaign Co-Op can safely reclaim only room data that
+     * no submitted/current display list can still reference.
+     */
+    if (g_BgRoomInfo[roomID].cur_room_totalsize > 0
+        && (getPlayerCount() == 1
+            || (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)))
     {
         bgModGarbageCollectRoomsForLoad(allocsize);
     }
@@ -2680,6 +2968,14 @@ void bgLoadRoomModelData(s32 roomID)
         {
             used = result;
             redarken_lights_in_room(roomID);
+#ifdef GE_MODDED_CHEATS
+            if (g_MirrorLevelsBgEnabled)
+            {
+                /* Newly streamed rooms are decompressed from the original BG
+                 * asset, so reflect their room-local X vertices on arrival. */
+                bgMirrorRoomVerticesRaw(roomID);
+            }
+#endif
         }
         else
         {
@@ -2747,12 +3043,40 @@ void bgLoadRoomModelData(s32 roomID)
         g_BgRoomInfo[roomID].usize_secondary_DL_binary = 0;
         g_BgRoomInfo[roomID].model_bin_loaded = 0;
         memaDefrag();
+
+        /*
+         * On the first ever load of a room there is no cached expanded size,
+         * so GoldenEye allocates the current longest free block and only then
+         * discovers whether it was large enough.  In Co-Op, four independent
+         * viewports can fragment the small campaign room heap enough for that
+         * first attempt to be short.  Progressively grow the longest safe free
+         * run for the next visible-frame retry instead of leaving the room
+         * absent until an unrelated inventory/camera state change happens to
+         * shake memory loose.
+         */
+        if (g_BgRoomInfo[roomID].cur_room_totalsize <= 0
+            && gamemode == GAMEMODE_MULTI
+            && get_scenario() == SCENARIO_COOP)
+        {
+            s32 longest = memaGetLongestFree();
+            bgModGarbageCollectRoomsForLoad(longest + 0x1000);
+        }
+
         goto end;
     }
 #endif
 
     g_BgRoomInfo[roomID].cur_room_totalsize = ((used + 0x20) & ~0xf);
     g_BgRoomInfo[roomID].model_bin_loaded = 1;
+#ifdef GE_MODDED_CHEATS
+    if (g_MirrorLevelsBgEnabled)
+    {
+        /* Reflection reverses triangle handedness. Swap triangle winding in
+         * the newly decompressed room display lists so ordinary back-face
+         * culling remains correct rather than disabling culling globally. */
+        bgMirrorRoomGdlRaw(roomID);
+    }
+#endif
 
     // If wasted space is detected, shrink allocated memory block.
     if (allocsize != ((used + 0x20) & ~0xf))
@@ -2923,6 +3247,9 @@ Gfx *bgRenderRoomPrimary(Gfx *gdl, s32 room_index)
 
             gSPSegment(gdl++, SPSEGMENT_BG_VTX, OS_K0_TO_PHYSICAL(g_BgRoomInfo[room_index].vertices));
             gSPDisplayList(gdl++, OS_K0_TO_PHYSICAL(g_BgRoomInfo[room_index].ptr_expanded_mapping_info));
+#ifdef GE_MODDED_CHEATS
+            bgModPinRoomForFrame(room_index);
+#endif
 
             // Set the room's state to "loaded"
             g_BgRoomInfo[room_index].model_bin_loaded = 1;
@@ -2958,6 +3285,9 @@ Gfx *bgRenderRoomSecondary(Gfx *gdl, s32 room_index)
 
             gSPSegment(gdl++, SPSEGMENT_BG_VTX, OS_K0_TO_PHYSICAL(g_BgRoomInfo[room_index].vertices));
             gSPDisplayList(gdl++, OS_K0_TO_PHYSICAL(g_BgRoomInfo[room_index].ptr_secondary_expanded_mapping_info));
+#ifdef GE_MODDED_CHEATS
+            bgModPinRoomForFrame(room_index);
+#endif
 
             // Set the room's state to "loaded"
             g_BgRoomInfo[room_index].model_bin_loaded = 1;
@@ -3936,7 +4266,11 @@ void sub_GAME_7F0B7F84(s32 roomnum, s32 portalnum /*canonically p*/, s32 depth, 
 
     if (i);
  
+    #ifdef GE_MODDED_CHEATS
+    playerpos = bgGetVisibilityOrigin();
+#else
     playerpos = bondviewGetCurrentPlayersPosition();
+#endif
     sub_GAME_7F0B96CC(portalnum, &metric);
     playermetric = ((metric.normal.z * playerpos->z) + ((metric.normal.x * playerpos->x) + (metric.normal.y * playerpos->y))) * room_data_float1;
     portalmetric = sub_GAME_7F0B9990(portalnum);
@@ -4093,7 +4427,11 @@ s32 sub_GAME_7F0B7F84(s32 value, s32 roomnum, s32 portalnum /*canonically p*/, s
 
     if (i);
  
+    #ifdef GE_MODDED_CHEATS
+    playerpos = bgGetVisibilityOrigin();
+#else
     playerpos = bondviewGetCurrentPlayersPosition();
+#endif
     sub_GAME_7F0B96CC(portalnum, &metric);
     playermetric = ((metric.normal.z * playerpos->z) + ((metric.normal.x * playerpos->x) + (metric.normal.y * playerpos->y))) * room_data_float1;
     portalmetric = sub_GAME_7F0B9990(portalnum);

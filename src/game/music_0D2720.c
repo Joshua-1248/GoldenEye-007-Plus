@@ -36,6 +36,9 @@ struct music_setup music_setup_entries[] = {
     { LEVELID_SHO,       M_SURFACE2,     0xFFFF,   0xFFFF },
     { LEVELID_SURFACE2,  M_SURFACE2,     M_WIND,   M_SURFACE2END },
     { LEVELID_CUBA,      M_CUBA,         0xFFFF,   0xFFFF },
+#ifdef GE_MAP_MAKER
+    { LEVELID_MAP_MAKER, M_NONE,         0xFFFF,   0xFFFF },
+#endif
     { 0 }
 };
 

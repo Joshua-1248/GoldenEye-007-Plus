@@ -41,10 +41,10 @@ def has(f, *needles):
     return all(n in s for n in needles)
 
 check('R21 ROM revision is 0x15', '0x15' in files['src/rom_header.s'])
-check('B+Z queued mission-item path exists', has('src/game/bondinv.c','g_MissionItemQueueValid','bondinvProcessMissionItemQueue','gunRequestHandWeaponChange'))
-check('B+Z queue is ticked after gun update', 'bondinvProcessMissionItemQueue();' in files['src/game/bondview2.c'])
-check('RC9 B+Z chord requires prior B plus fresh Z edge', has('src/game/bondview2.c','(oldbuttons & B_BUTTON)','!(oldbuttons & Z_TRIG)','bzInventoryPressed = TRUE;'))
-check('RC9 B+Z valid chord remains consumed until release', has('src/game/bondview2.c','if (bzInventoryChord)','buttons &= ~(B_BUTTON | Z_TRIG);'))
+check('A+B queued mission-item path exists', has('src/game/bondinv.c','g_MissionItemQueueValid','bondinvProcessMissionItemQueue','gunRequestHandWeaponChange'))
+check('A+B queue is ticked after gun update', 'bondinvProcessMissionItemQueue();' in files['src/game/bondview2.c'])
+check('R22 A+B chord requires prior A plus fresh B edge', has('src/game/bondview2.c','(oldbuttons & A_BUTTON)','!(oldbuttons & B_BUTTON)','abGadgetPressed = TRUE;'))
+check('R22 A+B chord redirects pre-draw and waits behind an active draw', has('src/game/bondview2.c','(oldbuttons & A_BUTTON)','!(oldbuttons & B_BUTTON)','bondinvWeaponSwitchInProgress()','abGadgetPressed = TRUE;') and has('src/game/bondinv.c','MISSION_ITEM_QUEUE_REDIRECT','MISSION_ITEM_QUEUE_WAIT_DRAW','bondinvHandHasPassedRedirectWindow','gunRequestHandWeaponChange(GUNRIGHT, item, 1)'))
 check('Shared Co-Op mission item registries exist', has('src/game/bondinv.c','g_CoopSharedProps','g_CoopSharedItems','bondinvShareCoopItem','bondinvShareCoopProp'))
 check('Shared mission items restore during inventory reinit', has('src/game/bondinv.c','g_CoopSharedPropCount','bondinvAddPropToInv(g_CoopSharedProps[i])','bondinvAddInvItem(i)'))
 check('Mission pickups feed the shared registry', has('src/game/propobj.c','bondinvShareCoopItem','bondinvShareCoopProp'))
@@ -94,7 +94,7 @@ for rel, text in files.items():
             if '?' in m.group(1):
                 conditional_stringids.append((rel, m.group(0)))
 check('No unguarded conditional getStringID calls remain', len(conditional_stringids) == 2 and any(rel == 'src/game/mpmenu.c' and '(g_pausedFlag ?' in call for rel, call in conditional_stringids) and any(rel == 'src/game/front.c' and 'CHEAT_NO_RADAR_MP' in call for rel, call in conditional_stringids) and 'Multiplayer Settings No Radar On/Off' in files['scripts/patch_r21_front_textids.py'])
-check('Options Page 2 exposes all five requested settings', has('src/game/front.c','Head Roll','Endless Death Cam','Real-Time Collapse','Disable Hitstun','Damage Flash') or has('src/game/spectrum.c','Head Roll','Endless Death Cam','Real-Time Collapse','Disable Hitstun','Damage Flash'))
+check('Options Page 2 exposes all five requested settings', has('src/game/front.c','Head Roll','Endless Death Cam','Real-Time Collapse','Damage Hitstun','Damage Flash') or has('src/game/spectrum.c','Head Roll','Endless Death Cam','Real-Time Collapse','Damage Hitstun','Damage Flash'))
 check('Extended option defaults are Head Roll/Damage Flash On and death/hitstun options Off', has('src/game/file2.h','DEFAULT_MOD_OPTIONS2','MODOPT2_MIGRATED | MODOPT2_DAMAGE_FLASH') and 'OPTION_HEADROLL' in files['src/game/file2.h'])
 check('Endless Death Cam loops solo death replay without incrementing finite replay count', has('src/game/bondview2.c','MODOPT2_ENDLESS_DEATHCAM','bondviewSetCameraMode(CAMERAMODE_DEATH_CAM_SP)'))
 check('Real-Time Collapse uses full head animation speed', has('src/game/bondview2.c','MODOPT2_REALTIME_COLLAPSE','bheadSetSpeed','1.0f : 0.5f'))
@@ -106,7 +106,7 @@ check('Persistent non-manual crosshair is smaller while manual Aim keeps retail 
 check('Options labels were relocated out of compressed C data', 'g_ModOptionsLabels' not in files['src/game/front.c'] and has('src/game/spectrum.c','frontModGetOptionLabel','static u32 text[6]'))
 check('PD-style room allocation GC is called for cached room reloads', has('src/game/bg.c','bgModGarbageCollectRoomsForLoad(allocsize)','cur_room_totalsize > 0'))
 check('Room GC protects visible/neighbour rooms and defrags immediately', has('src/game/spectrum.c','model_bin_loaded > oldestage','!room->room_rendered','!room->room_neighbor_to_rendered','delete_room_data(oldestroom)','memaDefrag();') and '!room->field_35' not in files['src/game/spectrum.c'])
-check('Severnaya arrow decal disables mipmapping on all affected door variants', all('TEXTURETYPE_TILE, 0, 0, IMAGE_1242' in files[f] for f in ['assets/obseg/prop/sev_door3/Model.c','assets/obseg/prop/sev_door3_wind/Model.c','assets/obseg/prop/sev_door4_wind/Model.c','assets/obseg/prop/sev_door_v1/Model.c']))
+check('Severnaya arrow decal uses retail mipmapping on all affected door variants', all('TEXTURETYPE_MIPMAP, 0, 0, IMAGE_1242' in files[f] for f in ['assets/obseg/prop/sev_door3/Model.c','assets/obseg/prop/sev_door3_wind/Model.c','assets/obseg/prop/sev_door4_wind/Model.c','assets/obseg/prop/sev_door_v1/Model.c']))
 check('Build wrapper preserves all four complete custom Severnaya door directories', has('build_r21.sh','assets/obseg/prop/sev_door3','assets/obseg/prop/sev_door3_wind','assets/obseg/prop/sev_door4_wind','assets/obseg/prop/sev_door_v1'))
 
 check('Everything Unlocked ROM header is GoldenEye Plus', 'GoldenEye Plus      ' in files['src/rom_header.s'])

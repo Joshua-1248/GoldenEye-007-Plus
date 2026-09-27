@@ -29,11 +29,18 @@
 #include "language.h"
 #include "matrixmath.h"
 #include "objecthandler.h"
+#include "options.h"
 #include "player.h"
 #include "propobj.h"
 #include "stan.h"
 #include "model.h"
 #include "tex.h"
+
+#ifdef GE_PHYSICAL_FASTPATHS
+extern GunModelFileRecord gitem_structs[];
+extern WeaponStats default_weaponstats;
+#define CHR_GET_INST_SIZE_FAST(model) (modMicroOptimizationsEnabled() ? ((model)->obj->BoundingVolumeRadius * (model)->scale) : getinstsize(model))
+#endif
 
 #ifdef VERSION_EU
 #define GROUND_SMOOTH_FACTOR 0.118799984f /* 0x3DF34D68 (PAL-scaled 0.1) */
@@ -49,6 +56,10 @@ void chrUpdateAimProperties( ChrRecord *arg0);
 void chrUpdateAnim( ChrRecord *chr, s32 tickamount);
 void sub_GAME_7F057D44(f32 *arg0, f32 *arg1, f32 arg2);
 f32  get_007_health_mod(void);
+#ifdef GE_MODDED_CHEATS
+s32 bondviewGetThirdPersonLocalBodyAlpha(void);
+s32 bondviewThirdPersonPresentationActive(s32 player);
+#endif
 
 // end forward declarations
 
@@ -99,6 +110,8 @@ ChrRecord *g_ChrSlots = 0;
 s32 g_NumChrSlots = 0;
 
 #ifdef GE_MODDED_CHEATS
+bool g_ChrTestHitProbeNoSideEffects = FALSE;
+
 /*
  * GoldenEye campaign AI assumes that "Bond" is g_CurrentPlayer.  That is
  * fine in solo, but in Co-Op it makes a guard's target change with whichever
@@ -273,8 +286,13 @@ static s32 chrCoopFindNearestTargetPlayer(ChrRecord *chr)
     s32 i;
     s32 bestplayer = -1;
     f32 bestdist2 = 1.0e30f;
+#ifdef GE_PHYSICAL_FASTPATHS
+    s32 playercount = modMicroOptimizationsEnabled() ? getPlayerCount() : -1;
 
+    for (i = 0; i < (modMicroOptimizationsEnabled() ? playercount : getPlayerCount()); i++)
+#else
     for (i = 0; i < getPlayerCount(); i++)
+#endif
     {
         PropRecord *playerprop;
         f32 dx;
@@ -323,6 +341,18 @@ void chrCoopSetTargetPlayer(ChrRecord *chr, s32 playernum)
         || chr == NULL
         || chr->prop == NULL
         || chr->prop->type != PROP_TYPE_CHR)
+    {
+        return;
+    }
+
+    /*
+     * Perfect Dark's Co-Op buddies are TEAM_ALLY and never acquire human
+     * teammates as hostile targets.  GoldenEye has no campaign team field,
+     * so our escort/POI classification is the equivalent relationship.
+     * Keep their player reference for follow/escort logic only; a player
+     * sight/hit/noise must never become a hostile combat stimulus.
+     */
+    if (chrCoopShouldFollowNearestPlayer(chr))
     {
         return;
     }
@@ -404,6 +434,14 @@ s32 chrCoopGetTargetPlayer(ChrRecord *chr)
     if (gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP || chr == NULL || chr->prop == NULL)
     {
         return get_cur_playernum();
+    }
+
+    /* Shared campaign cinematics are authored around one canonical Bond.
+     * Keep all Bond-relative AI on P1 rather than allowing the normal Co-Op
+     * target sidecar to rotate context between viewports mid-cutscene. */
+    if (lvlIsCoopEndCutscene())
+    {
+        return PLAYER_1;
     }
 
     state = chrCoopGetTargetState(chr);
@@ -505,6 +543,26 @@ s32 chrCoopGetTargetPlayer(ChrRecord *chr)
     state->laststimulus60 = -1;
 
     return nextplayer;
+}
+
+PropRecord *chrCoopGetTargetProp(ChrRecord *chr)
+{
+    s32 playernum;
+
+    if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)
+    {
+        playernum = chrCoopGetTargetPlayer(chr);
+
+        if (playernum >= 0
+            && playernum < getPlayerCount()
+            && g_playerPointers[playernum] != NULL
+            && g_playerPointers[playernum]->prop != NULL)
+        {
+            return g_playerPointers[playernum]->prop;
+        }
+    }
+
+    return getCurrentPlayerProp();
 }
 
 #endif
@@ -1824,11 +1882,61 @@ s32 sub_GAME_7F01FC10(Model *model, coord3d *src, coord3d *dst, f32 *ground_y)
     s32 i;
     StandTile *tile;
     union ModelRwData *rwdata;
+#ifdef GE_MODDED_CHEATS
+    s32 tpPlayerVerticalY;
+    s32 tpTankSupportedY;
+    s32 tpPlayerNum;
+#endif
 
     chr = model->chr;
     moved = 0;
     ground = 0.0f;
     groundpos = src;
+#ifdef GE_MODDED_CHEATS
+    tpPlayerVerticalY = FALSE;
+    tpTankSupportedY = FALSE;
+    tpPlayerNum = -1;
+
+    /* Perfect Dark keeps the player's detected support and smoothed feet
+     * height as separate movement-owned values, and feeds both to the visible
+     * player chr.  Do the same continuously rather than only while the values
+     * differ.  At a ledge edge GoldenEye's raw body STAN can legally point at
+     * the lower floor while MoveBond still considers the collision cylinder
+     * supported by the upper ledge; using the raw body STAN there is the source
+     * of the remaining one-frame snap. */
+    if (chr->prop != NULL && chr->prop->type == PROP_TYPE_VIEWER)
+    {
+        tpPlayerNum = getPlayerPointerIndex(chr->prop);
+
+        if (tpPlayerNum >= 0 && tpPlayerNum < getPlayerCount())
+        {
+            struct player *tpplayer = g_playerPointers[tpPlayerNum];
+
+            if (playerCoopTankStandingOnTank(tpPlayerNum))
+            {
+                /* The tank deck is ground.  Keep the model in GoldenEye's
+                 * grounded branch, but substitute the live player base as the
+                 * support plane instead of the STAN underneath the vehicle. */
+                tpTankSupportedY = TRUE;
+            }
+            else if (tpplayer != NULL
+                && (g_CameraMode == CAMERAMODE_NONE
+                    || g_CameraMode == CAMERAMODE_FP
+                    || g_CameraMode == CAMERAMODE_MP)
+                && (getPlayerCount() >= 2 || bondviewThirdPersonPresentationActive(tpPlayerNum)))
+            {
+                /* V81: movement-owned player Y is a LIVE GAMEPLAY contract.
+                 * Do not leak it into POSEND cinematic bodies just because the
+                 * Third Person preference remains latched (or because this is
+                 * campaign Co-Op). Dam's bungee ending uses root translation
+                 * from ANIM_dam_jump; forcing the cinematic viewer back onto
+                 * player stanHeight/field_70 corrupts the first/third camera
+                 * cuts and prevents the authored fall from being followed. */
+                tpPlayerVerticalY = TRUE;
+            }
+        }
+    }
+#endif
 
     if (chr->prop->stan != NULL)
     {
@@ -1871,8 +1979,37 @@ s32 sub_GAME_7F01FC10(Model *model, coord3d *src, coord3d *dst, f32 *ground_y)
         if (!(chr->chrflags & CHRFLAG_LOCK_Y_POS))
         {
             ground = stanGetPositionYValue(chr->prop->stan, groundpos->x, groundpos->z);
+#ifdef GE_MODDED_CHEATS
+            if (tpTankSupportedY && tpPlayerNum >= 0 && g_playerPointers[tpPlayerNum] != NULL)
+            {
+                /* A player standing on the tank is grounded ON THE TANK. */
+                ground = g_playerPointers[tpPlayerNum]->field_70;
+            }
+            else if (tpPlayerVerticalY && tpPlayerNum >= 0 && g_playerPointers[tpPlayerNum] != NULL)
+            {
+                /* Do not use the visible body's instantaneous STAN as a second
+                 * floor authority.  MoveBond's stanHeight already includes
+                 * GoldenEye's collision-radius edge/support handling and is the
+                 * direct analogue of Perfect Dark's player->vv_ground. */
+                ground = g_playerPointers[tpPlayerNum]->stanHeight;
+            }
+#endif
             chr->ground = ground;
 
+#ifdef GE_MODDED_CHEATS
+            if (tpPlayerVerticalY)
+            {
+                /* Mirror Perfect Dark's player-body contract directly:
+                 *   chr ground    <- player detected support
+                 *   chr manground <- player smoothed feet Y
+                 * and never let the remote-character gravity/INIT path replace
+                 * either value. */
+                chr->chrflags &= ~CHRFLAG_INIT;
+                chr->manground = g_playerPointers[tpPlayerNum]->field_70;
+                chr->sumground = chr->manground / GROUND_SMOOTH_FACTOR;
+            }
+            else
+#endif
             if (chr->chrflags & CHRFLAG_INIT)
             {
                 rwdata = modelGetNodeRwData(model, model->obj->RootNode);
@@ -2207,6 +2344,86 @@ void chrpropCleanupForRemoval(PropRecord *prop)
     }
 }
 
+#ifdef GE_MODDED_CHEATS
+/*
+ * Third Person's live SP toggle needs to remove Bond's temporary external
+ * body without destroying mission props which are currently in his inventory.
+ *
+ * Retail bondviewRemovePlayerBody() is a cinematic/transition cleanup path.
+ * chrpropCleanupForRemoval() therefore permanently frees every child object of
+ * the viewer prop.  Generic mission pickups, however, are deliberately
+ * reparented to the player prop when collected while their InvItem keeps the
+ * original PropRecord pointer.  Using the retail cleanup for a live TP toggle
+ * can consequently delete an objective prop out from under the inventory,
+ * making get_status_of_objective() report FAILED on the next update.
+ *
+ * Keep retail cleanup unchanged and provide this TP-only variant.  Inventory
+ * props stay parented to the viewer prop; transient body weapons/hat objects
+ * are removed exactly as before.
+ */
+void chrpropCleanupForThirdPersonToggle(PropRecord *prop)
+{
+    ChrRecord *chr;
+    Model *model;
+    PropRecord *child;
+    PropRecord *prev;
+    ObjectRecord *obj;
+
+    chr = prop->chr;
+    model = chr->model;
+
+    if (chr->field_160[0].ptr_SEbuffer1 != NULL && sndGetPlayingState(chr->field_160[0].ptr_SEbuffer1) != 0) {
+        sndDeactivate(chr->field_160[0].ptr_SEbuffer1);
+    }
+    if (chr->field_160[0].ptr_SEbuffer2 != NULL && sndGetPlayingState(chr->field_160[0].ptr_SEbuffer2) != 0) {
+        sndDeactivate(chr->field_160[0].ptr_SEbuffer2);
+    }
+    if (chr->field_160[1].ptr_SEbuffer1 != NULL && sndGetPlayingState(chr->field_160[1].ptr_SEbuffer1) != 0) {
+        sndDeactivate(chr->field_160[1].ptr_SEbuffer1);
+    }
+    if (chr->field_160[1].ptr_SEbuffer2 != NULL && sndGetPlayingState(chr->field_160[1].ptr_SEbuffer2) != 0) {
+        sndDeactivate(chr->field_160[1].ptr_SEbuffer2);
+    }
+
+    sub_GAME_7F050DE8(model);
+    chrpropDeregisterRooms(prop);
+
+    child = prop->child;
+
+    if (child != NULL) {
+        do {
+            prev = child->prev;
+
+            /* Live Third Person is only removing its temporary presentation
+             * body.  The only child props owned by that presentation are the
+             * body's generated held weapons and hat.  Every other child can be
+             * mission/progression state (keys, tapes, gadgets, tagged props,
+             * etc.) and must survive a camera-mode toggle regardless of how it
+             * is represented in the inventory list. */
+            if (child == chr->weapons_held[GUNLEFT]
+                || child == chr->weapons_held[GUNRIGHT]
+                || child == chr->handle_positiondata_hat)
+            {
+                obj = (ObjectRecord *)child->obj;
+                objDetach(child);
+                objFreePermanently(obj, TRUE);
+            }
+
+            child = prev;
+        } while (child != NULL);
+    }
+
+    clear_aircraft_model_obj(model);
+
+    chr->model = NULL;
+    chr->chrnum = -1;
+
+    if (chr->field_20 != NULL) {
+        sub_GAME_7F06B248(chr->field_20);
+    }
+}
+#endif
+
 
 /**
  * Address 0x7F020540 (VERSION_US, VERSION_JP).
@@ -2421,6 +2638,13 @@ void chrHandleJointPositioned(enum CHR_RENDER_PART bodypart, Mtxf *matrix)
     u16 hidden;
     ChrRecord *chr;
 
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled() && (((bodypart != CHR_RENDERPART_LEFT_ARM) && (bodypart != CHR_RENDERPART_RIGHT_ARM)) && (bodypart != CHR_RENDERPART_TORSO)) && (bodypart != CHR_RENDERPART_HEAD))
+    {
+        return;
+    }
+#endif
+
     scale = 1.0f;
 
 #ifdef BUGFIX_R1
@@ -2444,7 +2668,11 @@ void chrHandleJointPositioned(enum CHR_RENDER_PART bodypart, Mtxf *matrix)
         }
     }
 #else
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled() ? ((((u8)g_CheatPlayerTextRelated[CHEAT_DK_MODE] >> player_num) & 1) != 0) : cheatIsActive(CHEAT_DK_MODE))
+#else
     if (cheatIsActive(CHEAT_DK_MODE))
+#endif
     {
         if (bodypart == CHR_RENDERPART_HEAD)
         {
@@ -2456,11 +2684,14 @@ void chrHandleJointPositioned(enum CHR_RENDER_PART bodypart, Mtxf *matrix)
         }
     }
 #endif
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (!modMicroOptimizationsEnabled() && (((bodypart != CHR_RENDERPART_LEFT_ARM) && (bodypart != CHR_RENDERPART_RIGHT_ARM)) && (bodypart != CHR_RENDERPART_TORSO)) && (bodypart != CHR_RENDERPART_HEAD))
+#else
     if ((((bodypart != CHR_RENDERPART_LEFT_ARM) && (bodypart != CHR_RENDERPART_RIGHT_ARM)) && (bodypart != CHR_RENDERPART_TORSO)) && (bodypart != CHR_RENDERPART_HEAD))
+#endif
     {
         return;
     }
-
     zrot = (yrot = (xrot = 0.0f));
 
 #ifdef BUGFIX_R1
@@ -2778,12 +3009,16 @@ s32 chrTick(PropRecord *prop)
     coopMode = gamemode == GAMEMODE_MULTI
         && get_scenario() == SCENARIO_COOP
         && prop->type == PROP_TYPE_CHR;
-    coopFullTick = !coopMode || get_player_position_in_shuffled(get_cur_playernum()) == 0;
+    coopFullTick = !coopMode
+        || (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+        || get_player_position_in_shuffled(get_cur_playernum()) == 0;
 
+#ifndef GE_PHYSICAL_FASTPATHS
     if (coopMode && !coopFullTick)
     {
         tickamount = 0;
     }
+#endif
 #endif
 
     if ((!(chr->chrflags & CHRFLAG_HIDDEN)) || (chr->chrflags & CHRFLAG_00040000))
@@ -2875,17 +3110,30 @@ s32 chrTick(PropRecord *prop)
     }
     else
     {
-        if (((prop->type == PROP_TYPE_VIEWER) && (g_playerPointers[getPlayerPointerIndex(prop)]->cameramode == 1)) || (chr->chrflags & CHRFLAG_CULL_USING_HITBOX))
+        if (((prop->type == PROP_TYPE_VIEWER) && (g_playerPointers[getPlayerPointerIndex(prop)]->cameramode == 1
+#ifdef GE_MODDED_CHEATS
+                    || bondviewThirdPersonPresentationActive(getPlayerPointerIndex(prop))
+#endif
+                )) || (chr->chrflags & CHRFLAG_CULL_USING_HITBOX))
         {
             headSwitchVisible = 1;
 
-            if (((chr->actiontype == ACT_ANIM) && (chr->act_anim.unk02c == 0)) && (chr->act_anim.noTranslate != 0))
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+            /* Perfect Dark performs character animation/position simulation only
+             * on the frame's full tick.  Repeat split-screen passes are purely
+             * viewer-specific.  GE Plus already advances this NPC on the Co-Op
+             * full-tick viewport, so avoid repeating zero-delta shared work. */
+            if (coopFullTick)
+#endif
             {
-                modelTickAnim(model, tickamount, 0);
-            }
-            else
-            {
-                chrUpdateAnim(chr, tickamount);
+                if (((chr->actiontype == ACT_ANIM) && (chr->act_anim.unk02c == 0)) && (chr->act_anim.noTranslate != 0))
+                {
+                    modelTickAnim(model, tickamount, 0);
+                }
+                else
+                {
+                    chrUpdateAnim(chr, tickamount);
+                }
             }
 
             goto after_position_update;
@@ -2895,7 +3143,11 @@ s32 chrTick(PropRecord *prop)
         {
             if (((chr->actiontype == ACT_PATROL) && (chr->act_patrol.waydata.mode == WAYMODE_MAGIC)) || ((chr->actiontype == ACT_GOPOS) && (chr->act_gopos.waydata.mode == WAYMODE_MAGIC)))
             {
+#ifdef GE_PHYSICAL_FASTPATHS
+                headSwitchVisible = posIsOnScreen(prop, &prop->pos, CHR_GET_INST_SIZE_FAST(model), 1);
+#else
                 headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
+#endif
 
                 if (headSwitchVisible)
                 {
@@ -2912,8 +3164,17 @@ s32 chrTick(PropRecord *prop)
             }
             else
             {
-                chrUpdateAnim(chr, tickamount);
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+                if (coopFullTick)
+#endif
+                {
+                    chrUpdateAnim(chr, tickamount);
+                }
+#ifdef GE_PHYSICAL_FASTPATHS
+                headSwitchVisible = posIsOnScreen(prop, &prop->pos, CHR_GET_INST_SIZE_FAST(model), 1);
+#else
                 headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
+#endif
 
                 if (headSwitchVisible)
                 {
@@ -2930,42 +3191,69 @@ s32 chrTick(PropRecord *prop)
         }
         else if ((chr->actiontype == ACT_ANIM) && (chr->act_anim.unk02c == 0))
         {
+#ifdef GE_PHYSICAL_FASTPATHS
+            headSwitchVisible = posIsOnScreen(prop, &prop->pos, CHR_GET_INST_SIZE_FAST(model), 1);
+#else
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
+#endif
 
-            if (headSwitchVisible && (chr->act_anim.noTranslate == 0))
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+            if (coopFullTick)
+#endif
             {
-                chrUpdateAnim(chr, tickamount);
-            }
-            else
-            {
-                modelTickAnim(model, tickamount, 0);
+                if (headSwitchVisible && (chr->act_anim.noTranslate == 0))
+                {
+                    chrUpdateAnim(chr, tickamount);
+                }
+                else
+                {
+                    modelTickAnim(model, tickamount, 0);
+                }
             }
         }
         else if (chr->actiontype == ACT_STAND)
         {
+#ifdef GE_PHYSICAL_FASTPATHS
+            headSwitchVisible = posIsOnScreen(prop, &prop->pos, CHR_GET_INST_SIZE_FAST(model), 1);
+#else
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
+#endif
 
-            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+            if (coopFullTick)
+#endif
             {
-                chrUpdateAnim(chr, tickamount);
-            }
-            else if (model->anim2 != NULL)
-            {
-                modelTickAnim(model, tickamount, 0);
+                if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
+                {
+                    chrUpdateAnim(chr, tickamount);
+                }
+                else if (model->anim2 != NULL)
+                {
+                    modelTickAnim(model, tickamount, 0);
+                }
             }
         }
         else
         {
-            if (chr->chrflags & CHRFLAG_IGNORE_ANIM_TRANSLATION)
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+            if (coopFullTick)
+#endif
             {
-                modelTickAnim(model, tickamount, 0);
-            }
-            else
-            {
-                chrUpdateAnim(chr, tickamount);
+                if (chr->chrflags & CHRFLAG_IGNORE_ANIM_TRANSLATION)
+                {
+                    modelTickAnim(model, tickamount, 0);
+                }
+                else
+                {
+                    chrUpdateAnim(chr, tickamount);
+                }
             }
 
+#ifdef GE_PHYSICAL_FASTPATHS
+            headSwitchVisible = posIsOnScreen(prop, &prop->pos, CHR_GET_INST_SIZE_FAST(model), 1);
+#else
             headSwitchVisible = posIsOnScreen(prop, &prop->pos, getinstsize(model), 1);
+#endif
         }
     }
 
@@ -2990,7 +3278,11 @@ after_position_update:
 
     if (headSwitchVisible)
     {
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (!modMicroOptimizationsEnabled()) { if (get_debug_chrnum_flag()) {} }
+#else
         if (get_debug_chrnum_flag()) {}
+#endif
 
         prop->flags |= PROPFLAG_ONSCREEN;
         chr->chrflags |= CHRFLAG_HAS_BEEN_ON_SCREEN;
@@ -3010,7 +3302,11 @@ after_position_update:
         }
     }
 #else
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled() ? ((((u8)g_CheatPlayerTextRelated[CHEAT_DK_MODE] >> player_num) & 1) != 0) : cheatIsActive(CHEAT_DK_MODE))
+#else
         if (cheatIsActive(CHEAT_DK_MODE))
+#endif
         {
             modelSetDistanceScale(0.3125f);
         }
@@ -3019,7 +3315,11 @@ after_position_update:
         g_ModelJointPositionedFunc = chrHandleJointPositioned;
         g_CurModelChr = chr;
 
+#ifdef GE_PHYSICAL_FASTPATHS
+        renderdata.basemtx = modMicroOptimizationsEnabled() ? g_CurrentPlayer->field_10CC : camGetWorldToScreenMtxf();
+#else
         renderdata.basemtx = camGetWorldToScreenMtxf();
+#endif
         renderdata.mtxlist = dynAllocate(model->obj->numMatrices * (sizeof(Mtxf)));
 
         if (g_CurModelChr->flinchcnt >= 0)
@@ -3044,7 +3344,11 @@ after_position_update:
         subcalcmatrices(&renderdata, model);
 
         g_ModelJointPositionedFunc = NULL;
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled()) g_ModelDistanceScale = 1.0f; else modelSetDistanceScale(1.0f);
+#else
         modelSetDistanceScale(1.0f);
+#endif
 
 #ifdef GE_MODDED_CHEATS
         if (!coopMode || coopFullTick)
@@ -3406,9 +3710,27 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
     chrmodel = chr->model;
     chrfadealpha = (s32) chr->fadealpha;
 
+#ifdef GE_MODDED_CHEATS
+    /* Third Person camera proximity fade is viewport-local.  Never write this
+     * value back to chr->fadealpha: doing so would make the local player's fade
+     * visible from other players' split-screen cameras too. */
+    if (g_CurrentPlayer != NULL && prop == g_CurrentPlayer->prop)
+    {
+        s32 localalpha = bondviewGetThirdPersonLocalBodyAlpha();
+        if (localalpha < chrfadealpha)
+        {
+            chrfadealpha = localalpha;
+        }
+    }
+#endif
+
     if (!(chr->chrflags & CHRFLAG_04000000))
     {
+#ifdef GE_PHYSICAL_FASTPATHS
+        f32 f = chrobjFogVisRangeRelated(prop, CHR_GET_INST_SIZE_FAST(chrmodel)); //0-1
+#else
         f32 f = chrobjFogVisRangeRelated(prop, getinstsize(chrmodel)); //0-1
+#endif
         chrfadealpha = (s32) (f * (f32) chrfadealpha);
     }
 
@@ -3478,7 +3800,16 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
             }
 
             mrData.flags = spB8;
+#ifdef GE_MODDED_CHEATS
+            /* During the late Third Person reticle-occlusion redraw, the same
+             * Bond geometry already exists at identical Z from the world pass.
+             * A normal Z-tested second draw can fail on equal depth, leaving the
+             * 2D reticle visible over Bond.  Disable Z testing only for this one
+             * presentation redraw so Bond/weapon pixels reliably cover the sight. */
+            mrData.zbufferenabled = bondviewThirdPersonReticleOcclusionPassActive() ? FALSE : TRUE;
+#else
             mrData.zbufferenabled = TRUE;
+#endif
             mrData.gdl = gdl;
 
             if ((chr->chrflags & CHRFLAG_NO_SHADOW) != 0)
@@ -3891,7 +4222,11 @@ void chrTestHit(PropRecord *prop, ShotData *shotdata)
     }
 
     model = chr->model;
+#ifdef GE_PHYSICAL_FASTPATHS
+    modelsize = CHR_GET_INST_SIZE_FAST(model);
+#else
     modelsize = getinstsize(model);
+#endif
 
     if ((prop->flags & PROPFLAG_ONSCREEN) == FALSE)
     {
@@ -3917,7 +4252,11 @@ void chrTestHit(PropRecord *prop, ShotData *shotdata)
         if (chr->weapons_held[i] != NULL)
         {
             weapon = chr->weapons_held[i]->weapon;
+#ifdef GE_PHYSICAL_FASTPATHS
+            size = model->scale * CHR_GET_INST_SIZE_FAST(weapon->model);
+#else
             size = model->scale * getinstsize(weapon->model);
+#endif
 
             if (heldmodelsize < size)
             {
@@ -3982,13 +4321,18 @@ void chrTestHit(PropRecord *prop, ShotData *shotdata)
 
     if (hitbounds && (prop->zDepth <= shotdata->maxdist))
     {
-        chr->chrflags |= CHRFLAG_NEAR_MISS;
-        chr->numclosearghs++;
 #ifdef GE_MODDED_CHEATS
-        /* chrTestHit is reached from the current player's hitscan path. */
-        if (prop->type == PROP_TYPE_CHR)
+        if (!g_ChrTestHitProbeNoSideEffects)
         {
-            chrCoopSetTargetPlayer(chr, get_cur_playernum());
+#endif
+            chr->chrflags |= CHRFLAG_NEAR_MISS;
+            chr->numclosearghs++;
+#ifdef GE_MODDED_CHEATS
+            /* chrTestHit is reached from the current player's hitscan path. */
+            if (prop->type == PROP_TYPE_CHR)
+            {
+                chrCoopSetTargetPlayer(chr, get_cur_playernum());
+            }
         }
 #endif
     }
@@ -4019,10 +4363,18 @@ void chrHandleBulletHit(struct ShotData *shot, struct BulletHit *bhit)
 
     chr = bhit->prop->chr;
 
-    // Calculate the view space hit position for impact effects.
-    hitpos.f[0] = shot->viewOrigin.x - ((bhit->dist * shot->viewDir.x) / shot->viewDir.z);
-    hitpos.f[1] = shot->viewOrigin.y - ((bhit->dist * shot->viewDir.y) / shot->viewDir.z);
-    hitpos.f[2] = shot->viewOrigin.z - bhit->dist;
+    // Calculate the view-space hit position for impact effects.  Retail
+    // normally uses a zero viewOrigin (the camera).  Plus Third Person may
+    // use a translated muzzle/weapon trace origin, so solve the ray at the
+    // absolute camera-space depth stored in bhit->dist.  This is identical to
+    // the retail formula when viewOrigin.z == 0.
+    {
+        f32 rayt = (-bhit->dist - shot->viewOrigin.z) / shot->viewDir.z;
+
+        hitpos.f[0] = shot->viewOrigin.x + rayt * shot->viewDir.x;
+        hitpos.f[1] = shot->viewOrigin.y + rayt * shot->viewDir.y;
+        hitpos.f[2] = shot->viewOrigin.z + rayt * shot->viewDir.z;
+    }
 
     scale = 1.0f - (42.0f / sqrtf(SQ(hitpos.f[0]) + SQ(hitpos.f[1]) + SQ(hitpos.f[2])));
 
@@ -4215,28 +4567,10 @@ void chrCheckGuardsHeardSound(f32 noise)
     {
         if (g_ChrSlots[i].model != NULL)
         {
-#ifdef GE_PHYSICAL_FASTPATHS
-            f32 threshold = g_ChrSlots[i].hearingscale * (noise * 100.0f);
-
-            if (threshold > 0.0f)
-            {
-                PropRecord *guardprop = g_ChrSlots[i].prop;
-                PropRecord *bondprop = getCurrentPlayerProp();
-                f32 dx = bondprop->pos.x - guardprop->pos.x;
-                f32 dy = bondprop->pos.y - guardprop->pos.y;
-                f32 dz = bondprop->pos.z - guardprop->pos.z;
-
-                if ((dx * dx) + (dy * dy) + (dz * dz) < threshold * threshold)
-                {
-                    chrlvAlertGuardToPlayerPosition(&g_ChrSlots[i]);
-                }
-            }
-#else
             if (chrGetDistanceToBond(&g_ChrSlots[i]) < g_ChrSlots[i].hearingscale * (noise * 100.0f))
             {
                 chrlvAlertGuardToPlayerPosition(&g_ChrSlots[i]);
             }
-#endif
         }
     }
 }
@@ -4284,6 +4618,28 @@ PropRecord *chrGetEquippedWeaponPropWithCheck(ChrRecord *self, GUNHAND hand)
     {
         WeaponObjRecord *wep = gunprop->weapon;
 
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled())
+        {
+            ITEM_IDS item = wep->weaponnum;
+            WeaponStats *stats;
+
+            if (gitem_structs[item].has_no_model == 0)
+            {
+                stats = gitem_structs[item].item_weapon_stats;
+            }
+            else
+            {
+                stats = &default_weaponstats;
+            }
+
+            if ((stats->BitFlags & WEAPONSTATBITFLAG_HOLD_AS_GUN) == 0)
+            {
+                gunprop = NULL;
+            }
+        }
+        else
+#endif
         if (bondwalkItemCheckBitflags(wep->weaponnum, WEAPONSTATBITFLAG_HOLD_AS_GUN) == 0)
         {
             gunprop = NULL;

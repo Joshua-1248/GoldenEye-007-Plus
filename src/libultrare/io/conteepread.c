@@ -11,19 +11,40 @@ s32 osEepromRead(OSMesgQueue *mq, u8 address, u8 *buffer) {
     u8 *ptr;
     OSContStatus data;
     __OSContEepromFormat format;
+#ifdef GE_SAVE_EEPROM16K
+    u16 type;
+#endif
     ret = 0;
     i = 0;
     ptr = (u8 *) &__osEepPifRam;
+#ifdef GE_SAVE_EEPROM16K
+    __osSiGetAccess();
+    ret = __osEepStatus(mq, &data);
+    type = data.type & (CONT_EEPROM | CONT_EEP16K);
+    if (ret != 0) {
+        __osSiRelAccess();
+        return CONT_NO_RESPONSE_ERROR;
+    }
+    if (type == CONT_EEPROM) {
+        if (address >= EEPROM_MAXBLOCKS) {
+            __osSiRelAccess();
+            return -1;
+        }
+    } else if (type != (CONT_EEPROM | CONT_EEP16K)) {
+        __osSiRelAccess();
+        return CONT_NO_RESPONSE_ERROR;
+    }
+#else
     if (address > 0x40) {
         return -1;
     }
     __osSiGetAccess();
     ret = __osEepStatus(mq, &data);
-    if (ret != 0 || data.type != 0x8000) {
-
-        return 8;
+    if (ret != 0 || data.type != CONT_EEPROM) {
+        return CONT_NO_RESPONSE_ERROR;
     }
-    while (data.status & 0x80) {
+#endif
+    while (data.status & CONT_EEPROM_BUSY) {
         __osEepStatus(mq, &data);
     }
     __osPackEepReadData(address);
@@ -34,7 +55,7 @@ s32 osEepromRead(OSMesgQueue *mq, u8 address, u8 *buffer) {
     }
     __osEepPifRam.pifstatus = 0;
     ret = __osSiRawStartDma(OS_READ, &__osEepPifRam);
-    __osContLastCmd = 4;
+    __osContLastCmd = CONT_CMD_READ_EEPROM;
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
     for (i = 0; i < 4; i++) {
         ptr++;

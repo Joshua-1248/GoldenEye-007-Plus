@@ -5,6 +5,10 @@
 #include <bondtypes.h>
 #include "bondview.h"
 
+#ifdef GE_PHYSICAL_FASTPATHS
+extern s32 player_num;
+#endif
+
 struct player_data {
     /* 0x0 */
     s32 shot_count[7];
@@ -98,6 +102,12 @@ void set_cur_player(s32 playernum);
 s32 playerCoopTankCanCurrentPlayerClaim(void);
 void playerCoopTankClaimCurrentPlayer(void);
 void playerCoopTankReleaseCurrentPlayer(void);
+void playerCoopTankResetCurrentPlayerForRespawn(void);
+s32 playerCoopTankBodyHidden(s32 index);
+void playerCoopTankHideDriverUntilRespawnCurrentPlayer(void);
+void playerCoopTankShowDriverCurrentPlayer(void);
+s32 playerCoopTankStandingOnTank(s32 index);
+void playerCoopTankCarryRiders(struct PropRecord *tankProp, struct coord3d *oldPos, f32 oldAngle, struct coord3d *newPos, f32 newAngle);
 #endif
 s32 getPlayerCount(void);
 void set_cur_player_screen_size(u32 width, u32 height);

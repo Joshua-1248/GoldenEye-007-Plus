@@ -8907,6 +8907,45 @@ void spectrum_hw_emulation(void)
 
 #ifdef GE_MODDED_CHEATS
 
+/*
+ * R22 Co-Op room streaming safety.  GoldenEye submits double-buffered master
+ * display lists whose room commands point directly into mema room allocations.
+ * One buffer may still be executing while the other is being built, so keep a
+ * room-pin generation for each graphics buffer and never GC either generation.
+ */
+static u8 g_ModRoomRenderPins[2][MAXROOMCOUNT];
+static s32 g_ModRoomRenderPinBank;
+
+void bgModBeginRoomRenderFrame(s32 bufferindex)
+{
+    s32 i;
+
+    g_ModRoomRenderPinBank = bufferindex & 1;
+
+    for (i = 0; i < MAXROOMCOUNT; i++)
+    {
+        g_ModRoomRenderPins[g_ModRoomRenderPinBank][i] = 0;
+    }
+}
+
+void bgModPinRoomForFrame(s32 room)
+{
+    if ((u32) room < MAXROOMCOUNT)
+    {
+        g_ModRoomRenderPins[g_ModRoomRenderPinBank][room] = 1;
+    }
+}
+
+static bool bgModRoomIsPinnedByGfx(s32 room)
+{
+    if ((u32) room >= MAXROOMCOUNT)
+    {
+        return TRUE;
+    }
+
+    return g_ModRoomRenderPins[0][room] || g_ModRoomRenderPins[1][room];
+}
+
 
 /*
  * R21: Perfect Dark-style recovery for a failed/crowded room allocation.
@@ -8932,7 +8971,8 @@ void bgModGarbageCollectRoomsForLoad(s32 bytesneeded)
 
             if (room->model_bin_loaded > oldestage
                     && !room->room_rendered
-                    && !room->room_neighbor_to_rendered)
+                    && !room->room_neighbor_to_rendered
+                    && !bgModRoomIsPinnedByGfx(roomnum))
             {
                 oldestroom = roomnum;
                 oldestage = room->model_bin_loaded;
@@ -8966,7 +9006,7 @@ void fileUnlockEverythingInFolder(s32 foldernum)
     save->flag_007 |= 1;
     save->unlocked_cheats_1 = 0xff;
     save->unlocked_cheats_2 = 0xff;
-    save->unlocked_cheats_3 = 0xff;
+    save->unlocked_cheats_3 = (save->unlocked_cheats_3 & 0xf0) | 0x0f;
     fileWriteSave(save);
 }
 
@@ -8975,71 +9015,119 @@ void fileUnlockEverythingInFolder(s32 foldernum)
  * spectrum.o is the final US game-text/BSS object, so placing this helper
  * here also avoids shifting the addresses of existing game functions.
  *
- * The frontend consumes each returned label immediately, so one scratch
- * buffer is sufficient and costs only BSS rather than compressed ROM data.
+ * Use a small BSS ring so callers can retain one dynamic label while
+ * fetching another value string before rendering. A single scratch buffer
+ * caused the Full Health/Full Armor/Normal Animation labels to be
+ * overwritten by the shared ACTIVATE value.
  */
 char *frontModGetOptionLabel(s32 index)
 {
-    static u32 text[6];
+    static u32 text[4][9];
+    static u32 slot;
+    u32 *buf = text[slot++ & 3];
 
     if (index == 0) { /* Music Volume */
-        text[0]=0x4D757369; text[1]=0x6320566F; text[2]=0x6C756D65; text[3]=0;
+        buf[0]=0x4D757369; buf[1]=0x6320566F; buf[2]=0x6C756D65; buf[3]=0;
     } else if (index == 1) { /* FX Volume */
-        text[0]=0x46582056; text[1]=0x6F6C756D; text[2]=0x65000000;
+        buf[0]=0x46582056; buf[1]=0x6F6C756D; buf[2]=0x65000000;
     } else if (index == 2) { /* Control Style */
-        text[0]=0x436F6E74; text[1]=0x726F6C20; text[2]=0x5374796C; text[3]=0x65000000;
+        buf[0]=0x436F6E74; buf[1]=0x726F6C20; buf[2]=0x5374796C; buf[3]=0x65000000;
     } else if (index == 3) { /* Look Up/Down */
-        text[0]=0x4C6F6F6B; text[1]=0x2055702F; text[2]=0x446F776E; text[3]=0;
+        buf[0]=0x4C6F6F6B; buf[1]=0x2055702F; buf[2]=0x446F776E; buf[3]=0;
     } else if (index == 4) { /* Auto Aim */
-        text[0]=0x4175746F; text[1]=0x2041696D; text[2]=0;
+        buf[0]=0x4175746F; buf[1]=0x2041696D; buf[2]=0;
     } else if (index == 5) { /* Aim Control */
-        text[0]=0x41696D20; text[1]=0x436F6E74; text[2]=0x726F6C00;
+        buf[0]=0x41696D20; buf[1]=0x436F6E74; buf[2]=0x726F6C00;
     } else if (index == 6) { /* Sight On Screen */
-        text[0]=0x53696768; text[1]=0x74204F6E; text[2]=0x20536372; text[3]=0x65656E00;
+        buf[0]=0x53696768; buf[1]=0x74204F6E; buf[2]=0x20536372; buf[3]=0x65656E00;
     } else if (index == 7) { /* Look Ahead */
-        text[0]=0x4C6F6F6B; text[1]=0x20416865; text[2]=0x61640000;
+        buf[0]=0x4C6F6F6B; buf[1]=0x20416865; buf[2]=0x61640000;
     } else if (index == 8) { /* Crosshair */
-        text[0]=0x43726F73; text[1]=0x73686169; text[2]=0x72000000;
+        buf[0]=0x43726F73; buf[1]=0x73686169; buf[2]=0x72000000;
     } else if (index == 9) { /* Ammo On Screen */
-        text[0]=0x416D6D6F; text[1]=0x204F6E20; text[2]=0x53637265; text[3]=0x656E0000;
+        buf[0]=0x416D6D6F; buf[1]=0x204F6E20; buf[2]=0x53637265; buf[3]=0x656E0000;
     } else if (index == 10) { /* Screen Size */
-        text[0]=0x53637265; text[1]=0x656E2053; text[2]=0x697A6500;
+        buf[0]=0x53637265; buf[1]=0x656E2053; buf[2]=0x697A6500;
     } else if (index == 11) { /* Screen Ratio */
-        text[0]=0x53637265; text[1]=0x656E2052; text[2]=0x6174696F; text[3]=0;
+        buf[0]=0x53637265; buf[1]=0x656E2052; buf[2]=0x6174696F; buf[3]=0;
     } else if (index == 12) { /* Head Roll */
-        text[0]=0x48656164; text[1]=0x20526F6C; text[2]=0x6C000000;
+        buf[0]=0x48656164; buf[1]=0x20526F6C; buf[2]=0x6C000000;
     } else if (index == 13) { /* Endless Death Cam */
-        text[0]=0x456E646C; text[1]=0x65737320; text[2]=0x44656174; text[3]=0x68204361; text[4]=0x6D000000;
+        buf[0]=0x456E646C; buf[1]=0x65737320; buf[2]=0x44656174; buf[3]=0x68204361; buf[4]=0x6D000000;
     } else if (index == 14) { /* Real-Time Collapse */
-        text[0]=0x5265616C; text[1]=0x2D54696D; text[2]=0x6520436F; text[3]=0x6C6C6170; text[4]=0x73650000;
-    } else if (index == 15) { /* Disable Hitstun */
-        text[0]=0x44697361; text[1]=0x626C6520; text[2]=0x48697473; text[3]=0x74756E00;
+        buf[0]=0x5265616C; buf[1]=0x2D54696D; buf[2]=0x6520436F; buf[3]=0x6C6C6170; buf[4]=0x73650000;
+    } else if (index == 15) { /* Damage Hitstun */
+        buf[0]=0x44616D61; buf[1]=0x67652048; buf[2]=0x69747374; buf[3]=0x756E0000;
     } else if (index == 16) { /* Damage Flash */
-        text[0]=0x44616D61; text[1]=0x67652046; text[2]=0x6C617368; text[3]=0;
+        buf[0]=0x44616D61; buf[1]=0x67652046; buf[2]=0x6C617368; buf[3]=0;
     } else if (index == 17) { /* Unlock Everything */
-        text[0]=0x556E6C6F; text[1]=0x636B2045; text[2]=0x76657279; text[3]=0x7468696E; text[4]=0x67000000;
+        buf[0]=0x556E6C6F; buf[1]=0x636B2045; buf[2]=0x76657279; buf[3]=0x7468696E; buf[4]=0x67000000;
     } else if (index == 18) { /* UNLOCK EVERYTHING */
-        text[0]=0x554E4C4F; text[1]=0x434B2045; text[2]=0x56455259; text[3]=0x5448494E; text[4]=0x47000000;
+        buf[0]=0x554E4C4F; buf[1]=0x434B2045; buf[2]=0x56455259; buf[3]=0x5448494E; buf[4]=0x47000000;
     } else if (index == 19) { /* Are you sure? */
-        text[0]=0x41726520; text[1]=0x796F7520; text[2]=0x73757265; text[3]=0x3F000000;
+        buf[0]=0x41726520; buf[1]=0x796F7520; buf[2]=0x73757265; buf[3]=0x3F000000;
     } else if (index == 20) { /* No / Yes are packed together */
-        text[0]=0x4E6F0059; text[1]=0x65730000;
-    } else if (index == 21) { text[0]=0x312E3120; text[1]=0x486F6E65; text[2]=0x79000000;
-    } else if (index == 22) { text[0]=0x312E3220; text[1]=0x536F6C69; text[2]=0x74616972; text[3]=0x65000000;
-    } else if (index == 23) { text[0]=0x312E3320; text[1]=0x4B697373; text[2]=0x79000000;
-    } else if (index == 24) { text[0]=0x312E3420; text[1]=0x476F6F64; text[2]=0x6E696768; text[3]=0x74000000;
-    } else if (index == 25) { text[0]=0x322E3120; text[1]=0x506C656E; text[2]=0x74790000;
-    } else if (index == 26) { text[0]=0x322E3220; text[1]=0x47616C6F; text[2]=0x72650000;
-    } else if (index == 27) { text[0]=0x322E3320; text[1]=0x446F6D69; text[2]=0x6E6F0000;
-    } else if (index == 28) { text[0]=0x322E3420; text[1]=0x476F6F64; text[2]=0x68656164; text[3]=0;
+        buf[0]=0x4E6F0059; buf[1]=0x65730000;
+    } else if (index == 21) { buf[0]=0x312E3120; buf[1]=0x486F6E65; buf[2]=0x79000000;
+    } else if (index == 22) { buf[0]=0x312E3220; buf[1]=0x536F6C69; buf[2]=0x74616972; buf[3]=0x65000000;
+    } else if (index == 23) { buf[0]=0x312E3320; buf[1]=0x4B697373; buf[2]=0x79000000;
+    } else if (index == 24) { buf[0]=0x312E3420; buf[1]=0x476F6F64; buf[2]=0x6E696768; buf[3]=0x74000000;
+    } else if (index == 25) { buf[0]=0x322E3120; buf[1]=0x506C656E; buf[2]=0x74790000;
+    } else if (index == 26) { buf[0]=0x322E3220; buf[1]=0x47616C6F; buf[2]=0x72650000;
+    } else if (index == 27) { buf[0]=0x322E3320; buf[1]=0x446F6D69; buf[2]=0x6E6F0000;
+    } else if (index == 28) { buf[0]=0x322E3420; buf[1]=0x476F6F64; buf[2]=0x68656164; buf[3]=0;
     } else if (index == 29) { /* Taking Damage Sound */
-        text[0]=0x54616B69; text[1]=0x6E672044; text[2]=0x616D6167; text[3]=0x6520536F; text[4]=0x756E6400;
-    } else if (index == 30) { /* Disable Knockback */
-        text[0]=0x44697361; text[1]=0x626C6520; text[2]=0x4B6E6F63; text[3]=0x6B626163; text[4]=0x6B000000;
-    } else { /* Disable Noise Dithering */
-        text[0]=0x44697361; text[1]=0x626C6520; text[2]=0x4E6F6973; text[3]=0x65204469; text[4]=0x74686572; text[5]=0x696E6700;
+        buf[0]=0x54616B69; buf[1]=0x6E672044; buf[2]=0x616D6167; buf[3]=0x6520536F; buf[4]=0x756E6400;
+    } else if (index == 30) { /* Damage Knockback */
+        buf[0]=0x44616D61; buf[1]=0x6765204B; buf[2]=0x6E6F636B; buf[3]=0x6261636B; buf[4]=0;
+    } else if (index == 31) { /* Noise Dithering */
+        buf[0]=0x4E6F6973; buf[1]=0x65204469; buf[2]=0x74686572; buf[3]=0x696E6700;
+    } else if (index == 32) { /* Third Person */
+        buf[0]=0x54686972; buf[1]=0x64205065; buf[2]=0x72736F6E; buf[3]=0;
+    } else if (index == 33) { /* Full Health */
+        buf[0]=0x46756C6C; buf[1]=0x20486561; buf[2]=0x6C746800;
+    } else if (index == 34) { /* Full Armor */
+        buf[0]=0x46756C6C; buf[1]=0x2041726D; buf[2]=0x6F720000;
+    } else if (index == 35) { /* Normal Animation */
+        buf[0]=0x4E6F726D; buf[1]=0x616C2041; buf[2]=0x6E696D61; buf[3]=0x74696F6E; buf[4]=0;
+    } else if (index == 36) { /* ACTIVATE */
+        buf[0]=0x41435449; buf[1]=0x56415445; buf[2]=0;
+    } else if (index == 37) { /* LOCKED */
+        buf[0]=0x4C4F434B; buf[1]=0x45440000;
+    } else if (index == 38) { /* Lock Viewport */
+        buf[0]=0x4C6F636B; buf[1]=0x20566965; buf[2]=0x77706F72; buf[3]=0x74000000;
+    } else if (index == 39) { /* 1st Person */
+        buf[0]=0x31737420; buf[1]=0x50657273; buf[2]=0x6F6E0000;
+    } else if (index == 40) { /* 3rd Person */
+        buf[0]=0x33726420; buf[1]=0x50657273; buf[2]=0x6F6E0000;
+    } else if (index == 41) { /* None */
+        buf[0]=0x4E6F6E65; buf[1]=0;
+    } else if (index == 42) { /* Fly Mode */
+        buf[0]=0x466C7920; buf[1]=0x4D6F6465; buf[2]=0;
+    } else if (index == 43) { /* Complete Objectives */
+        buf[0]=0x436F6D70; buf[1]=0x6C657465; buf[2]=0x204F626A; buf[3]=0x65637469; buf[4]=0x76657300;
+    } else if (index == 44) { /* Complete Mission */
+        buf[0]=0x436F6D70; buf[1]=0x6C657465; buf[2]=0x204D6973; buf[3]=0x73696F6E; buf[4]=0;
+    } else if (index == 45) { /* Kill Count Message */
+        buf[0]=0x4B696C6C; buf[1]=0x20436F75; buf[2]=0x6E74204D; buf[3]=0x65737361; buf[4]=0x67650000;
+    } else if (index == 46) { /* Micro-optimizations */
+        buf[0]=0x4D696372; buf[1]=0x6F2D6F70; buf[2]=0x74696D69; buf[3]=0x7A617469; buf[4]=0x6F6E7300;
+    } else if (index == 47) { /* Stay In TP On Death */
+        buf[0]=0x53746179; buf[1]=0x20496E20; buf[2]=0x5450204F; buf[3]=0x6E204465; buf[4]=0x61746800;
+    } else if (index == 48) { /* TP Crouch Cam */
+        buf[0]=0x54502043; buf[1]=0x726F7563; buf[2]=0x68204361; buf[3]=0x6D000000;
+    } else if (index == 49) { /* Directional Shoulder */
+        buf[0]=0x44697265; buf[1]=0x6374696F; buf[2]=0x6E616C20; buf[3]=0x53686F75;
+        buf[4]=0x6C646572; buf[5]=0;
+    } else if (index == 50) { /* Anti-Aliasing */
+        buf[0]=0x416E7469; buf[1]=0x2D416C69; buf[2]=0x6173696E; buf[3]=0x67000000;
+    } else if (index == 51) { /* TP Sight Translucency */
+        buf[0]=0x54502053; buf[1]=0x69676874; buf[2]=0x20547261; buf[3]=0x6E736C75;
+        buf[4]=0x63656E63; buf[5]=0x79000000;
+    } else {
+        buf[0]=0;
     }
 
-    return (char *)text;
+    return (char *)buf;
 }
 #endif

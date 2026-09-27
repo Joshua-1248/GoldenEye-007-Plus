@@ -2756,6 +2756,7 @@ void hudmsgBottomShow(char *string);
 void setFontTables(s32 arg0, s32 arg1);
 #endif
 
+void bondviewUpdateCameraMatrices(coord3d* cam_pos, coord3d* cam_look_dir, coord3d* cam_up);
 Gfx * bondviewRenderDebugBondView(Gfx *arg0);
 s32 bond_pressed_reload_activate(void);
 Gfx* write_stan_tiles_in_yellow(Gfx *arg0);
@@ -2781,6 +2782,12 @@ int bondviewGetIfCurrentPlayerDamageShowTime(void);
 int bondviewGetIfCurrentPlayerHealthShowTime(void);
 u8 bondviewGetCurrentPlayersRoom(void);
 coord3d *bondviewGetCurrentPlayersPosition(void);
+#ifdef GE_MODDED_CHEATS
+s32 bondviewGetThirdPersonVisibilityCamera(coord3d *outpos);
+s32 bondviewGetThirdPersonLocalBodyAlpha(void);
+s32 bondviewThirdPersonPresentationActive(s32 player);
+s32 bondviewThirdPersonReticleOcclusionPassActive(void);
+#endif
 void bondviewUpdateGuardTankFlagsRelated(PropRecord *prop, s32 flag);
 void bondviewGetPropHeightRelatedValues(PropRecord *arg0, struct rect4f **field_B0, s32 *arg2, f32 *height_related, f32 *collision);
 void bondviewAddCurrentPlayerArmor(f32 arg0);
@@ -2824,6 +2831,9 @@ void bondviewResetUpperTextDisplay(void);
 Mtxf *currentPlayerGetProjectionMatrixF(void);
 void transform3Dto2DCoords(coord3d *in, coord2d *out);
 void bondviewRemovePlayerBody(void);
+#ifdef GE_MODDED_CHEATS
+void bondviewRemovePlayerBodyForThirdPersonToggle(void);
+#endif
 void currentPlayerAdjustFade(f32 maxfadetime, s32 r, s32 g, s32 b, f32 frac);
 void bondviewSelectCuff(Model *model, ModelFileHeader *header, s32 switchindex);
 void sub_GAME_7F08976C(f32 param_1);

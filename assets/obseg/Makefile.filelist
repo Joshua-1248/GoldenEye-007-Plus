@@ -682,3 +682,9 @@ PROPNAMELIST = ak47mag \
 				wood_sm_crate5 \
 				wood_sm_crate6 \
 				wppkmag
+# GoldenEye Plus Map Maker native-test private stage resources.
+ifeq ($(MAP_MAKER),YES)
+LEVELNAMELIST += mapmaker
+STANNAMELIST += mapmaker
+SETUPNAMELIST += setupmapmaker
+endif

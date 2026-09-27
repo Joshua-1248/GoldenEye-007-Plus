@@ -10,9 +10,15 @@ extern OSMesg __osEepromTimerMsg[4];
 
 s32 osEepromLongWrite(OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes) {
     s32 result = 0;
+#ifdef GE_SAVE_EEPROM16K
+    if (nbytes < 0 || (u32)address + (((u32)nbytes + EEPROM_BLOCK_SIZE - 1) / EEPROM_BLOCK_SIZE) > EEP16K_MAXBLOCKS) {
+        return -1;
+    }
+#else
     if (address > 0x40) {
         return -1;
     }
+#endif
 
     while (nbytes > 0) {
         result = osEepromWrite(mq, address, buffer);

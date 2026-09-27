@@ -123,6 +123,9 @@ extern GunModelFileRecord gitem_structs[];
  */
 extern u8 _weaponTexCacheStart[];
 extern u8 _weaponTexCacheEnd[];
+#ifdef GE_MAP_MAKER
+extern u8 _mapMakerScratchEnd[];
+#endif
 
 static struct texpool g_WeaponTextureCachePool;
 static s32 g_WeaponTextureCacheReady = FALSE;
@@ -131,9 +134,18 @@ static s32 g_WeaponTextureCacheOverflowed = FALSE;
 
 static void gunInitFirstPersonTextureCache(void)
 {
-    s32 size = (s32)(_weaponTexCacheEnd - _weaponTexCacheStart);
+    u8 *start = _weaponTexCacheStart;
+    s32 size;
+#ifdef GE_MAP_MAKER
+    /* The dedicated Map Maker child stage must preserve the resident editor
+     * scratch at 0x80400000.._mapMakerScratchEnd.  Start the shared gun cache
+     * after it; the existing per-hand fallback handles any cache overflow. */
+    if (lvlGetCurrentStageToLoad() == LEVELID_MAP_MAKER)
+        start = _mapMakerScratchEnd;
+#endif
+    size = (s32)(_weaponTexCacheEnd - start);
 
-    texInitPool(&g_WeaponTextureCachePool, _weaponTexCacheStart, size);
+    texInitPool(&g_WeaponTextureCachePool, start, size);
     g_WeaponTextureCacheReady = TRUE;
     g_WeaponTextureCachePrewarmed = FALSE;
     g_WeaponTextureCacheOverflowed = FALSE;
@@ -160,6 +172,12 @@ void gunPrewarmFirstPersonTextureCache(void)
     gunInitFirstPersonTextureCache();
     pool = &g_WeaponTextureCachePool;
 
+    /* Persistent weapon textures outlive retail room texture pools.  Route
+     * their explicit-LOD dimensions to the dedicated non-evicting metadata
+     * table so prewarming cannot wrap the retail 150-entry stage cache. */
+    texResetPersistentLodCache();
+    texSetPersistentLodCacheMode(TRUE);
+
     /*
      * R11: The decomp already contains the first-person model texture tables.
      * Use a generated, first-occurrence-ordered texture-ID list rather than
@@ -182,10 +200,12 @@ void gunPrewarmFirstPersonTextureCache(void)
         {
             g_WeaponTextureCacheOverflowed = TRUE;
             g_WeaponTextureCachePrewarmed = TRUE;
+            texSetPersistentLodCacheMode(FALSE);
             return;
         }
     }
 
+    texSetPersistentLodCacheMode(FALSE);
     g_WeaponTextureCachePrewarmed = TRUE;
 }
 #endif
@@ -1888,9 +1908,14 @@ void generate_player_thrown_grenade(s32 hand)
         throw_speed_vec.f[2] = ((player_prop->pos.f[2] - bondprevpos->f[2]) / g_GlobalTimerDelta) + throw_speed_vec.f[2];
     }
 
-    spE0.f[0] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][0];
-    spE0.f[1] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][1];
-    spE0.f[2] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][2];
+#ifdef GE_MODDED_CHEATS
+    if (!gunGetThirdPersonHandOrigin(hand, &spE0))
+#endif
+    {
+        spE0.f[0] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][0];
+        spE0.f[1] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][1];
+        spE0.f[2] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][2];
+    }
 
     matrix_4x4_set_identity(&spA0_a);
     matrix_4x4_copy(&g_CurrentPlayer->hands[hand].throw_item_pos_related, &sp40_f);
@@ -1975,9 +2000,14 @@ void generate_player_thrown_knife(s32 hand)
         throw_speed_vec.f[2] = ((player_prop->pos.f[2] - bondprevpos->f[2]) / g_GlobalTimerDelta) + throw_speed_vec.f[2];
     }
 
-    spE0.f[0] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][0];
-    spE0.f[1] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][1];
-    spE0.f[2] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][2];
+#ifdef GE_MODDED_CHEATS
+    if (!gunGetThirdPersonHandOrigin(hand, &spE0))
+#endif
+    {
+        spE0.f[0] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][0];
+        spE0.f[1] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][1];
+        spE0.f[2] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][2];
+    }
 
     matrix_4x4_set_rotation_around_z(4.712389f, &spA0_a);
     matrix_4x4_set_rotation_around_x(M_PI_F, &sp40_f);
@@ -2074,9 +2104,14 @@ void generate_player_thrown_object(s32 hand)
         throw_speed_vec.f[2] = ((player_prop->pos.f[2] - bondprevpos->f[2]) / g_GlobalTimerDelta) + throw_speed_vec.f[2];
     }
 
-    spE0.f[0] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][0];
-    spE0.f[1] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][1];
-    spE0.f[2] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][2];
+#ifdef GE_MODDED_CHEATS
+    if (!gunGetThirdPersonHandOrigin(hand, &spE0))
+#endif
+    {
+        spE0.f[0] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][0];
+        spE0.f[1] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][1];
+        spE0.f[2] = g_CurrentPlayer->hands[hand].throw_item_pos_related.m[3][2];
+    }
 
     matrix_4x4_set_identity(&spA0_a);
     matrix_4x4_copy(&g_CurrentPlayer->hands[hand].throw_item_pos_related, &sp40_f);
@@ -2233,6 +2268,7 @@ void gunSpawnGLGrenade(s32 handnum)
     Mtxf launchmtx;
     coord3d aimpos;
     coord3d aimdir;
+    coord3d launchpos;
     PropRecord *playerprop;
     coord3d *prevplayerpos;
 
@@ -2262,6 +2298,13 @@ void gunSpawnGLGrenade(s32 handnum)
     launchmtx.m[3][1] = 0.0f;
     launchmtx.m[3][2] = 0.0f;
 
+#ifdef GE_MODDED_CHEATS
+    if (!gunGetThirdPersonMuzzleOrigin(handnum, &launchpos))
+#endif
+    {
+        launchpos = hand->field_B58;
+    }
+
     grenadeobj = create_new_item_instance_of_model(PROP_CHRGRENADEROUND, ITEM_GRENADEROUND);
 
     if (grenadeobj != NULL)
@@ -2270,7 +2313,7 @@ void gunSpawnGLGrenade(s32 handnum)
         grenadeobj->runtime_bitflags &= ~RUNTIMEBITFLAG_OWNER;
         grenadeobj->runtime_bitflags |= get_cur_playernum() << RUNTIMEBITSHIFT_OWNER;
 
-        gunInitProjectileFromPlayer(grenadeobj, &hand->field_B58, &launchmtx, &launchvel, (s32 *)&identitymtx);
+        gunInitProjectileFromPlayer(grenadeobj, &launchpos, &launchmtx, &launchvel, (s32 *)&identitymtx);
 
         if (grenadeobj->runtime_bitflags & RUNTIMEBITFLAG_00000080)
         {
@@ -2464,9 +2507,14 @@ void gunFireTankShell(s32 handnum)
         bullet_path_from_screen_center(&screenpos, &aimdir, handnum);
         mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &aimdir);
 
-        spawnpos.x = hand->field_B58.x;
-        spawnpos.y = hand->field_B58.y;
-        spawnpos.z = hand->field_B58.z;
+#ifdef GE_MODDED_CHEATS
+        if (!gunGetThirdPersonMuzzleOrigin(handnum, &spawnpos))
+#endif
+        {
+            spawnpos.x = hand->field_B58.x;
+            spawnpos.y = hand->field_B58.y;
+            spawnpos.z = hand->field_B58.z;
+        }
 
         if (1);
 
@@ -2537,6 +2585,14 @@ void gunFireTankShell(s32 handnum)
             }
         }
     }
+
+#ifdef GE_MODDED_CHEATS
+    if (weaponid == ITEM_ROCKETLAUNCH && modThirdPersonActive(get_cur_playernum()) &&
+        hand->firedrocket != 0)
+    {
+        hand->rocket = NULL;
+    }
+#endif
 }
 #endif
 

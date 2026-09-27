@@ -13,4 +13,5 @@ void set_mt_tex_alloc(void)
     }
 
     texInitPool(&ptr_texture_alloc_start, mempAllocBytesInBank(bytes, MEMPOOL_STAGE), bytes);
+    texResetStageOverflowPool();
 }

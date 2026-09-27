@@ -46,6 +46,9 @@
 #include "ob.h"
 #include "gbi_extension.h"
 #include "model.h"
+#ifdef GE_MAP_MAKER
+#include "mapmaker.h"
+#endif
 
 extern char *frontModGetOptionLabel(s32 index);
 
@@ -196,6 +199,7 @@ struct CoopMissionReportSnapshot
     s32 bondkia;
     s32 success;
     s32 cheatsused;
+    s32 missiontimer;
     OBJECTIVESTATUS objectivestatus[OBJECTIVES_MAX];
     s32 deaths[MAX_PLAYER_COUNT];
     s32 shotcount[MAX_PLAYER_COUNT][7];
@@ -204,6 +208,9 @@ struct CoopMissionReportSnapshot
 };
 
 static struct CoopMissionReportSnapshot g_CoopMissionReport;
+/* R22: Explicit frontend destination latch.  A Co-Op campaign mission must
+ * always visit the folder Mission Report before returning to MP menus. */
+static s32 g_CoopMissionReportPending;
 #endif
 
 
@@ -277,6 +284,10 @@ s32 highlight_aimadjustment;
 #ifdef GE_MODDED_CHEATS
 s32 highlight_settings;
 s32 highlight_noradar;
+#ifdef GE_MODDED_CHEATS
+s32 highlight_viewportlock;
+s32 highlight_killcount;
+#endif
 s32 mp_player_options_player;
 s32 mp_player_options_highlight;
 #endif
@@ -1236,6 +1247,9 @@ void frontStoreCoopMissionReportStats(void)
         return;
     }
 
+    /* Set the routing latch while Co-Op identity is still unquestionably
+     * live.  Report statistics are best-effort below, but routing is not. */
+    g_CoopMissionReportPending = TRUE;
     g_CoopMissionReport.valid = FALSE;
     g_CoopMissionReport.playercount = 0;
 
@@ -1256,6 +1270,7 @@ void frontStoreCoopMissionReportStats(void)
     g_CoopMissionReport.missionfailed = mission_failed_or_aborted;
     g_CoopMissionReport.bondkia = g_isBondKIA;
     g_CoopMissionReport.cheatsused = g_AppendCheatSinglePlayer;
+    g_CoopMissionReport.missiontimer = getMissiontimer();
 
     for (objective = 0; objective < OBJECTIVES_MAX; objective++)
     {
@@ -5419,6 +5434,8 @@ void init_menu_mp_settings(void)
     highlight_controlstyle = FALSE;
     highlight_aimadjustment = FALSE;
     highlight_noradar = FALSE;
+    highlight_viewportlock = FALSE;
+    highlight_killcount = FALSE;
     load_walletbond();
 }
 
@@ -5443,20 +5460,30 @@ void interface_menu_mp_settings(void)
         highlight_controlstyle = FALSE;
         highlight_aimadjustment = FALSE;
         highlight_noradar = FALSE;
+        highlight_viewportlock = FALSE;
+        highlight_killcount = FALSE;
 
         if (frontCheckCursorOnPreviousTab())
         {
             tab_prev_highlight = TRUE;
         }
-        else if (cursor_v_pos >= 0xc9 && frontCheckIfCheatIsUnlocked(CHEAT_NO_RADAR_MP))
+        else if (cursor_v_pos >= 0xde)
+        {
+            highlight_killcount = TRUE;
+        }
+        else if (cursor_v_pos >= 0xca)
+        {
+            highlight_viewportlock = TRUE;
+        }
+        else if (cursor_v_pos >= 0xb6 && frontCheckIfCheatIsUnlocked(CHEAT_NO_RADAR_MP))
         {
             highlight_noradar = TRUE;
         }
-        else if (cursor_v_pos >= 0xb5)
+        else if (cursor_v_pos >= 0xa2)
         {
             highlight_aimadjustment = TRUE;
         }
-        else if (cursor_v_pos >= 0xa1 && unlock_control_style)
+        else if (cursor_v_pos >= 0x8e && unlock_control_style)
         {
             highlight_controlstyle = TRUE;
         }
@@ -5515,6 +5542,14 @@ void interface_menu_mp_settings(void)
         {
             g_CheatActivated[CHEAT_NO_RADAR_MP] ^= 1;
         }
+        else if (highlight_viewportlock)
+        {
+            g_MpViewportLock = g_MpViewportLock == 2 ? 0 : g_MpViewportLock + 1;
+        }
+        else if (highlight_killcount)
+        {
+            g_MpKillCountMessageEnabled ^= 1;
+        }
     }
 }
 
@@ -5534,7 +5569,7 @@ Gfx *constructor_menu_mp_settings(Gfx *DL)
 
     text = (u8 *)"Settings";
     x = 0x37;
-    y = 0x66;
+    y = 0x68;
     DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
 
 #define MPSETTINGS_ROW(_text, _y, _highlight, _enabled) \
@@ -5544,17 +5579,29 @@ Gfx *constructor_menu_mp_settings(Gfx *DL)
     if (_highlight) DL = microcode_constructor_related_to_menus(DL, 0x37, y - 1, tw + 0x3c, y + 0xe, 0x32); \
     DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, (_enabled) ? 0xff : 0x70, viGetX(), viGetY(), 0, 0)
 
-    MPSETTINGS_ROW(langGet(getStringID(LTITLE, TITLE_STR_83_HEALTH)), 0x8d, highlight_health, unlock_handicap);
-    MPSETTINGS_ROW(langGet(getStringID(LTITLE, TITLE_STR_286_CONTROLSTYLE)), 0xa1, highlight_controlstyle, unlock_control_style);
-    MPSETTINGS_ROW((u8 *)"Player Options", 0xb5, highlight_aimadjustment, TRUE);
-    MPSETTINGS_ROW(cheatGetMenuTextPointer(CHEAT_NO_RADAR_MP), 0xc9, highlight_noradar, frontCheckIfCheatIsUnlocked(CHEAT_NO_RADAR_MP));
+    /* Six rows fit the folder without pushing the new global HUD toggle into
+     * the Previous-tab footer. */
+    MPSETTINGS_ROW(langGet(getStringID(LTITLE, TITLE_STR_83_HEALTH)), 0x7a, highlight_health, unlock_handicap);
+    MPSETTINGS_ROW(langGet(getStringID(LTITLE, TITLE_STR_286_CONTROLSTYLE)), 0x8e, highlight_controlstyle, unlock_control_style);
+    MPSETTINGS_ROW((u8 *)"Player Options", 0xa2, highlight_aimadjustment, TRUE);
+    MPSETTINGS_ROW(cheatGetMenuTextPointer(CHEAT_NO_RADAR_MP), 0xb6, highlight_noradar, frontCheckIfCheatIsUnlocked(CHEAT_NO_RADAR_MP));
+    MPSETTINGS_ROW((u8 *)"Lock Viewport", 0xca, highlight_viewportlock, TRUE);
+    MPSETTINGS_ROW((u8 *)frontModGetOptionLabel(45), 0xde, highlight_killcount, TRUE);
 #undef MPSETTINGS_ROW
 
-    text = langGet(getStringID(LTITLE, g_CheatActivated[CHEAT_NO_RADAR_MP] ? TITLE_STR_115_ON : TITLE_STR_116_OFF));
+    text = langGet(g_CheatActivated[CHEAT_NO_RADAR_MP] ? getStringID(LTITLE, TITLE_STR_115_ON) : getStringID(LTITLE, TITLE_STR_116_OFF));
     x = 0x120;
-    y = 0xc9;
+    y = 0xb6;
     colour = frontCheckIfCheatIsUnlocked(CHEAT_NO_RADAR_MP) ? 0xff : 0x70;
     DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, colour, viGetX(), viGetY(), 0, 0);
+
+    text = (u8 *)(g_MpViewportLock == 1 ? "1st Person" : g_MpViewportLock == 2 ? "3rd Person" : "None");
+    x = 0x120; y = 0xca;
+    DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+
+    text = langGet(g_MpKillCountMessageEnabled ? getStringID(LTITLE, TITLE_STR_115_ON) : getStringID(LTITLE, TITLE_STR_116_OFF));
+    x = 0x120; y = 0xde;
+    DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
 
     DL = frontAddPreviousTabText(DL);
     DL = frontDrawCursor(DL);
@@ -5598,9 +5645,9 @@ void interface_menu_mp_player_options(void)
         }
         else
         {
-            row = (cursor_v_pos - 0x7d) / 0x12;
+            row = (cursor_v_pos - 0x78) / 0x10;
             if (row < 0) row = 0;
-            if (row > 9) row = 9;
+            if (row > 10) row = 10;
             mp_player_options_highlight = row;
         }
     }
@@ -5618,6 +5665,11 @@ void interface_menu_mp_player_options(void)
             {
                 mp_player_options_player = 0;
             }
+        }
+        else if (mp_player_options_highlight == 10)
+        {
+            if (g_MpViewportLock == 0)
+                g_PlayerThirdPerson[mp_player_options_player] ^= 1;
         }
         else if (mp_player_options_highlight == 9)
         {
@@ -5677,9 +5729,9 @@ Gfx *constructor_menu_mp_player_options(Gfx *DL)
 
     flags = g_MpPlayerOptions[mp_player_options_player];
 
-    for (row = 0; row < 10; row++)
+    for (row = 0; row < 11; row++)
     {
-        y = 0x7d + row * 0x12;
+        y = 0x78 + row * 0x10;
 
         if (row == 0)
         {
@@ -5699,9 +5751,13 @@ Gfx *constructor_menu_mp_player_options(Gfx *DL)
         {
             text = (u8 *)"Taking Damage Sound";
         }
-        else
+        else if (row == 9)
         {
             text = (u8 *)frontModGetOptionLabel(8);
+        }
+        else
+        {
+            text = (u8 *)frontModGetOptionLabel(32);
         }
 
         textMeasure(&th, &tw, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
@@ -5710,7 +5766,7 @@ Gfx *constructor_menu_mp_player_options(Gfx *DL)
         {
             DL = microcode_constructor_related_to_menus(DL, 0x37, y - 1, tw + 0x3c, y + 0xe, 0x32);
         }
-        DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+        DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, (row == 10 && g_MpViewportLock) ? 0x70 : 0xff, viGetX(), viGetY(), 0, 0);
 
         if (row == 0)
         {
@@ -5727,6 +5783,10 @@ Gfx *constructor_menu_mp_player_options(Gfx *DL)
         else if (row == 9)
         {
             text = (u8 *)(g_MpPlayerCrosshair[mp_player_options_player] ? "On" : "Off");
+        }
+        else if (row == 10)
+        {
+            text = (u8 *)(g_MpViewportLock ? frontModGetOptionLabel(37) : (modThirdPersonActive(mp_player_options_player) ? "On" : "Off"));
         }
         else
         {
@@ -5746,7 +5806,7 @@ Gfx *constructor_menu_mp_player_options(Gfx *DL)
         }
 
         x = 0x120;
-        DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+        DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, (row == 10 && g_MpViewportLock) ? 0x70 : 0xff, viGetX(), viGetY(), 0, 0);
     }
 
     DL = frontAddPreviousTabText(DL);
@@ -8050,10 +8110,18 @@ Gfx *constructor_menu0A_briefing(Gfx *DL)
 //********************************************************************************************************
 void init_menu0B_runstage(void)
 {
+#ifdef GE_MAP_MAKER
+    /* Returning Native Test arrives at the frontend with selected_stage still
+     * LEVELID_MAP_MAKER.  Do not immediately schedule that stage again before
+     * the editor-return branch can consume the latch. */
+    if (mapmakerNativeTestShouldReturnToEditor())
+        return;
+#endif
 #ifdef GE_MODDED_CHEATS
     /* A result snapshot belongs to exactly one completed Co-Op mission. */
     g_CoopMissionReport.valid = FALSE;
     g_CoopMissionReport.playercount = 0;
+    g_CoopMissionReportPending = FALSE;
 #endif
     bossSetLoadedStage(selected_stage);
     lvlSetSelectedDifficulty(selected_difficulty);
@@ -8393,8 +8461,21 @@ void interface_menu0D_missioncomplete()
     }
     else if (tab_prev_selected)
     {
-        frontChangeMenu(MENU_MISSION_SELECT, FALSE);
-        set_cursor_to_stage_solo((s32)mission_folder_setup_entries[briefingpage].mission_num);
+#ifdef GE_MODDED_CHEATS
+        if (frontHasCoopMissionReport())
+        {
+            /* Co-Op uses MISSION FAILED as the first generic mission-report
+             * page (its constructor prints Completed/Failed/Aborted from the
+             * snapshot).  The statistics page is page two, so Previous should
+             * return to that report instead of ejecting to mission select. */
+            frontChangeMenu(MENU_MISSION_FAILED, FALSE);
+        }
+        else
+#endif
+        {
+            frontChangeMenu(MENU_MISSION_SELECT, FALSE);
+            set_cursor_to_stage_solo((s32)mission_folder_setup_entries[briefingpage].mission_num);
+        }
     }
 
     return;
@@ -8460,10 +8541,6 @@ static void frontCoopStatsFormatWeapon(char *dst, s32 player, s32 maxwidth)
 
 static Gfx *constructor_menu0D_coopmissionstats(Gfx *DL)
 {
-    /* Ten compact columns across the paper, clear of the vertical tabs.
-     * Keep the column positions as immediates instead of two pointer tables:
-     * besides being smaller, this avoids wasting precious compressed c_data
-     * space on relocated header pointers. */
     u8 stagename[3000];
     char value[40];
     char weapon[32];
@@ -8471,7 +8548,34 @@ static Gfx *constructor_menu0D_coopmissionstats(Gfx *DL)
     s32 y;
     s32 shots;
     s32 hitshots;
+    s32 allhits;
+    s32 headhits;
+    s32 bodyhits;
+    s32 limbhits;
+    s32 otherhits;
+    s32 missionseconds;
+    s32 targettime;
     f32 accuracy;
+
+    /* Refined 440x330 Co-Op report layout.  Weapon Of Choice is presented
+     * as a separate per-player block beneath the crest, leaving the main
+     * table for Deaths / Accuracy / Shots / Kills. */
+    const s32 rowlabelx = 0x52;
+    const s32 hitrowlabelx = 0x52;
+    const s32 deathsx   = 0x95;
+    const s32 accuracyx = 0xD4;
+    const s32 weaponx   = 0x128;
+    const s32 shotx     = 0x114;
+    const s32 killx     = 0x157;
+    const s32 headx     = 0x95;
+    const s32 bodyx     = 0xD4;
+    const s32 limbx     = 0x114;
+    const s32 othersx   = 0x157;
+    const s32 headerrowy = 0xBC;
+    const s32 weaponheadery = 0x7E;
+    const s32 weaponrowy = 0x8A;
+    const s32 weaponrowstep = 0x0B;
+    const s32 labelrgba = 0xFF0000FF;
 
     DL = viSetFillColor(DL, 0, 0, 0);
     DL = viFillScreen(DL);
@@ -8486,31 +8590,81 @@ static Gfx *constructor_menu0D_coopmissionstats(Gfx *DL)
                 ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
 
-    DL = frontCoopStatsPrintCentered(DL, "Deaths",   55, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Accuracy", 91, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Weapon",  139, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "of choice",139, 0xB1, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Shot",    190, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "total",   190, 0xB1, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Kill",    224, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "total",   224, 0xB1, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Head",    255, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "hits",    255, 0xB1, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Body",    286, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "hits",    286, 0xB1, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Limb",    317, 0xA8, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "hits",    317, 0xB1, 0xFF);
-    DL = frontCoopStatsPrintCentered(DL, "Others",  351, 0xA8, 0xFF);
+    /* Match the retail single-player report hierarchy: Time is the first
+     * statistic and uses the mission timer captured before stage teardown.
+     * Keep Target on the next row so cheat-unlock notices can live to the
+     * right of it without colliding with the main stats table. */
+    {
+        s32 x = 0x37;
+        s32 timey = 0x9E;
+        s32 targety = 0xAD;
+
+        DL = frontPrintText(DL, &x, &timey, "Time:",
+                ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        missionseconds = g_CoopMissionReport.missiontimer / 60;
+        sprintf(value, "%02d:%02d", missionseconds / 60, missionseconds % 60);
+        x = 0x82;
+        DL = frontPrintText(DL, &x, &timey, value,
+                ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+
+        targettime = solo_target_time_array[mission_folder_setup_entries[briefingpage].mission_num][selected_difficulty];
+
+        if ((targettime > 0) && (selected_difficulty != DIFFICULTY_007))
+        {
+            x = 0x37;
+            DL = frontPrintText(DL, &x, &targety,
+                    langGet(getStringID(LTITLE, TITLE_STR_274_TARGET)),
+                    ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+            sprintf(value, "%02d:%02d", targettime / 60, targettime % 60);
+            x = 0x82;
+            DL = frontPrintText(DL, &x, &targety, value,
+                    ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+        }
+
+        if (g_NewCheatUnlocked)
+        {
+            s32 cheatx;
+            s32 cheaty = 0x34;
+            s32 cheatheight = 0;
+            s32 cheatwidth = 0;
+
+            sprintf(value, "[%s]", langGet(getStringID(LTITLE, TITLE_STR_275_NEWCHEATAVAILABLE)));
+            textMeasure(&cheatheight, &cheatwidth, value, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            cheatx = 0xDC - (cheatwidth >> 1);
+            DL = frontPrintText(DL, &cheatx, &cheaty, value,
+                    ptrFontZurichBoldChars, ptrFontZurichBold, 0xA00000FF,
+                    viGetX(), viGetY(), 0, 0);
+        }
+    }
+
+    /* Favorite weapon now lives in its own compact block beneath the service
+     * crest instead of consuming a main-table column. */
+    DL = frontCoopStatsPrintCentered(DL, "Weapon Of Choice", weaponx, weaponheadery, 0xFF);
+    for (p = 0; p < g_CoopMissionReport.playercount; p++)
+    {
+        s32 weapony = weaponrowy + p * weaponrowstep;
+
+        sprintf(value, "P%d", p + 1);
+        DL = frontCoopStatsPrintCentered(DL, value, weaponx - 0x2F, weapony, labelrgba);
+
+        frontCoopStatsFormatWeapon(weapon, p, 82);
+        DL = frontCoopStatsPrintCentered(DL, weapon, weaponx + 0x0B, weapony, 0xFF);
+    }
+
+    DL = frontCoopStatsPrintCentered(DL, "Deaths",     deathsx,   headerrowy, 0xFF);
+    DL = frontCoopStatsPrintCentered(DL, "Accuracy",   accuracyx, headerrowy, 0xFF);
+    DL = frontCoopStatsPrintCentered(DL, "Shots",      shotx,     headerrowy, 0xFF);
+    DL = frontCoopStatsPrintCentered(DL, "Kills",      killx,     headerrowy, 0xFF);
 
     for (p = 0; p < g_CoopMissionReport.playercount; p++)
     {
-        y = 0xC1 + p * 0x12;
+        y = 0xC8 + p * 0x0C;
 
         sprintf(value, "P%d", p + 1);
-        DL = frontCoopStatsPrintCentered(DL, value, 28, y, 0x00FF00FF);
+        DL = frontCoopStatsPrintCentered(DL, value, rowlabelx, y, labelrgba);
 
         sprintf(value, "%d", g_CoopMissionReport.deaths[p]);
-        DL = frontCoopStatsPrintCentered(DL, value, 55, y, 0xFF);
+        DL = frontCoopStatsPrintCentered(DL, value, deathsx, y, 0xFF);
 
         shots = g_CoopMissionReport.shotcount[p][0];
         hitshots = g_CoopMissionReport.shotcount[p][1]
@@ -8521,29 +8675,53 @@ static Gfx *constructor_menu0D_coopmissionstats(Gfx *DL)
             + g_CoopMissionReport.shotcount[p][6];
         accuracy = shots > 0 ? (hitshots * 100.0f) / shots : 0.0f;
         sprintf(value, "%.1f%%", accuracy);
-        DL = frontCoopStatsPrintCentered(DL, value, 91, y, 0xFF);
-
-        frontCoopStatsFormatWeapon(weapon, p, 48);
-        DL = frontCoopStatsPrintCentered(DL, weapon, 139, y, 0xFF);
+        DL = frontCoopStatsPrintCentered(DL, value, accuracyx, y, 0xFF);
 
         sprintf(value, "%d", shots);
-        DL = frontCoopStatsPrintCentered(DL, value, 190, y, 0xFF);
+        DL = frontCoopStatsPrintCentered(DL, value, shotx, y, 0xFF);
 
         sprintf(value, "%d", g_CoopMissionReport.killcount[p]);
-        DL = frontCoopStatsPrintCentered(DL, value, 224, y, 0xFF);
+        DL = frontCoopStatsPrintCentered(DL, value, killx, y, 0xFF);
+    }
 
-        sprintf(value, "%d", g_CoopMissionReport.shotcount[p][1]);
-        DL = frontCoopStatsPrintCentered(DL, value, 255, y, 0xFF);
+    {
+        s32 x = 0x46;
+        s32 hitsy = 0xFC;
+        DL = frontPrintText(DL, &x, &hitsy, "Hits:",
+                ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    }
+    DL = frontCoopStatsPrintCentered(DL, "Head",   headx,   0xFD, 0xFF);
+    DL = frontCoopStatsPrintCentered(DL, "Body",   bodyx,   0xFD, 0xFF);
+    DL = frontCoopStatsPrintCentered(DL, "Limb",   limbx,   0xFD, 0xFF);
+    DL = frontCoopStatsPrintCentered(DL, "Others", othersx, 0xFD, 0xFF);
 
-        sprintf(value, "%d", g_CoopMissionReport.shotcount[p][2]);
-        DL = frontCoopStatsPrintCentered(DL, value, 286, y, 0xFF);
+    for (p = 0; p < g_CoopMissionReport.playercount; p++)
+    {
+        y = 0x10A + p * 0x0C;
+        headhits = g_CoopMissionReport.shotcount[p][1];
+        bodyhits = g_CoopMissionReport.shotcount[p][2];
+        limbhits = g_CoopMissionReport.shotcount[p][3];
+        otherhits = g_CoopMissionReport.shotcount[p][4] + g_CoopMissionReport.shotcount[p][5];
+        allhits = headhits + bodyhits + limbhits + otherhits;
 
-        sprintf(value, "%d", g_CoopMissionReport.shotcount[p][3]);
-        DL = frontCoopStatsPrintCentered(DL, value, 317, y, 0xFF);
+        sprintf(value, "P%d", p + 1);
+        DL = frontCoopStatsPrintCentered(DL, value, hitrowlabelx, y, labelrgba);
 
-        sprintf(value, "%d", g_CoopMissionReport.shotcount[p][4]
-                + g_CoopMissionReport.shotcount[p][5]);
-        DL = frontCoopStatsPrintCentered(DL, value, 351, y, 0xFF);
+        sprintf(value, "%d (%d%%)", headhits,
+                allhits > 0 ? (s32)floorFloat((headhits * 100.0f / allhits) + 0.5f) : 0);
+        DL = frontCoopStatsPrintCentered(DL, value, headx, y, 0xFF);
+
+        sprintf(value, "%d (%d%%)", bodyhits,
+                allhits > 0 ? (s32)floorFloat((bodyhits * 100.0f / allhits) + 0.5f) : 0);
+        DL = frontCoopStatsPrintCentered(DL, value, bodyx, y, 0xFF);
+
+        sprintf(value, "%d (%d%%)", limbhits,
+                allhits > 0 ? (s32)floorFloat((limbhits * 100.0f / allhits) + 0.5f) : 0);
+        DL = frontCoopStatsPrintCentered(DL, value, limbx, y, 0xFF);
+
+        sprintf(value, "%d (%d%%)", otherhits,
+                allhits > 0 ? (s32)floorFloat((otherhits * 100.0f / allhits) + 0.5f) : 0);
+        DL = frontCoopStatsPrintCentered(DL, value, othersx, y, 0xFF);
     }
 
     DL = frontAddNextTabText(DL);
@@ -8810,6 +8988,11 @@ static s32 frontModIsHiddenCheat(s32 cheat)
         case CHEAT_NO_RADAR_MP:
         case CHEAT_NO_RELOAD:
         case CHEAT_RAPID_FIRE:
+        case CHEAT_NO_CLIPPING:
+        case CHEAT_FLY_MODE:
+        case CHEAT_KINETIC_EXPLOSIONS:
+        case CHEAT_SUPER_TANK:
+        case CHEAT_MIRRORED_LEVELS:
             return TRUE;
     }
 
@@ -8832,6 +9015,11 @@ u8 *frontModGetCheatMenuText(s32 cheat)
         case CHEAT_DEBUG_POS: return (u8 *)"Debug Position";
         case CHEAT_NO_RELOAD: return (u8 *)"No Reload";
         case CHEAT_RAPID_FIRE: return (u8 *)"Rapid Fire";
+        case CHEAT_NO_CLIPPING: return (u8 *)"No-Clipping";
+        case CHEAT_FLY_MODE: return (u8 *)frontModGetOptionLabel(42);
+        case CHEAT_KINETIC_EXPLOSIONS: return (u8 *)"Kinetic Explosions";
+        case CHEAT_SUPER_TANK: return (u8 *)"Super Tank";
+        case CHEAT_MIRRORED_LEVELS: return (u8 *)"Mirrored Levels";
     }
     return cheatGetMenuTextPointer(cheat);
 }
@@ -8840,10 +9028,14 @@ static void frontModBuildCheatPage(s32 page)
 {
     static const u8 hiddencheats[] = {
         CHEAT_RAPID_FIRE,
+        CHEAT_KINETIC_EXPLOSIONS,
+        CHEAT_SUPER_TANK,
+        CHEAT_MIRRORED_LEVELS,
+        CHEAT_NO_CLIPPING,
+        CHEAT_FLY_MODE,
         CHEAT_EXTRA_MP_CHARS,
         CHEAT_MAXAMMO,
         CHEAT_DEBUG_UNK5,
-        CHEAT_DEACTIVATE_INVINCIBILITY,
         CHEAT_2X_HEALTH,
         CHEAT_2X_ARMOR,
         CHEAT_EXTRA_WEAPONS,
@@ -9183,10 +9375,16 @@ static s32 g_ModOptionsPage;
 static s32 g_ModOptionsUnlockHover;
 static s32 g_ModOptionsUnlockConfirm;
 static s32 g_ModOptionsUnlockChoice;
+#ifdef GE_MAP_MAKER
+static s32 g_ModOptionsMapMakerHover;
+static s32 g_ModOptionsStartPage2;
+static s32 g_MapMakerMenuChoice;
+#endif
 
 #define MOD_OPTIONS_TITLE_Y       42
 #define MOD_OPTIONS_FIRST_ROW_Y   66
 #define MOD_OPTIONS_ROW_HEIGHT    18
+#define MOD_SPECIAL_OPTIONS_ROW_HEIGHT 16
 #define MOD_OPTIONS_SLIDER_X1     202
 #define MOD_OPTIONS_SLIDER_X2     340
 #define MOD_OPTIONS_PERCENT_X     346
@@ -9199,7 +9397,13 @@ void init_menu_mod_options(void)
     tab_prev_selected = FALSE;
     tab_prev_highlight = FALSE;
     tab_next_highlight = FALSE;
+#ifdef GE_MAP_MAKER
+    g_ModOptionsPage = g_ModOptionsStartPage2 ? 1 : 0;
+    g_ModOptionsStartPage2 = 0;
+    g_ModOptionsMapMakerHover = FALSE;
+#else
     g_ModOptionsPage = 0;
+#endif
     g_ModOptionsHighlighted = 0;
     g_ModOptionsDirty = FALSE;
     g_ModOptionsUnlockHover = FALSE;
@@ -9212,7 +9416,15 @@ void init_menu_mod_options(void)
         save->options &= ~OPTION_CROSSHAIR;
         g_ModOptionsDirty = TRUE;
     }
-    if (save && (save->mod_options3 & MODOPT3_SIGNATURE_MASK) != MODOPT3_SIGNATURE)
+    if (save && (save->mod_options3 & MODOPT3_LEGACY_SIGNATURE_MASK) == MODOPT3_LEGACY_SIGNATURE_V32)
+    {
+        /* V33 migration: bit 5 becomes Directional Shoulder View Toggle.
+         * V32's 0xa0 marker had that bit set as part of the signature, so
+         * clear it explicitly to preserve the requested default Off state. */
+        save->mod_options3 = (save->mod_options3 & 0x1f) | MODOPT3_SIGNATURE;
+        g_ModOptionsDirty = TRUE;
+    }
+    else if (save && (save->mod_options3 & MODOPT3_SIGNATURE_MASK) != MODOPT3_SIGNATURE)
     {
         if (!(save->mod_options2 & MODOPT2_R21_MIGRATED))
         {
@@ -9228,6 +9440,28 @@ void init_menu_mod_options(void)
         save->mod_options3 = DEFAULT_MOD_OPTIONS3;
         g_ModOptionsDirty = TRUE;
     }
+#ifdef GE_MODDED_CHEATS
+    if (save)
+    {
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+        /* V39: The GE+ SRAM extension is authoritative.  Load it before the
+         * frontend Special Options page is rendered so values edited in the
+         * main menu and values seen in-game are the same per-folder state. */
+        if (!fileLoadExtendedSettings(save))
+        {
+            g_ModGameplayOptions2 = save->mod_options2;
+            g_ModGameplayOptions3 = save->mod_options3;
+            g_ModTpSightTranslucencyEnabled = TRUE;
+            fileLoadThirdPersonCameraSettings(save);
+        }
+#else
+        g_ModGameplayOptions2 = save->mod_options2;
+        g_ModGameplayOptions3 = save->mod_options3;
+        g_ModTpSightTranslucencyEnabled = TRUE;
+        fileLoadThirdPersonCameraSettings(save);
+#endif
+    }
+#endif
 
     frontModApplyMusicVolume(save);
     load_walletbond();
@@ -9252,11 +9486,54 @@ static void frontModOptionsChange(s32 direction)
         else if (g_ModOptionsHighlighted == 4) save->mod_options2 ^= MODOPT2_DISABLE_KNOCKBACK;
         else if (g_ModOptionsHighlighted == 5) save->mod_options2 ^= MODOPT2_DISABLE_NOISE_DITHER;
         else if (g_ModOptionsHighlighted == 6) save->mod_options2 ^= MODOPT2_DAMAGE_FLASH;
+
+        /* Page-2 gameplay toggles are live runtime options as well as save
+         * fields.  Keep the active state synchronized immediately so SP
+         * Disable Knockback / Damage Flash and related effects do not wait
+         * for the save to be reloaded before taking effect. */
+        if (g_ModOptionsHighlighted >= 1 && g_ModOptionsHighlighted <= 6)
+        {
+            g_ModGameplayOptions2 = save->mod_options2;
+        }
+
         else if (g_ModOptionsHighlighted == 7) save->options = (opt ^ OPTION_CROSSHAIR) | OPTION_R21_MIGRATED;
         else if (g_ModOptionsHighlighted == 8)
         {
             save->mod_options2 ^= MODOPT2_DISABLE_DAMAGE_SFX;
             g_ModGameplayOptions2 = save->mod_options2;
+        }
+        else if (g_ModOptionsHighlighted == 9)
+        {
+            modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
+            save->mod_options3 = g_ModGameplayOptions3;
+        }
+        else if (g_ModOptionsHighlighted == 10)
+        {
+            s32 i;
+            g_ModStayInTpOnDeathDefault ^= 1;
+            for (i = 0; i < MAX_PLAYER_COUNT; i++)
+                g_PlayerStayInTpOnDeath[i] = g_ModStayInTpOnDeathDefault;
+            fileStoreThirdPersonCameraSettings(save);
+        }
+        else if (g_ModOptionsHighlighted == 11)
+        {
+            g_ModGameplayOptions3 ^= MODOPT3_TP_CROUCH_CAM;
+            g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+            save->mod_options3 = g_ModGameplayOptions3;
+        }
+        else if (g_ModOptionsHighlighted == 12)
+        {
+            g_ModGameplayOptions3 ^= MODOPT3_DIRECTIONAL_SHOULDER;
+            g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+            save->mod_options3 = g_ModGameplayOptions3;
+        }
+        else if (g_ModOptionsHighlighted == 13)
+        {
+            g_ModTpSightTranslucencyEnabled ^= 1;
+        }
+        else if (g_ModOptionsHighlighted == 14)
+        {
+            g_ModAntiAliasingEnabled ^= 1;
         }
         g_ModOptionsDirty = TRUE;
         return;
@@ -9315,7 +9592,7 @@ static void frontModOptionsChange(s32 direction)
 void interface_menu_mod_options(void)
 {
     s32 row;
-    s32 maxrow = g_ModOptionsPage ? 8 : 10;
+    s32 maxrow = g_ModOptionsPage ? 14 : 10;
     u32 pressed;
 
     viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
@@ -9367,7 +9644,17 @@ void interface_menu_mod_options(void)
             if (g_ModOptionsDirty)
             {
                 save_data *save = fileGetSaveForFoldernum(selected_folder_num);
-                if (save) fileWriteSave(save);
+                if (save)
+                {
+                    fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+                    /* V39: fileWriteSave keeps the legacy 512-byte mirror,
+                     * then commit the live GE+ runtime state to the
+                     * authoritative journal bank.  This remains deferred to
+                     * menu exit, avoiding SRAM traffic on every cursor tap. */
+                    fileStoreExtendedSettings(save);
+#endif
+                }
                 g_ModOptionsDirty = FALSE;
             }
             frontChangeMenu(MENU_MODE_SELECT, FALSE);
@@ -9388,11 +9675,24 @@ void interface_menu_mod_options(void)
     {
         g_ModOptionsUnlockHover = g_ModOptionsPage
             && cursor_h_pos >= 250.0f && cursor_h_pos <= 382.0f
-            && cursor_v_pos >= 63.0f && cursor_v_pos <= 85.0f;
+            && cursor_v_pos >= 63.0f && cursor_v_pos <= 82.0f;
+#ifdef GE_MAP_MAKER
+        g_ModOptionsMapMakerHover = g_ModOptionsPage
+            && cursor_h_pos >= 250.0f && cursor_h_pos <= 382.0f
+            && cursor_v_pos >= 83.0f && cursor_v_pos <= 103.0f;
+#endif
 
-        row = ((s32)cursor_v_pos - MOD_OPTIONS_FIRST_ROW_Y) / MOD_OPTIONS_ROW_HEIGHT;
+        /* Special Options is rendered at a tighter 16-pixel row pitch than
+         * the normal Options page.  Use the same pitch for cursor hit-testing
+         * or the selection box drifts upward by two pixels per row. */
+        row = ((s32)cursor_v_pos - MOD_OPTIONS_FIRST_ROW_Y) /
+            (g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT);
         if (row < 0) row = 0; if (row > maxrow) row = maxrow;
+#ifdef GE_MAP_MAKER
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover)
+#else
         if (!g_ModOptionsUnlockHover)
+#endif
         {
             g_ModOptionsHighlighted = row;
         }
@@ -9408,8 +9708,32 @@ void interface_menu_mod_options(void)
             frontUpdateControlStickPosition();
             return;
         }
+#ifdef GE_MAP_MAKER
+        if (g_ModOptionsMapMakerHover && (pressed & (START_BUTTON|Z_TRIG|A_BUTTON)))
+        {
+            if (g_ModOptionsDirty)
+            {
+                save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+                if (save)
+                {
+                    fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+                    fileStoreExtendedSettings(save);
+#endif
+                }
+                g_ModOptionsDirty = FALSE;
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            frontChangeMenu(MENU_MAP_MAKER, FALSE);
+            return;
+        }
+#endif
 
+#ifdef GE_MAP_MAKER
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
+#else
         if (!g_ModOptionsUnlockHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
+#endif
         {
             save_data *save = fileGetSaveForFoldernum(selected_folder_num);
             f32 t = (cursor_h_pos - (f32)MOD_OPTIONS_SLIDER_X1) /
@@ -9437,12 +9761,20 @@ void interface_menu_mod_options(void)
             }
         }
 
+#ifdef GE_MAP_MAKER
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && (pressed & (L_JPAD|L_CBUTTONS)))
+#else
         if (!g_ModOptionsUnlockHover && (pressed & (L_JPAD|L_CBUTTONS)))
+#endif
         {
             frontModOptionsChange(-1);
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         }
+#ifdef GE_MAP_MAKER
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
+#else
         if (!g_ModOptionsUnlockHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
+#endif
         {
             frontModOptionsChange(1);
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
@@ -9457,13 +9789,14 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
 {
     save_data *save = fileGetSaveForFoldernum(selected_folder_num);
     s32 i, x, y, value;
-    s32 count = g_ModOptionsPage ? 9 : 11;
+    s32 count = g_ModOptionsPage ? 15 : 11;
     s32 sliderfill;
     s32 percent;
     char percenttext[8];
     const char *valueptr;
     u16 opt = save ? save->options : DEFAULT_OPTIONS;
     u8 opt2 = save ? save->mod_options2 : DEFAULT_MOD_OPTIONS2;
+    u8 opt3 = save ? save->mod_options3 : DEFAULT_MOD_OPTIONS3;
 
     DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
 
@@ -9499,7 +9832,7 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
         return DL;
     }
 
-    x=55; y=MOD_OPTIONS_TITLE_Y; DL = frontPrintText(DL,&x,&y,"Options",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    x=55; y=MOD_OPTIONS_TITLE_Y; DL = frontPrintText(DL,&x,&y,g_ModOptionsPage ? "Special Options" : "Options",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
 
     if (g_ModOptionsPage)
     {
@@ -9512,15 +9845,30 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
             DL = microcode_constructor_related_to_menus(DL,250,65,252 + uw + 2,81,0x32);
         }
         DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(17),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+#ifdef GE_MAP_MAKER
+        x = 252;
+        y = 84;
+        if (g_ModOptionsMapMakerHover && !tab_prev_highlight && !tab_next_highlight)
+        {
+            s32 mh, mw;
+            textMeasure(&mh, &mw, "Map Maker", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,250,83,252 + mw + 2,100,0x32);
+        }
+        DL = frontPrintText(DL,&x,&y,"Map Maker",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+#endif
     }
 
     for (i=0;i<count;i++)
     {
         static const u8 page1labels[11] = {0,1,2,3,4,5,6,7,9,10,11};
-        static const u8 page2labels[9] = {12,13,14,15,30,31,16,8,29};
+        static const u8 page2labels[15] = {12,13,14,15,30,31,16,8,29,46,47,48,49,51,50};
         char *label = frontModGetOptionLabel(g_ModOptionsPage ? page2labels[i] : page1labels[i]);
-        y=MOD_OPTIONS_FIRST_ROW_Y+i*MOD_OPTIONS_ROW_HEIGHT; x=55;
+        y=MOD_OPTIONS_FIRST_ROW_Y+i*(g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT); x=55;
+#ifdef GE_MAP_MAKER
+        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !tab_prev_highlight && !tab_next_highlight)
+#else
         if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !tab_prev_highlight && !tab_next_highlight)
+#endif
         {
             s32 lh, lw;
             textMeasure(&lh,&lw,label,ptrFontZurichBoldChars,ptrFontZurichBold,0);
@@ -9547,12 +9895,18 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
             if (i == 0) value = opt & OPTION_HEADROLL;
             else if (i == 1) value = opt2 & MODOPT2_ENDLESS_DEATHCAM;
             else if (i == 2) value = opt2 & MODOPT2_REALTIME_COLLAPSE;
-            else if (i == 3) value = opt2 & MODOPT2_DISABLE_HITSTUN;
-            else if (i == 4) value = opt2 & MODOPT2_DISABLE_KNOCKBACK;
-            else if (i == 5) value = opt2 & MODOPT2_DISABLE_NOISE_DITHER;
+            else if (i == 3) value = !(opt2 & MODOPT2_DISABLE_HITSTUN);
+            else if (i == 4) value = !(opt2 & MODOPT2_DISABLE_KNOCKBACK);
+            else if (i == 5) value = !(opt2 & MODOPT2_DISABLE_NOISE_DITHER);
             else if (i == 6) value = opt2 & MODOPT2_DAMAGE_FLASH;
             else if (i == 7) value = opt & OPTION_CROSSHAIR;
-            else { value = opt2 & MODOPT2_DISABLE_DAMAGE_SFX; value = !value; }
+            else if (i == 8) { value = opt2 & MODOPT2_DISABLE_DAMAGE_SFX; value = !value; }
+            else if (i == 9) value = opt3 & MODOPT3_ENABLE_MICROOPT;
+            else if (i == 10) value = g_ModStayInTpOnDeathDefault;
+            else if (i == 11) value = opt3 & MODOPT3_TP_CROUCH_CAM;
+            else if (i == 12) value = opt3 & MODOPT3_DIRECTIONAL_SHOULDER;
+            else if (i == 13) value = g_ModTpSightTranslucencyEnabled;
+            else value = g_ModAntiAliasingEnabled;
             valueptr = value ? "On" : "Off";
         }
         else if (i==2) { value=(opt&OPTION_CONTROLTYPE)>>8; if(value>7)value=0; valueptr=frontModGetOptionLabel(21 + value); }
@@ -9575,23 +9929,442 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
 }
 #endif
 
+
+#ifdef GE_MAP_MAKER
 //********************************************************************************************************
-//NO CONTROLLER SCREEN
+//BASIC MAP MAKER FRONTEND / PROTOTYPE EDITOR
 //********************************************************************************************************
-void init_menu16_nocontroller(void) {
+static Gfx *frontMapMakerPrintOutlined(Gfx *DL, s32 x, s32 y, const char *text, u32 colour)
+{
+    return textRenderOutlined(DL, &x, &y, (s8 *)text, ptrFontZurichBoldChars, ptrFontZurichBold,
+            colour, 0x000000E0, viGetX(), viGetY(), 0, 0);
+}
+
+void init_menu_map_maker(void)
+{
+    g_MapMakerMenuChoice = 0;
+    tab_prev_highlight = FALSE;
+    tab_next_highlight = FALSE;
+    load_walletbond();
+}
+
+void update_menu_map_maker(void) { }
+
+void interface_menu_map_maker(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
+
+    if (pressed & (U_JPAD | U_CBUTTONS)) g_MapMakerMenuChoice = 0;
+    if (pressed & (D_JPAD | D_CBUTTONS)) g_MapMakerMenuChoice = 1;
+
+    if (pressed & B_BUTTON)
+    {
+        g_ModOptionsStartPage2 = 1;
+        musicTrack1Play(M_FOLDERS);
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+    {
+        mapmakerSetEditorMode(g_MapMakerMenuChoice == 1
+                ? MAPMAKER_EDITOR_ADVANCED : MAPMAKER_EDITOR_BASIC);
+        frontChangeMenu(MENU_MAP_MAKER_BASIC, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_map_maker(Gfx *DL)
+{
+    s32 h;
+    s32 w;
+
+    DL = viSetFillColor(DL, 0, 0, 0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+
+    /* Keep every Map Maker label readable over the animated folder/Bond art. */
+    DL = microcode_constructor_related_to_menus(DL, 42, 26, 422, 222, 0x000000B8);
+    DL = frontMapMakerPrintOutlined(DL, 55, 42, "Map Maker", 0xFFE070FF);
+
+    textMeasure(&h, &w, "Basic Map", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+    if (g_MapMakerMenuChoice == 0)
+        DL = microcode_constructor_related_to_menus(DL, 70, 90, 400, 109, 0x76561CB0);
+    DL = frontMapMakerPrintOutlined(DL, 74, 92, "Basic Map",
+            g_MapMakerMenuChoice == 0 ? 0xFFE070FF : 0xFFFFFFFF);
+    DL = frontMapMakerPrintOutlined(DL, 250, 92, "3D Module Editor", 0xFFFFFFFF);
+
+    textMeasure(&h, &w, "Advanced Map", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+    if (g_MapMakerMenuChoice == 1)
+        DL = microcode_constructor_related_to_menus(DL, 70, 120, 400, 139, 0x76561CB0);
+    DL = frontMapMakerPrintOutlined(DL, 74, 122, "Advanced Map",
+            g_MapMakerMenuChoice == 1 ? 0xFFE070FF : 0xFFFFFFFF);
+    DL = frontMapMakerPrintOutlined(DL, 250, 122, "Meshes / Rooms / Portals", 0xFFFFFFFF);
+
+    DL = frontMapMakerPrintOutlined(DL, 74, 176, "Basic: fast modules   Advanced: direct mesh authoring", 0xD0D0D0FF);
+    DL = frontMapMakerPrintOutlined(DL, 74, 198, "B: Back", 0xB8B8B8FF);
+
+    DL = frontDrawCursor(DL);
+    return DL;
+}
+
+void init_menu_map_maker_basic(void)
+{
+    frontCleanUpWalletBond();
+    zbufSetBuffer(ALIGN64_V2(ptr_logo_and_walletbond_DL + 0x31160), Z_BUFFER_4_3_WIDTH, Z_BUFFER_4_3_HEIGHT);
+    mapmakerBasicInit();
+}
+
+void update_menu_map_maker_basic(void) { }
+
+void interface_menu_map_maker_basic(void)
+{
+    viSetFovY(55.0f);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(10.0f, 8000.0f);
+    viSetUseZBuf(TRUE);
+    set_cur_player_screen_size(440, 330);
+    viSetViewSize(440, 330);
+    set_cur_player_viewport_size(0, 0);
+    viSetViewPosition(0, 0);
+
+    {
+        s32 mapmakerResult = mapmakerBasicTick();
+
+        if (mapmakerResult)
+        {
+            /* Basic Map temporarily replaces the global frontend texture-pool
+             * descriptor. Restore it before either the folder renderer or the
+             * native stage loader runs. */
+            mapmakerBasicRestoreFrontendResources();
+
+            if (mapmakerResult == 2)
+            {
+                /* Native Test has its own stage slot and private bootstrap
+                 * BG/STAN/setup.  Never route through or mutate a retail map. */
+                gamemode = GAMEMODE_SOLO;
+                selected_num_players = 1;
+                selected_stage = LEVELID_MAP_MAKER;
+                selected_difficulty = DIFFICULTY_AGENT;
+                frontChangeMenu(MENU_RUN_STAGE, TRUE);
+                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+                return;
+            }
+
+            musicTrack1Play(M_FOLDERS);
+            frontChangeMenu(MENU_MAP_MAKER, FALSE);
+        }
+    }
+}
+
+Gfx *constructor_menu_map_maker_basic(Gfx *DL)
+{
+    char status[160];
+    s32 choice;
+    s32 y;
+    s32 i;
+    s32 menuRight;
+    static const char *menuLabels[16] = {
+        "Resume Editing",
+        "First Person View",
+        "Native Test Mode",
+        "Tool",
+        "3D View",
+        "Material",
+        "Save Map",
+        "Load Map",
+        "Music",
+        "Snap",
+        "Grid Size",
+        "Placement",
+        "Texture Flip",
+        "Editor Fog",
+        "Arbitrary Rotation",
+        "Exit to Map Maker"
+    };
+
+    DL = viSetFillColor(DL, 4, 8, 10);
+    DL = viFillScreen(DL);
+    DL = microcode_constructor(DL);
+
+    /* Do not keep submitting the editable world underneath the START menu.
+     * Apart from wasting N64 RSP/RDP work, recycled editor textures could make
+     * already-submitted module/grid commands flicker behind the translucent
+     * menu.  The menu is a modal editor panel, so render a stable background. */
+    if (!mapmakerBasicIsMenuOpen())
+        DL = mapmakerBasicRender(DL);
+
+    DL = microcode_constructor(DL);
+
+    if (mapmakerBasicIsPlaytesting())
+    {
+        DL = microcode_constructor_related_to_menus(DL, 4, 4, 250, 48, 0x000000B8);
+        DL = microcode_constructor_related_to_menus(DL, 4, 286, 436, 326, 0x000000B8);
+        DL = frontMapMakerPrintOutlined(DL, 12, 8, "Map Maker: Basic", 0xFFE070FF);
+        sprintf(status, "First Person View   Controls: %s", mapmakerBasicGetControlStyleName());
+        DL = frontMapMakerPrintOutlined(DL, 12, 26, status, 0xFFFFFFFF);
+        DL = frontMapMakerPrintOutlined(DL, 12, 294,
+                "First Person View uses GoldenEye player-view scale/settings.", 0xE0E0E0FF);
+        DL = frontMapMakerPrintOutlined(DL, 12, 310, mapmakerBasicGetStorageStatus(), 0xC8D8C8FF);
+        return DL;
+    }
+
+    /* Title gets its own small box.  Keep the wording literal: this is an
+     * editor preview, not an in-game real-time native stage edit. */
+    DL = microcode_constructor_related_to_menus(DL, 4, 4, 196, 28, 0x000000B8);
+    DL = frontMapMakerPrintOutlined(DL, 12, 8,
+            mapmakerGetEditorMode() == MAPMAKER_EDITOR_ADVANCED ? "Map Maker: Advanced" : "Map Maker: Basic",
+            0xFFE070FF);
+
+    /* Main placement/status box. */
+    DL = microcode_constructor_related_to_menus(DL, 4, 32, 330, 88, 0x000000B0);
+    if (mapmakerGetEditorMode() == MAPMAKER_EDITOR_ADVANCED)
+        sprintf(status, "Tool: %s   Primitive: %s   Axis: %s", mapmakerAdvancedGetToolName(),
+                mapmakerAdvancedGetMeshTypeName(), mapmakerAdvancedGetAxisName());
+    else if (mapmakerBasicGetTool() == MAPTOOL_PLAYER_START)
+        sprintf(status, "Player Starts: %d/%d   Rotation: %d", mapmakerBasicGetPlayerStartCount(),
+                MAPMAKER_MAX_PLAYER_STARTS, mapmakerBasicGetRotationDegrees());
+    else if (mapmakerBasicGetTool() == MAPTOOL_ENTITY || mapmakerBasicGetTool() == MAPTOOL_PICKUP)
+        sprintf(status, "Placements: %d/%d   Rotation: %d", mapmakerBasicGetEntityCount(),
+                MAPMAKER_MAX_ENTITIES, mapmakerBasicGetRotationDegrees());
+    else
+        sprintf(status, "Module: %s   Rotation: %d   Placed: %d/%d", mapmakerBasicGetModuleName(),
+                mapmakerBasicGetRotationDegrees(), mapmakerBasicGetModuleCount(), MAPMAKER_MAX_MODULES);
+    DL = frontMapMakerPrintOutlined(DL, 12, 36, status, 0xFFFFFFFF);
+    if (mapmakerGetEditorMode() == MAPMAKER_EDITOR_ADVANCED)
+        sprintf(status, "Meshes: %d/%d   Portals: %d/%d   Room: %d   Layer: %d", mapmakerAdvancedGetMeshCount(),
+                MAPMAKER_ADV_MAX_MESHES, mapmakerAdvancedGetPortalCount(), MAPMAKER_ADV_MAX_PORTALS,
+                mapmakerAdvancedGetRoom(), mapmakerBasicGetCursorY());
+    else
+        sprintf(status, "Grid: X %d   Layer %d   Z %d   Layers: %d..%d", mapmakerBasicGetCursorX(),
+                mapmakerBasicGetCursorY(), mapmakerBasicGetCursorZ(), MAPMAKER_MIN_LAYER, MAPMAKER_MAX_LAYER);
+    DL = frontMapMakerPrintOutlined(DL, 12, 52, status, 0xD8D8D8FF);
+    DL = frontMapMakerPrintOutlined(DL, 12, 68, mapmakerBasicGetStorageStatus(), 0xC8D8C8FF);
+
+    /* Texture mode owns a persistent visual picker.  Keep the preview visible
+     * while browsing live and while START is open so the selected retail
+     * texture never becomes a blind numeric choice. */
+    if (mapmakerGetEditorMode() == MAPMAKER_EDITOR_BASIC && mapmakerBasicGetTool() == MAPTOOL_TEXTURE)
+    {
+        sImageTableEntry preview;
+        DL = microcode_constructor_related_to_menus(DL, 334, 4, 436, 102, 0x000000C8);
+        sprintf(status, "Mat %02d / Tex %04d", mapmakerBasicGetMaterialSlot() + 1,
+                mapmakerBasicGetMaterialTexture());
+        DL = frontMapMakerPrintOutlined(DL, 340, 8, status, 0xFFF0A0FF);
+        sprintf(status, "Surface: %s", mapmakerBasicGetSelectedSurfaceName());
+        DL = frontMapMakerPrintOutlined(DL, 340, 84, status, 0xFFFFFFFF);
+        if (mapmakerBasicGetMaterialPreview(&preview))
+        {
+            f32 xy[2];
+            f32 half[2];
+            f32 aspect = preview.height > 0 ? (f32)preview.width / (f32)preview.height : 1.0f;
+            xy[0] = 385.0f;
+            xy[1] = 53.0f;
+            half[0] = 24.0f;
+            half[1] = 24.0f;
+            if (aspect > 1.0f) half[1] = 24.0f / aspect;
+            else if (aspect > 0.0f) half[0] = 24.0f * aspect;
+            texSelect(&DL, &preview, 1, 0, 0);
+            display_image_at_position(&DL, xy, half, preview.width, preview.height, 0, 0, 1,
+                    255, 255, 255, 255, preview.level > 0, 0);
+        }
+    }
+
+    if (!mapmakerBasicIsMenuOpen())
+    {
+        /* Tool/view information is deliberately separated from the top status
+         * so long surface/material labels cannot run off the right edge. */
+        DL = microcode_constructor_related_to_menus(DL, 4, 238, 436, 270, 0x000000B0);
+        if (mapmakerGetEditorMode() == MAPMAKER_EDITOR_ADVANCED)
+        {
+            sprintf(status, "A Select   L Tool   R+L Axis   Z Action   Hold B Erase");
+            DL = frontMapMakerPrintOutlined(DL, 12, 246, status, 0xFFF0A0FF);
+        }
+        else         if (mapmakerBasicGetTool() == MAPTOOL_BUILD)
+        {
+            sprintf(status, "Tool: Build   View: %s   Place: %s",
+                    mapmakerBasicGetViewName(), mapmakerBasicGetPlacementModeName());
+            DL = frontMapMakerPrintOutlined(DL, 12, 246, status, 0xFFF0A0FF);
+        }
+        else if (mapmakerBasicGetTool() == MAPTOOL_ENTITY)
+        {
+            sprintf(status, "Entity %02X: %s [%s]", mapmakerBasicGetEntitySetupType(),
+                    mapmakerBasicGetEntityTypeName(), mapmakerBasicGetEntityClassName());
+            DL = frontMapMakerPrintOutlined(DL, 12, 242, status, 0xFFF0A0FF);
+            sprintf(status, "%s: %d", mapmakerBasicGetEntityIdLabel(), mapmakerBasicGetEntityObjectId());
+            DL = frontMapMakerPrintOutlined(DL, 12, 256, status, 0xE8E8E8FF);
+        }
+        else if (mapmakerBasicGetTool() == MAPTOOL_PICKUP)
+        {
+            sprintf(status, "Pickup %02X: %s", mapmakerBasicGetPickupSetupType(), mapmakerBasicGetPickupTypeName());
+            DL = frontMapMakerPrintOutlined(DL, 12, 242, status, 0xFFF0A0FF);
+            if (mapmakerBasicPickupHasQuantity())
+                sprintf(status, "%s %d   Qty %d", mapmakerBasicGetPickupSubtypeName(),
+                        mapmakerBasicGetPickupSubtype(), mapmakerBasicGetPickupQuantity());
+            else
+                sprintf(status, "%s [%d]", mapmakerBasicGetPickupSubtypeName(), mapmakerBasicGetPickupSubtype());
+            DL = frontMapMakerPrintOutlined(DL, 12, 256, status, 0xE8E8E8FF);
+        }
+        else if (mapmakerBasicGetTool() == MAPTOOL_PLAYER_START)
+        {
+            sprintf(status, "Player Start %d   Placed: %d/%d", mapmakerBasicGetPlayerStartSlot() + 1,
+                    mapmakerBasicGetPlayerStartCount(), MAPMAKER_MAX_PLAYER_STARTS);
+            DL = frontMapMakerPrintOutlined(DL, 12, 242, status, 0xFFF0A0FF);
+            DL = frontMapMakerPrintOutlined(DL, 12, 256,
+                    "Native start = IntroSpawn referencing a Pad ID", 0xE8E8E8FF);
+        }
+        else
+        {
+            sprintf(status, "Tool: Texture   Flip: %s", mapmakerBasicGetTextureFlipName());
+            DL = frontMapMakerPrintOutlined(DL, 12, 246, status, 0xFFF0A0FF);
+        }
+
+        DL = microcode_constructor_related_to_menus(DL, 4, 274, 436, 326, 0x000000B0);
+        if (mapmakerBasicGetTool() == MAPTOOL_TEXTURE)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 12, 282,
+                    "D-Pad Browse Texture   A Material   L Flip", 0xE0E0E0FF);
+            DL = frontMapMakerPrintOutlined(DL, 12, 300,
+                    "Stick/C Move View   Hold Z Paint   B Clear   START Menu", 0xE0E0E0FF);
+        }
+        else if (mapmakerBasicGetTool() == MAPTOOL_ENTITY)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 12, 282,
+                    "D-Pad L/R Setup Type   A/R+A ID +/-   L Rotate", 0xE0E0E0FF);
+            DL = frontMapMakerPrintOutlined(DL, 12, 300,
+                    "Stick/C Move View   Z Place Entity   B Delete   START Menu", 0xE0E0E0FF);
+        }
+        else if (mapmakerBasicGetTool() == MAPTOOL_PICKUP)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 12, 282,
+                    "D-Pad L/R Pickup Kind   A/R+A Subtype   L Rotate", 0xE0E0E0FF);
+            DL = frontMapMakerPrintOutlined(DL, 12, 300,
+                    "R+Up/Down Quantity   Z Place Pickup   B Delete   START", 0xE0E0E0FF);
+        }
+        else if (mapmakerBasicGetTool() == MAPTOOL_PLAYER_START)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 12, 282,
+                    "D-Pad L/R Start ID   Up/Down Layer   L Rotate", 0xE0E0E0FF);
+            DL = frontMapMakerPrintOutlined(DL, 12, 300,
+                    "Z Place/Move Start   B Delete nearest   START Menu", 0xE0E0E0FF);
+        }
+        else
+        {
+            if (mapmakerBasicIsFreeView())
+                DL = frontMapMakerPrintOutlined(DL, 12, 282,
+                        "Stick Look   C Move   D-Pad Module/Layer   Hold R: 2x Speed", 0xE0E0E0FF);
+            else
+                DL = frontMapMakerPrintOutlined(DL, 12, 282,
+                        "Orbit: Stick Cursor   C Buttons Orbit   D-Pad Module/Layer", 0xE0E0E0FF);
+            DL = frontMapMakerPrintOutlined(DL, 12, 300,
+                    "Hold Z Place/Draw   B Delete   L Rotate   START Menu", 0xE0E0E0FF);
+        }
+
+        if (mapmakerBasicIsFreeView() || mapmakerBasicGetTool() == MAPTOOL_TEXTURE
+                || mapmakerBasicGetTool() == MAPTOOL_ENTITY || mapmakerBasicGetTool() == MAPTOOL_PICKUP
+                || mapmakerBasicGetTool() == MAPTOOL_PLAYER_START)
+            DL = frontMapMakerPrintOutlined(DL, 216, 158, "+", 0xFFE070FF);
+        return DL;
+    }
+
+    /* Modal menu: leave the texture preview unobstructed when Texture is the
+     * active tool. */
+    menuRight = mapmakerBasicGetTool() == MAPTOOL_TEXTURE ? 328 : 372;
+    DL = microcode_constructor_related_to_menus(DL, 68, 28, menuRight, 320, 0x000000F0);
+    DL = frontMapMakerPrintOutlined(DL, 92, 34, "MAP MAKER MENU", 0xFFE070FF);
+    choice = mapmakerBasicGetMenuChoice();
+
+    for (i = 0; i < 16; i++)
+    {
+        y = 50 + i * 17;
+        if (choice == i)
+            DL = microcode_constructor_related_to_menus(DL, 86, y - 3, menuRight - 18, y + 15, 0x76561CB0);
+        DL = frontMapMakerPrintOutlined(DL, 94, y, menuLabels[i], choice == i ? 0xFFE070FF : 0xFFFFFFFF);
+
+        if (i == 3)
+        {
+            sprintf(status, "< %s >", mapmakerBasicGetToolName());
+            DL = frontMapMakerPrintOutlined(DL, 224, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 4)
+        {
+            sprintf(status, "< %s >", mapmakerBasicGetViewName());
+            DL = frontMapMakerPrintOutlined(DL, 224, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 5)
+        {
+            /* No image preview in this modal menu. */
+            sprintf(status, "S%02d T%04d", mapmakerBasicGetMaterialSlot() + 1, mapmakerBasicGetMaterialTexture());
+            DL = frontMapMakerPrintOutlined(DL, 224, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 8)
+        {
+            if (mapmakerBasicGetMusicTrack() < 0)
+                sprintf(status, "%s", mapmakerBasicGetMusicName());
+            else
+                sprintf(status, "%d: %s", mapmakerBasicGetMusicTrack(), mapmakerBasicGetMusicName());
+            DL = frontMapMakerPrintOutlined(DL, 190, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 9)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 224, y, mapmakerBasicGetSnapEnabled() ? "< On >" : "< Off >",
+                    choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 10)
+        {
+            sprintf(status, "< %d >", mapmakerBasicGetGridSize());
+            DL = frontMapMakerPrintOutlined(DL, 224, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 11)
+        {
+            sprintf(status, "< %s >", mapmakerBasicGetPlacementModeName());
+            DL = frontMapMakerPrintOutlined(DL, 224, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 12)
+        {
+            sprintf(status, "< %s >", mapmakerBasicGetTextureFlipName());
+            DL = frontMapMakerPrintOutlined(DL, 224, y, status, choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 13)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 224, y, mapmakerBasicGetEditorFogEnabled() ? "< Black >" : "< Off >",
+                    choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+        else if (i == 14)
+        {
+            DL = frontMapMakerPrintOutlined(DL, 224, y, mapmakerAdvancedGetArbitraryRotationEnabled() ? "< On >" : "< Off >",
+                    choice == i ? 0xFFF0A0FF : 0xD0D0D0FF);
+        }
+    }
+
+    DL = frontDrawCursor(DL);
+    return DL;
+}
+#endif
+
+void init_menu16_nocontroller(void)
+{
     return;
 }
 
-
-void update_menu16_nocontrollers(void) {
+void update_menu16_nocontrollers(void)
+{
     return;
 }
 
-
-void interface_menu16_nocontrollers(void) {
+void interface_menu16_nocontrollers(void)
+{
     return;
 }
-
 
 Gfx *constructor_menu16_nocontrollers(Gfx *DL)
 {
@@ -9695,7 +10468,12 @@ void init_menu18_displaycast(void)
 
     if ((full_actor_intro != 0) && (intro_character_index == 0))
     {
+#ifndef GE_MODDED_CHEATS
         musicTrack1ApplySeqpVol(VOLUME_MAX);
+#endif
+        /* Plus leaves Track 1 at the user's saved frontend volume.  The retail
+         * full-volume write here otherwise defeats a 0% music setting when the
+         * multiplayer/game-over flow advances to the cast/intro sequence. */
         g_musicXTrack1Fade = 0;
         musicTrack1Play(M_INTRO);
     }
@@ -10468,6 +11246,10 @@ void menu_init(void)
             case MENU_MOD_OPTIONS:            update_menu_mod_options();            break;
             case MENU_MP_SETTINGS:             update_menu_mp_settings();             break;
             case MENU_MP_PLAYER_OPTIONS:       update_menu_mp_player_options();        break;
+#ifdef GE_MAP_MAKER
+            case MENU_MAP_MAKER:              update_menu_map_maker();              break;
+            case MENU_MAP_MAKER_BASIC:        update_menu_map_maker_basic();        break;
+#endif
 #endif
             case MENU_NO_CONTROLLERS:         update_menu16_nocontrollers();        break;
             case MENU_DISPLAY_CAST:           update_menu18_displaycast();          break;
@@ -10513,6 +11295,10 @@ void menu_init(void)
             case MENU_MOD_OPTIONS:            init_menu_mod_options();              break;
             case MENU_MP_SETTINGS:             init_menu_mp_settings();               break;
             case MENU_MP_PLAYER_OPTIONS:       init_menu_mp_player_options();          break;
+#ifdef GE_MAP_MAKER
+            case MENU_MAP_MAKER:              init_menu_map_maker();                break;
+            case MENU_MAP_MAKER_BASIC:        init_menu_map_maker_basic();          break;
+#endif
 #endif
             case MENU_NO_CONTROLLERS:         init_menu16_nocontroller();           break;
             case MENU_DISPLAY_CAST:           init_menu18_displaycast();            break;
@@ -10547,20 +11333,49 @@ void menu_init(void)
         case MENU_MOD_OPTIONS:            interface_menu_mod_options();             break;
         case MENU_MP_SETTINGS:             interface_menu_mp_settings();              break;
         case MENU_MP_PLAYER_OPTIONS:       interface_menu_mp_player_options();         break;
+#ifdef GE_MAP_MAKER
+        case MENU_MAP_MAKER:              interface_menu_map_maker();               break;
+        case MENU_MAP_MAKER_BASIC:        interface_menu_map_maker_basic();         break;
+#endif
 #endif
         case MENU_NO_CONTROLLERS:         interface_menu16_nocontrollers();         break;
         case MENU_DISPLAY_CAST:           interface_menu18_displaycast();           break;
         case MENU_SPECTRUM_EMU:           interface_menu19_spectrum();              break;
         case MENU_RUN_STAGE:
+#ifdef GE_MAP_MAKER
+            /* Consume the editor-child return before running ordinary stage
+             * launch logic.  This prevents LEVELID_MAP_MAKER from being
+             * scheduled a second time during the title/frontend handoff. */
+            if (mapmakerNativeTestShouldReturnToEditor())
+            {
+                mapmakerNativeTestFinishReturn();
+                musicTrack1Play(M_FOLDERS);
+                frontChangeMenu(MENU_MAP_MAKER_BASIC, TRUE);
+            }
+            else
+#endif
             if (interface_menu0B_runstage())
             {
                 frontChangeMenu(MENU_LEGAL_SCREEN, 1);
             }
+
 #ifdef GE_MODDED_CHEATS
-            else if (frontHasCoopMissionReport())
+            else if (gamemode == GAMEMODE_MULTI && scenario == SCENARIO_COOP)
             {
-                /* The stage teardown may already have reset gamemode/scenario.
-                 * The persistent result latch is authoritative here. */
+                /* Campaign Co-Op always returns through Mission Report.
+                 * gamemode/scenario survive the stage->Title teardown (and
+                 * are what MP Options itself uses to display Scenario: Co-Op),
+                 * unlike front.c-local report latches/snapshots which may be
+                 * reinitialised with the frontend overlay.  Therefore these
+                 * persistent mode fields are the authoritative routing key. */
+                g_CoopMissionReportPending = FALSE;
+                frontChangeMenu(MENU_MISSION_FAILED, 1);
+            }
+            else if (g_CoopMissionReportPending || frontHasCoopMissionReport())
+            {
+                /* Secondary compatibility guard for any path that preserves
+                 * report state but has already changed the scenario field. */
+                g_CoopMissionReportPending = FALSE;
                 frontChangeMenu(MENU_MISSION_FAILED, 1);
             }
 #endif
@@ -10664,6 +11479,14 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
         case MENU_MP_PLAYER_OPTIONS:
             DL = constructor_menu_mp_player_options(DL);
             break;
+#ifdef GE_MAP_MAKER
+        case MENU_MAP_MAKER:
+            DL = constructor_menu_map_maker(DL);
+            break;
+        case MENU_MAP_MAKER_BASIC:
+            DL = constructor_menu_map_maker_basic(DL);
+            break;
+#endif
 #endif
         case MENU_NO_CONTROLLERS:
             DL = constructor_menu16_nocontrollers(DL);

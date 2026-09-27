@@ -1,100 +1,121 @@
 # GoldenEye 007 Plus
 
-GoldenEye 007 Plus is a community modification of **GoldenEye 007 for Nintendo 64**, built on the fully decompiled GoldenEye source and focused on performance, stability, expanded multiplayer/co-op support, quality-of-life features, and preservation-minded enhancements.
+GoldenEye 007 Plus is a community modification of **GoldenEye 007 for Nintendo 64**, built on the fully decompiled GoldenEye source and focused on performance, stability, expanded multiplayer/co-op support, Third Person gameplay, quality-of-life features, experimental in-game map creation, and preservation-minded enhancements.
 
-This repository contains **source code and project material only**. It is not a substitute for the original game and is intended to be built using a legally obtained copy of the retail ROM where required by the build system.
+This repository contains **source code and project material only**. It is not a substitute for the original game. A legally obtained retail ROM is required where the upstream build/extraction process needs original game data.
 
-## Current development baseline
+## Current development snapshot
 
-This snapshot is the current **R22** development baseline and includes the cumulative work carried forward from R21, including:
+This source refresh represents the current **R22-derived GoldenEye 007 Plus development tree through internal checkpoint V83 (2026-09-27)**. It supersedes the older public GitHub source snapshot from 2026-09-12.
 
-- performance and load-time optimizations;
-- expanded 1–4 player co-op architecture;
-- multiplayer map/menu enhancements;
-- dual-wield multiplayer work;
-- expanded Watch and Options interfaces;
-- save-backed gameplay options;
-- `Disable Hitstun`;
-- `Disable Knockback`;
-- `Disable Noise Dithering`;
-- configurable damage flash, crosshair and taking-damage sound;
-- expanded in-game cheats including Rapid Fire and No Reload;
-- SP Watch Special Options scrolling for the expanded option list;
-- selective, evidence-based Perfect Dark backports where the underlying behavior is genuinely equivalent or useful.
+Major work present in this tree includes:
 
-The project deliberately keeps GoldenEye behavior as the baseline. Perfect Dark and other related Rare-era material are references, not wholesale replacements.
+- performance and load-time optimization passes;
+- expanded 1–4 player campaign Co-Op architecture;
+- expanded multiplayer maps, menus, character selection and dual-wield behavior;
+- save-backed gameplay/Special Options;
+- Third Person gameplay with adjustable camera and crosshair tuning;
+- Third Person cutscene handoff fixes, including the Surface II and Dam end cinematics;
+- TP Sight Translucency while manually aiming;
+- Third Person projectile/beam/tracer alignment work;
+- Moonraker Laser Third Person straight-ray penetration work;
+- shared campaign Co-Op mission-item and objective-state handling;
+- Co-Op mission report/statistics routing;
+- Mirrored Levels support and live-toggle safety work;
+- Basic/Advanced Map Maker development with a dedicated native Map Maker stage architecture;
+- selective, evidence-based Perfect Dark backports where the underlying behavior is genuinely equivalent or appropriate.
 
-## Important emulator note
+The project deliberately keeps GoldenEye behavior as the baseline. Perfect Dark and related Rare-era material are references, not wholesale replacements.
 
-When testing with **Project64 + GLideN64**, enable:
+## Current runtime notes
+
+Some current development areas are still under stress testing. In particular, Mirrored Levels live toggling has received multiple safety fixes and should continue to be tested on large/explored stages such as Caverns.
+
+The Surface II Third Person/Co-Op cutscene crash is runtime-confirmed fixed in:
+
+- single-player Third Person;
+- 2P Co-Op, including both players in Third Person;
+- 3P and 4P Co-Op.
+
+Dam's Third Person ending presentation has also been corrected so its scripted camera sequence can play normally while the Third Person preference remains enabled.
+
+## Emulator note
+
+When testing with **Project64 + GLideN64**, keep graphics-plugin behavior separate from source-code regressions. Earlier development found that GLideN64 framebuffer/depth settings can produce black-world symptoms unrelated to GoldenEye game logic.
+
+A known useful diagnostic setting is:
 
 `Force depth buffer clear = ON`
 
-An intermittent split-screen black-world/background problem was traced to GLideN64 state rather than GoldenEye game code. Do not confuse that plugin issue with the separate, genuine code-side room-lifetime problem that was fixed earlier in development.
+Record the Project64 version, GLideN64 revision, framebuffer-emulation state, and depth-buffer-clear setting with renderer bug reports.
 
 ## Building
 
-The simplest supported build path is:
+The current tested build configuration is:
+
+```sh
+make VERSION=US \
+    PHYSICAL_CODE=YES \
+    PHYSICAL_FASTPATHS=YES \
+    MODDED_CHEATS=YES \
+    MAP_MAKER=YES \
+    OPT_USE_LLVM=YES \
+    COMPARE=0 \
+    -j2
+```
+
+`MODDED_CHEATS=YES` currently enables the Plus 16 Kbit EEPROM backend by default, so the normal output path includes `-eep16`.
+
+A helper script is also provided:
 
 ```sh
 ./build_geplus.sh
 ```
 
-Place a legally obtained, unmodified NTSC-U ROM in the repository root as `baserom.u.z64` first. The helper verifies the expected retail SHA-1, extracts only the required retail assets, preserves GoldenEye 007 Plus-specific model directories, and builds using:
+The helper intentionally defaults to **2 build jobs** rather than consuming every CPU core. Override with `JOBS=<n>` if desired.
 
-```sh
-make VERSION=US PHYSICAL_CODE=YES PHYSICAL_FASTPATHS=YES MODDED_CHEATS=YES OPT_USE_LLVM=YES COMPARE=0
+Place a legally obtained, unmodified NTSC-U ROM in the repository root as:
+
+```text
+baserom.u.z64
 ```
 
-`OPT_USE_LLVM=YES` is required by the current project toolchain/environment. The build may emit expected LLVM music-relocation warnings which are repaired by the project wrapper.
-
-The compressed C/data slot is currently constrained to **72,704 bytes**. The present R22 build reaches that limit exactly, so future C additions should first reclaim space or use an appropriate size-neutral approach rather than silently expanding the established memory layout.
-
-## Retail ROM requirement
-
-The upstream GoldenEye decompilation build process expects a legally obtained retail ROM for extraction of copyrighted assets that are not distributed as freely licensed project material. Do not commit or redistribute retail ROMs or extracted proprietary game assets unless you have the legal right to do so.
+The helper verifies the expected retail SHA-1 before extraction/build.
 
 ## Repository organization
 
-This repository has been intentionally cleaned of development-session artifacts, old release patches, build logs, test matrices, and superseded status files. It contains the current GoldenEye 007 Plus source, required build tooling/assets, and public-facing documentation.
+The public source layout is intentionally cleaned of development-session clutter and generated ROM/build outputs.
 
 Useful areas include:
 
-- `src/game/` — gameplay, menus, AI, player systems, rendering-facing game code;
+- `src/game/` — gameplay, menus, AI, player systems and rendering-facing game code;
 - `src/libultra/` and `src/libultrare/` — N64 runtime/library code carried by the upstream project;
-- `assets/` — build-time asset definitions and generated/extracted material;
+- `assets/` — build-time asset definitions and source material permitted in the public tree;
+- `scripts/` — build, audit, generation and extraction helpers;
 - `tools/` — build and conversion utilities;
+- `docs/` — project documentation where applicable.
+
+Generated/extracted retail assets, ROMs, object files and local build products are intentionally excluded.
 
 ## Development principles
 
-The project follows several standing rules:
-
-1. **Correctness before optimization.** Known-good releases are retained as comparison points and risky changes are regression-tested across 1P/2P/3P/4P.
-2. **All relevant modes stay in sync.** When a new option, cheat, or configurable feature is added, it should be exposed in every appropriate menu and player mode rather than being stranded in one interface.
-3. **Preserve attribution and provenance.** Upstream code, research, third-party tools, and backported material must retain their original notices and be documented.
+1. **Correctness before optimization.** Known-good checkpoints are retained as comparison points and risky changes are regression-tested across 1P/2P/3P/4P.
+2. **All relevant modes stay in sync.** New options, cheats and campaign state should behave consistently in every appropriate interface/player mode.
+3. **Preserve attribution and provenance.** Upstream code, research, third-party tools and backported material must retain their original notices.
 4. **Backport selectively.** Perfect Dark or related-engine code is used only when the function/algorithm is genuinely equivalent or clearly appropriate for GoldenEye.
 5. **Separate game bugs from emulator/plugin bugs.** Reproduce and document the distinction before altering game code.
+6. **Campaign Co-Op objectives are team-wide.** Mission-objective truth and required mission-item authority must not become accidentally player-local.
 
-## Historical releases and preservation
+## Documentation and provenance
 
-The repository includes a preservation record for the project's earlier modded revisions, R21 release-candidate lineage, and current R22 development checkpoints:
+Before redistributing or contributing, keep these files with the source:
 
-- [`RELEASE_INDEX.md`](RELEASE_INDEX.md) — preservation matrix showing which revisions are preserved, reconstructable, documented, or still missing;
-- [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md) — chronological history of changes and enhancements across the project;
-- [`PRESERVATION_STATUS.md`](PRESERVATION_STATUS.md) — recovery priorities, archival policy, and integrity requirements for historical artifacts;
-- [`GITHUB_RELEASE_TEMPLATE.md`](GITHUB_RELEASE_TEMPLATE.md) — standard format for documenting future and reconstructed GitHub releases.
+- `LICENSES_AND_NOTICES.txt`
+- `CREDITS.txt`
+- `REFERENCES.txt`
+- `UPSTREAM_GOLDENEYE_README.md`
 
-Historical revisions are not silently rewritten when later testing changes a diagnosis. Corrections are recorded separately so the original development history and the later confirmed explanation are both preserved.
-
-## Documentation
-
-See these files before redistributing or contributing:
-
-- `LICENSES_AND_NOTICES.txt` — licensing and redistribution notes;
-- `CREDITS.txt` — project and upstream attribution;
-- `REFERENCES.txt` — source/research references and provenance;
-
-The original GoldenEye decompilation README is preserved as `UPSTREAM_GOLDENEYE_README.md`.
+See `CURRENT_DEVELOPMENT_STATUS.md` for a concise summary of the current post-GitHub-snapshot work.
 
 ## Legal / trademark notice
 

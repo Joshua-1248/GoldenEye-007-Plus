@@ -868,6 +868,12 @@ typedef enum FILEINDEXID
 #ifdef VERSION_EU
     WAXP,
 #endif
+#ifdef GE_MAP_MAKER
+    /* Appended to preserve every existing resource ID. */
+    BG_MAPMAKER_ALL_P,
+    BG_MAPMAKER_ALL_P_STAN,
+    SETUPMAPMAKER,
+#endif
     OBENDSEG
 } FILEINDEXID;
 

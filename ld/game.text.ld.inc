@@ -42,6 +42,9 @@
       build/OUTCODE/src/game/cleanplayersound.o (.text);
       build/OUTCODE/src/game/title.o (.text);
       build/OUTCODE/src/game/front.o (.text);
+#ifdef GE_MAP_MAKER
+      build/OUTCODE/src/game/mapmaker.o (.text);
+#endif
       build/OUTCODE/src/game/rle.o (.text);
       build/OUTCODE/src/game/title2.o (.text);
       build/OUTCODE/src/game/title3.o (.text);
@@ -92,6 +95,7 @@
       build/OUTCODE/src/game/gobjdata2.o (.text);
       build/OUTCODE/src/game/cobjdata.o (.text);
       build/OUTCODE/src/game/cheat.o (.text);
+      build/OUTCODE/src/game/mirroredlevels.o (.text);
       build/OUTCODE/src/game/line_tri_intersect.o (.text);
       build/OUTCODE/src/game/unk_092E50.o (.text);
       build/OUTCODE/src/game/sky.o (.text);

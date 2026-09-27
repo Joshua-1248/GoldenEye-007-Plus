@@ -10,6 +10,15 @@
 
 #define TEX_ALPHA_WEIGHT 961
 
+#ifdef GE_PHYSICAL_FASTPATHS
+/* Secondary stage texture capacity in Expansion Pak RDRAM.  This is only used
+ * after the retail stage pool can no longer safely accept another texture. */
+extern u8 _stageTexOverflowStart[];
+extern u8 _stageTexOverflowEnd[];
+static struct texpool g_StageTexOverflowPool;
+static s32 g_StageTexOverflowReady;
+#endif
+
 // bss
 //8008C720
 struct texpool *ptr_texture_alloc_start;
@@ -23,6 +32,25 @@ s32 ptr_last_entry_facemapping;
 struct texcacheitem g_TexCacheItems[150];
 //8008D090
 s32 g_TexCacheCount;
+#ifdef GE_PHYSICAL_FASTPATHS
+/* Plus keeps first-person weapon textures resident for the whole stage.
+ * Their explicit-LOD dimensions must not consume retail's 150-entry room/
+ * stage metadata cache, whose wrap-to-zero behavior assumes retail texture
+ * lifetimes.  Keep persistent-cache metadata in a separate small table. */
+struct texcacheitem g_PersistentTexCacheItems[PERSISTENT_TEX_LOD_CACHE_CAPACITY];
+s32 g_PersistentTexCacheCount;
+static s32 g_TexPersistentLodCacheMode;
+
+void texResetPersistentLodCache(void)
+{
+    g_PersistentTexCacheCount = 0;
+}
+
+void texSetPersistentLodCacheMode(s32 enabled)
+{
+    g_TexPersistentLodCacheMode = enabled != 0;
+}
+#endif
 //8008D094
 s32 g_TexNumToLoad;
 
@@ -159,6 +187,18 @@ s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpoo
     u8 scratch2[0x800];
     u8 scratch[0x2100];
     u16 palette[0x100];
+    struct texcacheitem *lodcache = g_TexCacheItems;
+    s32 *lodcachecount = &g_TexCacheCount;
+    s32 lodcachecapacity = ARRAYCOUNT(g_TexCacheItems);
+
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (g_TexPersistentLodCacheMode)
+    {
+        lodcache = g_PersistentTexCacheItems;
+        lodcachecount = &g_PersistentTexCacheCount;
+        lodcachecapacity = ARRAYCOUNT(g_PersistentTexCacheItems);
+    }
+#endif
 
     totalbytesout = 0;
     writetocache = FALSE;
@@ -179,11 +219,11 @@ s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpoo
 
     if (arg2)
     {
-        writetocache = TRUE;
+        writetocache = *lodcachecount < lodcachecapacity;
 
-        for (i = 0; i < g_TexCacheCount; i++)
+        for (i = 0; i < *lodcachecount; i++)
         {
-            if (g_TexCacheItems[i].texturenum == arg4->rightpos->texturenum)
+            if (lodcache[i].texturenum == arg4->rightpos->texturenum)
             {
                 writetocache = FALSE;
             }
@@ -216,8 +256,8 @@ s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpoo
         }
         else if (writetocache)
         {
-            g_TexCacheItems[g_TexCacheCount].widths[j - 1] = width;
-            g_TexCacheItems[g_TexCacheCount].heights[j - 1] = height;
+            lodcache[*lodcachecount].widths[j - 1] = width;
+            lodcache[*lodcachecount].heights[j - 1] = height;
         }
 
         if ((width * height) >= 4097)
@@ -238,13 +278,17 @@ s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpoo
 
     if (writetocache)
     {
-        g_TexCacheItems[g_TexCacheCount].texturenum = arg4->rightpos->texturenum;
+        lodcache[*lodcachecount].texturenum = arg4->rightpos->texturenum;
 
-        g_TexCacheCount++;
+        (*lodcachecount)++;
 
-        if (g_TexCacheCount >= ARRAYCOUNT(g_TexCacheItems))
+        /* Preserve retail cache wrap semantics for normal stage/room textures.
+         * Persistent weapon metadata never wraps: its backing textures stay
+         * resident for the whole stage, so evicting their dimensions would
+         * make later mipmap display-list conversion invalid. */
+        if (lodcache == g_TexCacheItems && *lodcachecount >= lodcachecapacity)
         {
-            g_TexCacheCount = 0;
+            *lodcachecount = 0;
         }
     }
 
@@ -838,6 +882,18 @@ s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct tex
     u8 *start;
     u8 *end;
     s32 writetocache = FALSE;
+    struct texcacheitem *lodcache = g_TexCacheItems;
+    s32 *lodcachecount = &g_TexCacheCount;
+    s32 lodcachecapacity = ARRAYCOUNT(g_TexCacheItems);
+
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (g_TexPersistentLodCacheMode)
+    {
+        lodcache = g_PersistentTexCacheItems;
+        lodcachecount = &g_PersistentTexCacheCount;
+        lodcachecapacity = ARRAYCOUNT(g_PersistentTexCacheItems);
+    }
+#endif
 
     texSetBitstring(src);
 
@@ -848,11 +904,11 @@ s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct tex
 
     if (arg2)
     {
-        writetocache = TRUE;
+        writetocache = *lodcachecount < lodcachecapacity;
 
-        for (i = 0; i < g_TexCacheCount; i++)
+        for (i = 0; i < *lodcachecount; i++)
         {
-            if (g_TexCacheItems[i].texturenum == arg4->rightpos->texturenum)
+            if (lodcache[i].texturenum == arg4->rightpos->texturenum)
             {
                 writetocache = FALSE;
             }
@@ -876,8 +932,8 @@ s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct tex
         }
         else if (writetocache)
         {
-            g_TexCacheItems[g_TexCacheCount].widths[i - 1] = width;
-            g_TexCacheItems[g_TexCacheCount].heights[i - 1] = height;
+            lodcache[*lodcachecount].widths[i - 1] = width;
+            lodcache[*lodcachecount].heights[i - 1] = height;
         }
 
         if (width * height > 0x2000)
@@ -999,20 +1055,15 @@ s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct tex
 
     if (writetocache)
     {
-        g_TexCacheItems[g_TexCacheCount].texturenum = arg4->rightpos->texturenum;
+        lodcache[*lodcachecount].texturenum = arg4->rightpos->texturenum;
 
-        g_TexCacheCount++;
+        (*lodcachecount)++;
 
-        // Resetting this variable to 0 here suggests that the g_TexCacheItems
-        // array is used in a circular manner, and that g_TexCacheCount is just
-        // the index of the oldest/next element. But earlier in this function
-        // there's a loop that iterates up to g_TexCacheCount, which doesn't
-        // make any sense if this value is used as a pointer in a circular list.
-        // Could be a @bug, or maybe they intended to reset the cache every time
-        // it fills up.
-        if (g_TexCacheCount >= ARRAYCOUNT(g_TexCacheItems))
+        // Retail's normal stage cache keeps its original wrap-to-zero behavior.
+        // The Plus persistent weapon table is deliberately non-evicting.
+        if (lodcache == g_TexCacheItems && *lodcachecount >= lodcachecapacity)
         {
-            g_TexCacheCount = 0;
+            *lodcachecount = 0;
         }
     }
 
@@ -2279,6 +2330,15 @@ void texInitPool(struct texpool *arg0, u8 *arg1, s32 arg2)
     arg0->rightpos = (struct tex *)(arg1 + arg2);
 }
 
+void texResetStageOverflowPool(void)
+{
+#ifdef GE_PHYSICAL_FASTPATHS
+    texInitPool(&g_StageTexOverflowPool, _stageTexOverflowStart,
+        (s32)(_stageTexOverflowEnd - _stageTexOverflowStart));
+    g_StageTexOverflowReady = TRUE;
+#endif
+}
+
 
 struct tex *texFindInPool(s32 texturenum, struct texpool *arg1)
 {
@@ -2381,14 +2441,32 @@ void texLoad(s32 *updateword, struct texpool *pool)
     s32 nextoffset;
     s16 *texnumptr;
     s32 bytesout;
+#ifdef GE_PHYSICAL_FASTPATHS
+    s32 isstagepool = FALSE;
+#endif
 
     if (pool == NULL)
     {
         pool = (struct texpool*) &ptr_texture_alloc_start;
+#ifdef GE_PHYSICAL_FASTPATHS
+        isstagepool = TRUE;
+#endif
     }
+#ifdef GE_PHYSICAL_FASTPATHS
+    else if (pool == (struct texpool *)&ptr_texture_alloc_start)
+    {
+        isstagepool = TRUE;
+    }
+#endif
 
     g_TexNumToLoad = *updateword & 0xffff;
     tex = texFindInPool(g_TexNumToLoad, pool);
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (tex == NULL && isstagepool && g_StageTexOverflowReady)
+    {
+        tex = texFindInPool(g_TexNumToLoad, &g_StageTexOverflowPool);
+    }
+#endif
 
     if (tex == NULL)
     {
@@ -2417,10 +2495,23 @@ void texLoad(s32 *updateword, struct texpool *pool)
             lod = *compptr & 0x3f;
             compptr++;
 
-            // If there's not enough memory to load the texture, set the texture
-            // pointer to the start of the pool. It'll be garbage data but the
-            // only other option is a crash. GBI commands contain texture IDs
-            // instead of pointers, and they must be replaced with pointers.
+            // Retail points the material at pool->start when the stage texture
+            // pool is exhausted. That avoids a crash but deliberately renders
+            // garbage texels. Physical/Expansion-Pak builds can keep the retail
+            // stage heap unchanged and spill late textures into reserved upper
+            // RDRAM instead. Custom texture pools retain their original rules.
+#ifdef GE_PHYSICAL_FASTPATHS
+            if (isstagepool && g_StageTexOverflowReady
+                && ((!iszlib && texFreeBytesInBuffer(pool) < 0x10CC)
+                    || (iszlib && texFreeBytesInBuffer(pool) < 0xA28)))
+            {
+                if ((!iszlib && texFreeBytesInBuffer(&g_StageTexOverflowPool) >= 0x10CC)
+                    || (iszlib && texFreeBytesInBuffer(&g_StageTexOverflowPool) >= 0xA28))
+                {
+                    pool = &g_StageTexOverflowPool;
+                }
+            }
+#endif
             if ((!iszlib && (texFreeBytesInBuffer(pool) < 0x10CC)) || (iszlib && texFreeBytesInBuffer(pool) < 0xA28)) {
                 *updateword = osVirtualToPhysical(pool->start);
                 return;

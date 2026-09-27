@@ -376,12 +376,69 @@ s32 waypointFindRouteInGroup(waypoint *from, waypoint *to, waypoint **arr, s32 a
 }
 
 
+#if defined(GE_OPTIMIZED)
+#define WAYGROUP_CONNECTION_CACHE_SIZE 16
+
+typedef struct WaygroupConnectionCacheEntry
+{
+    waygroup *groupa;
+    waygroup *groupb;
+    waypoint *pointa;
+    waypoint *pointb;
+} WaygroupConnectionCacheEntry;
+
+static WaygroupConnectionCacheEntry g_WaygroupConnectionCache[WAYGROUP_CONNECTION_CACHE_SIZE];
+static waygroup *g_WaygroupConnectionCacheGroups = NULL;
+static waypoint *g_WaygroupConnectionCachePoints = NULL;
+static s32 g_WaygroupConnectionCacheStage = -1;
+extern s32 g_CurrentStageToLoad;
+
+static void waygroupConnectionCacheEnsureCurrent(void)
+{
+    if (g_WaygroupConnectionCacheStage != g_CurrentStageToLoad
+        || g_WaygroupConnectionCacheGroups != g_CurrentSetup.waypointgroups
+        || g_WaygroupConnectionCachePoints != g_CurrentSetup.pathwaypoints)
+    {
+        s32 i;
+
+        for (i = 0; i < WAYGROUP_CONNECTION_CACHE_SIZE; i++)
+        {
+            g_WaygroupConnectionCache[i].groupa = NULL;
+            g_WaygroupConnectionCache[i].groupb = NULL;
+        }
+
+        g_WaygroupConnectionCacheGroups = g_CurrentSetup.waypointgroups;
+        g_WaygroupConnectionCachePoints = g_CurrentSetup.pathwaypoints;
+        g_WaygroupConnectionCacheStage = g_CurrentStageToLoad;
+    }
+}
+#endif
+
 void sub_GAME_7F08F438(waygroup *groupa, waygroup *groupb, waypoint **pointa, waypoint **pointb)
 {
     waypoint *points = g_CurrentSetup.pathwaypoints;
     waygroup *groups = g_CurrentSetup.waypointgroups;
     s32 *groupapointnums = groupa->waypoints;
     s32 stack;
+#if defined(GE_OPTIMIZED)
+    WaygroupConnectionCacheEntry *cacheentry = NULL;
+    u32 cachekey;
+
+    if (groups != NULL && groupa != NULL && groupb != NULL)
+    {
+        waygroupConnectionCacheEnsureCurrent();
+
+        cachekey = (((u32)groupa >> 2) * 33U) ^ ((u32)groupb >> 2);
+        cacheentry = &g_WaygroupConnectionCache[cachekey & (WAYGROUP_CONNECTION_CACHE_SIZE - 1)];
+
+        if (cacheentry->groupa == groupa && cacheentry->groupb == groupb)
+        {
+            *pointa = cacheentry->pointa;
+            *pointb = cacheentry->pointb;
+            return;
+        }
+    }
+#endif
 
     while (*groupapointnums >= 0)
     {
@@ -396,6 +453,15 @@ void sub_GAME_7F08F438(waygroup *groupa, waygroup *groupb, waypoint **pointa, wa
             {
                 *pointa = groupapoint;
                 *pointb = neighbour;
+#if defined(GE_OPTIMIZED)
+                if (cacheentry != NULL)
+                {
+                    cacheentry->groupa = groupa;
+                    cacheentry->groupb = groupb;
+                    cacheentry->pointa = groupapoint;
+                    cacheentry->pointb = neighbour;
+                }
+#endif
                 return;
             }
 
@@ -406,6 +472,15 @@ void sub_GAME_7F08F438(waygroup *groupa, waygroup *groupb, waypoint **pointa, wa
     }
     *pointb = NULL;
     *pointa = NULL;
+#if defined(GE_OPTIMIZED)
+    if (cacheentry != NULL)
+    {
+        cacheentry->groupa = groupa;
+        cacheentry->groupb = groupb;
+        cacheentry->pointa = NULL;
+        cacheentry->pointb = NULL;
+    }
+#endif
 }
 
 

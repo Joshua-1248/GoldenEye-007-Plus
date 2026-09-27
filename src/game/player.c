@@ -3,6 +3,7 @@
 #include <fr.h>
 #include <random.h>
 #include "player.h"
+#include "file2.h"
 #include "unk_092E50.h"
 #include "bondview.h"
 #include "lv.h"
@@ -43,6 +44,7 @@ struct CoopTankPlayerState
 
 static struct CoopTankPlayerState g_CoopTankPlayerState[MAX_PLAYER_COUNT];
 static s32 g_CoopTankOwnerPlayer = -1;
+static u32 g_CoopTankHiddenUntilRespawnMask = 0;
 
 static s32 playerIsCampaignCoop(void)
 {
@@ -92,6 +94,137 @@ static void playerResetCoopTankContext(s32 index)
     g_CoopTankPlayerState[index].canEnter = FALSE;
     g_CoopTankPlayerState[index].explodeOnDeath = FALSE;
     g_CoopTankPlayerState[index].damagePenaltyTicks = 0;
+    g_CoopTankHiddenUntilRespawnMask &= ~(1u << index);
+}
+
+s32 playerCoopTankBodyHidden(s32 index)
+{
+    if (!playerIsCampaignCoop() || index < 0 || index >= MAX_PLAYER_COUNT)
+    {
+        return FALSE;
+    }
+
+    if (index == player_num)
+    {
+        return g_PlayerIsInTank != 0
+            || (g_CoopTankHiddenUntilRespawnMask & (1u << index)) != 0;
+    }
+
+    return g_CoopTankPlayerState[index].isInTank != 0
+        || (g_CoopTankHiddenUntilRespawnMask & (1u << index)) != 0;
+}
+
+void playerCoopTankHideDriverUntilRespawnCurrentPlayer(void)
+{
+    if (playerIsCampaignCoop() && player_num >= 0 && player_num < MAX_PLAYER_COUNT)
+    {
+        g_CoopTankHiddenUntilRespawnMask |= 1u << player_num;
+    }
+}
+
+void playerCoopTankShowDriverCurrentPlayer(void)
+{
+    if (playerIsCampaignCoop() && player_num >= 0 && player_num < MAX_PLAYER_COUNT)
+    {
+        g_CoopTankHiddenUntilRespawnMask &= ~(1u << player_num);
+    }
+}
+
+s32 playerCoopTankStandingOnTank(s32 index)
+{
+    if (!playerIsCampaignCoop() || index < 0 || index >= MAX_PLAYER_COUNT)
+    {
+        return FALSE;
+    }
+
+    if (index == player_num)
+    {
+        return g_PlayerIsInTank == 0 && g_PlayerTankProp != NULL;
+    }
+
+    return g_CoopTankPlayerState[index].isInTank == 0
+        && g_CoopTankPlayerState[index].tankProp != NULL;
+}
+
+void playerCoopTankCarryRiders(struct PropRecord *tankProp,
+    struct coord3d *oldPos, f32 oldAngle, struct coord3d *newPos, f32 newAngle)
+{
+    s32 i;
+    f32 deltaAngle;
+    f32 sinDelta;
+    f32 cosDelta;
+    f32 deltaY;
+
+    if (!playerIsCampaignCoop() || tankProp == NULL || oldPos == NULL || newPos == NULL)
+    {
+        return;
+    }
+
+    /* The tank model uses M_TAU_F - tank_orientation_angle as its world Y
+     * rotation, so a rider rigidly attached to its deck rotates by the negative
+     * change in tank_orientation_angle. */
+    deltaAngle = oldAngle - newAngle;
+    sinDelta = sinf(deltaAngle);
+    cosDelta = cosf(deltaAngle);
+    deltaY = newPos->f[1] - oldPos->f[1];
+
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        struct player *player;
+        f32 relx;
+        f32 relz;
+        f32 newx;
+        f32 newz;
+        f32 dx;
+        f32 dz;
+
+        if (i == player_num
+            || g_CoopTankPlayerState[i].isInTank != 0
+            || g_CoopTankPlayerState[i].tankProp != tankProp)
+        {
+            continue;
+        }
+
+        player = g_playerPointers[i];
+
+        if (player == NULL || player->bonddead != FALSE)
+        {
+            continue;
+        }
+
+        relx = player->field_488.collision_position.f[0] - oldPos->f[0];
+        relz = player->field_488.collision_position.f[2] - oldPos->f[2];
+        newx = newPos->f[0] + relx * cosDelta + relz * sinDelta;
+        newz = newPos->f[2] - relx * sinDelta + relz * cosDelta;
+        dx = newx - player->field_488.collision_position.f[0];
+        dz = newz - player->field_488.collision_position.f[2];
+
+        /* Carry the authoritative player position, the immediately rendered
+         * prop/camera positions and bondprevpos together.  Moving bondprevpos
+         * with the deck prevents platform motion from being misread as the
+         * passenger's own running velocity on their next tick. */
+        player->field_488.collision_position.f[0] += dx;
+        player->field_488.collision_position.f[2] += dz;
+        player->field_488.collision_position.f[1] += deltaY;
+        player->field_488.pos.f[0] += dx;
+        player->field_488.pos.f[2] += dz;
+        player->field_488.pos.f[1] += deltaY;
+        player->field_488.pos3.f[0] += dx;
+        player->field_488.pos3.f[2] += dz;
+        player->field_488.pos3.f[1] += deltaY;
+        player->bondprevpos.f[0] += dx;
+        player->bondprevpos.f[2] += dz;
+        player->bondprevpos.f[1] += deltaY;
+        player->field_70 += deltaY;
+        player->stanHeight += deltaY;
+
+        if (player->prop != NULL)
+        {
+            player->prop->pos.f[0] += dx;
+            player->prop->pos.f[2] += dz;
+            player->prop->pos.f[1] += deltaY;
+        }
+    }
 }
 
 s32 playerCoopTankCanCurrentPlayerClaim(void)
@@ -118,6 +251,40 @@ void playerCoopTankReleaseCurrentPlayer(void)
     {
         g_CoopTankOwnerPlayer = -1;
     }
+}
+
+/*
+ * A respawning Co-Op player must not inherit any per-life relationship to the
+ * shared tank.  In particular, a driver's death can leave tankProp and the
+ * explode-on-death latch in the player's sidecar while the world tank is being
+ * destroyed/reconfigured by the death camera.  Loading that stale pointer on
+ * the first respawn tick can dereference an object which no longer represents
+ * a live tank.  Clear only this player's relationship; g_WorldTankProp remains
+ * owned by the stage and surviving players are unaffected.
+ */
+void playerCoopTankResetCurrentPlayerForRespawn(void)
+{
+    if (!playerIsCampaignCoop() || player_num < 0 || player_num >= MAX_PLAYER_COUNT)
+    {
+        return;
+    }
+
+    if (g_CoopTankOwnerPlayer == player_num)
+    {
+        g_CoopTankOwnerPlayer = -1;
+    }
+
+    playerResetCoopTankContext(player_num);
+
+    /* playerResetCoopTankContext updates the saved sidecar.  Also clear the
+     * currently loaded retail globals immediately so init_player_BONDdata() and
+     * the spawn-position code cannot observe the old per-life tank pointer. */
+    g_PlayerIsInTank = FALSE;
+    g_PlayerTankProp = NULL;
+    g_PlayerTankYOffset = 0.0f;
+    g_BondCanEnterTank = FALSE;
+    g_ExplodeTankOnDeathFlag = FALSE;
+    g_TankDamagePenaltyTicks = 0;
 }
 #endif
 //s32 dword_CODE_bss_8007A0C4;
@@ -183,6 +350,7 @@ void reset_play_data_ptrs(void)
     playerResetCoopTankContext(PLAYER_3);
     playerResetCoopTankContext(PLAYER_4);
     g_CoopTankOwnerPlayer = -1;
+    g_CoopTankHiddenUntilRespawnMask = 0;
 #endif
 }
 
@@ -212,14 +380,25 @@ void init_player_data_ptrs_construct_viewports(s32 playercount)
 
 s32 getPlayerCount(void)
 {
-    s32 count = 0;
-    s32 i;
-    for (i = 0; i < 4; i++) {
-        if (g_playerPointers[i] != NULL) {
-            count++;
-        }
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled())
+    {
+        return (g_playerPointers[0] != NULL)
+            + (g_playerPointers[1] != NULL)
+            + (g_playerPointers[2] != NULL)
+            + (g_playerPointers[3] != NULL);
     }
-    return count;
+#endif
+    {
+        s32 count = 0;
+        s32 i;
+        for (i = 0; i < 4; i++) {
+            if (g_playerPointers[i] != NULL) {
+                count++;
+            }
+        }
+        return count;
+    }
 }
 
 void initBONDdataforPlayer(s32 player_num)
@@ -634,7 +813,16 @@ s32 get_cur_playernum(void) {
 s32 getPlayerPointerIndex(PropRecord* prop)
 {
     s32 i;
-
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled())
+    {
+        s32 count = getPlayerCount();
+        for (i = 0; i < count; i++) {
+            if (g_playerPointers[i]->prop == prop) return i;
+        }
+        return -1;
+    }
+#endif
     for(i = 0; i < getPlayerCount(); i++) {
         if (g_playerPointers[i]->prop == prop) {
            return i;

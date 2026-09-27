@@ -3,6 +3,9 @@
 #include "lv.h"
 #include "unk_092E50.h"
 
+#ifdef GE_MODDED_CHEATS
+#include "game/mirroredlevels.h"
+#endif
 // bss
 //CODE.bss:80079E80
 f32 flt_CODE_bss_80079E80;

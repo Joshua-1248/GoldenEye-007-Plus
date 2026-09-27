@@ -1178,6 +1178,11 @@ s32 get_debug_portal_flag(void) {
 }
 #endif
 
+void set_debug_all_obj_complete_flag(s32 flag)
+{
+    debug_all_obj_complete_flag = flag ? 1 : 0;
+}
+
 #if defined(LEFTOVERDEBUG)
 s32 get_debug_chrnum_flag(void) {
     return debug_chrnum_flag;

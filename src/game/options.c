@@ -17,9 +17,17 @@
 #include "textrelated.h"
 #include "glass.h"
 #include "frametiming.h"
+#ifdef GE_MAP_MAKER
+#include "mapmaker.h"
+#endif
 #ifdef GE_MODDED_CHEATS
 #include "cheat.h"
 #include "file2.h"
+#include "debugmenu_handler.h"
+#endif
+#ifdef GE_MODDED_CHEATS
+s32 currentPlayerEquipWeaponWrapper(GUNHAND hand, s32 next_weapon);
+ITEM_IDS get_item_in_hand_or_watch_menu(GUNHAND hand);
 #endif
 #include "assets/obseg/text/LoptionE.h"
 
@@ -69,8 +77,13 @@ u32 game_options_index = 0;
 #define MODWATCH_STATE D_80040990
 #define MODWATCH_CHEAT_MODE 0x100
 #define MODWATCH_ROW_MASK 0xff
-#define MODWATCH_OPTION_ROWS 10
+#define MODWATCH_OPTION_ROWS 23
+#define MODWATCH_BASE_CHEATS (CHEAT_INVALID - 2)
+#define MODWATCH_MIRRORED_ROW MODWATCH_BASE_CHEATS
+#define MODWATCH_TOGGLE_ROWS (MODWATCH_BASE_CHEATS + 1)
+#define MODWATCH_ACTION_ROWS 5
 #define MODWATCH_VISIBLE_ROWS 7
+static u8 g_ModWatchSettingsDirty = FALSE;
 #endif
 // data
 //D:800409A0
@@ -137,6 +150,30 @@ u8 g_MpPlayerOptions[MAX_PLAYER_COUNT] = {
     MP_PLAYEROPT_DEFAULT
 };
 u8 g_MpPlayerCrosshair[MAX_PLAYER_COUNT];
+u8 g_PlayerThirdPerson[MAX_PLAYER_COUNT];
+u8 g_PlayerStayInTpOnDeath[MAX_PLAYER_COUNT];
+u8 g_ModStayInTpOnDeathDefault;
+u8 g_ModTpSightTranslucencyEnabled = TRUE;
+u8 g_MpViewportLock;
+u8 g_MpKillCountMessageEnabled = TRUE;
+/* Temporary R22 runtime Third Person camera tuner.  Zero preserves TP21. */
+s16 g_ModThirdPersonCameraDistanceAdjust;      /* offset from TP_CAM_DISTANCE_DEFAULT */
+s8 g_ModThirdPersonCameraHeightAdjust;         /* offset from TP_CAM_HEIGHT_DEFAULT */
+s8 g_ModThirdPersonCameraHorizontalAdjust;     /* offset from TP_CAM_HORIZONTAL_DEFAULT; +right / -left */
+s8 g_ModThirdPersonCameraDownFrameAdjust;      /* offset from TP_CAM_DOWN_FRAME_DEFAULT; downward-only screen-up framing */
+s8 g_ModThirdPersonCrouchCameraHeightAdjust;   /* crouch-only camera trim; session-local */
+s16 g_ModThirdPersonCrosshairRange = TP_CROSSHAIR_RANGE_DEFAULT; /* world-reticle maximum depth; session-local */
+
+s32 modThirdPersonActive(s32 player)
+{
+    return gamemode == GAMEMODE_MULTI && g_MpViewportLock ? g_MpViewportLock - 1 : g_PlayerThirdPerson[player];
+}
+
+s32 modStayInTpOnDeath(s32 player)
+{
+    if (player < 0 || player >= MAX_PLAYER_COUNT) return FALSE;
+    return g_PlayerStayInTpOnDeath[player] != 0;
+}
 
 static s32 mpPlayerOptionsActive(void)
 {
@@ -316,10 +353,6 @@ void watch_special_options_navigation(void);
  * Options scroller.  The fixed compressed-C slot is exactly full; preserving
  * these addresses restores the better compression pattern without executing
  * any additional runtime work. */
-static void modWatchScrollAlignmentPad0(void) { }
-static void modWatchScrollAlignmentPad1(void) { }
-static void modWatchScrollAlignmentPad2(void) { }
-static void modWatchScrollAlignmentPad3(void) { }
 
 #endif
 Gfx *draw_watch_mission_briefing_page(Gfx *gdl, Mtx *param_2);
@@ -902,6 +935,21 @@ void watch_screen0_navigation(void)
     {
         D_800409A4 = 0;
         set_missionstate(MISSION_STATE_0);
+#ifdef GE_MAP_MAKER
+        if (mapmakerNativeTestRequested())
+        {
+            /* Native Test is an editor child session, not a campaign mission.
+             * Tear down the dedicated stage through the normal boss/stage
+             * transition, but do not mark the save as a failed mission and
+             * absolutely do not delete the currently selected campaign folder.
+             * MENU_RUN_STAGE will see the preserved Native Test latch and
+             * restore the Map Maker editor snapshot. */
+            mission_failed_or_aborted = FALSE;
+            mapmakerNativeTestBeginReturn();
+            bossRunTitleStage();
+            return;
+        }
+#endif
         bossRunTitleStage();
         mission_failed_or_aborted = TRUE;
         deleteCurrentSelectedFolder();
@@ -1017,12 +1065,31 @@ static s32 modWatchCheatCount(void)
     /* Preserve the complete cheat table, including the retail NO NAME
      * unlock/debug codes. They have working handlers and are intentionally
      * exposed here for preservation/testing. */
-    return CHEAT_INVALID - 1;
+    return MODWATCH_TOGGLE_ROWS + MODWATCH_ACTION_ROWS;
 }
 
 static CHEAT_ID modWatchCheatAtRow(s32 row)
 {
-    return (CHEAT_ID)(row + 1);
+    /* Keep the established in-game cheat ordering intact.  Mod-added cheat
+     * IDs are appended immediately before CHEAT_INVALID, so newer cheats
+     * naturally appear at the bottom of the toggle-cheat list. */
+    if (row < MODWATCH_BASE_CHEATS)
+        return (CHEAT_ID)(row + 1);
+    if (row == MODWATCH_MIRRORED_ROW)
+        return CHEAT_MIRRORED_LEVELS;
+    return CHEAT_INVALID;
+}
+
+static char *modWatchActionLabel(s32 row)
+{
+    row -= MODWATCH_TOGGLE_ROWS;
+    return frontModGetOptionLabel(row == 0 ? 33 : row == 1 ? 34 : row == 2 ? 35 : row == 3 ? 43 : 44);
+}
+
+static void modWatchRunAction(s32 row)
+{
+    cheatModRunInGameAction(row - MODWATCH_TOGGLE_ROWS);
+    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
 }
 
 static s32 modWatchCheatUnlocked(CHEAT_ID cheat)
@@ -1033,12 +1100,34 @@ static s32 modWatchCheatUnlocked(CHEAT_ID cheat)
         cheat == CHEAT_EXTRA_MP_CHARS ||
         (cheat >= CHEAT_MAXAMMO && cheat <= CHEAT_2X_ARMOR) ||
         cheat == CHEAT_EXTRA_WEAPONS || cheat == CHEAT_10X_HEALTH ||
-        cheat == CHEAT_BONDPHASE || cheat == CHEAT_DEBUG_POS)
+        cheat == CHEAT_BONDPHASE || cheat == CHEAT_DEBUG_POS ||
+        cheat >= CHEAT_NO_RELOAD)
     {
         return TRUE;
     }
 
     return frontCheckIfCheatIsUnlocked(cheat);
+}
+
+static void modWatchCommitDeferredSettings(void)
+{
+    save_data *save;
+
+    if (!g_ModWatchSettingsDirty)
+        return;
+
+    save = fileGetSaveForFoldernum(selected_folder_num);
+
+    if (save)
+    {
+        save->mod_options2 = g_ModGameplayOptions2;
+        save->mod_options3 = g_ModGameplayOptions3;
+        fileStoreThirdPersonCameraSettings(save);
+        fileStoreExtendedSettings(save);
+        fileWriteSave(save);
+    }
+
+    g_ModWatchSettingsDirty = FALSE;
 }
 
 static void modWatchToggleOption(s32 row)
@@ -1086,7 +1175,148 @@ static void modWatchToggleOption(s32 row)
         if (save) save->mod_options2 = g_ModGameplayOptions2;
     }
 
-    if (save) fileWriteSave(save);
+    if (row == 10)
+    {
+        s32 player = get_cur_playernum();
+        g_PlayerStayInTpOnDeath[player] ^= 1;
+        if (gamemode != GAMEMODE_MULTI)
+        {
+            g_ModStayInTpOnDeathDefault = g_PlayerStayInTpOnDeath[player];
+            if (save) fileStoreThirdPersonCameraSettings(save);
+        }
+    }
+
+    if (row == 11)
+    {
+        modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
+        if (save) save->mod_options3 = g_ModGameplayOptions3;
+    }
+
+    if (row == 12)
+    {
+        g_ModGameplayOptions3 ^= MODOPT3_TP_CROUCH_CAM;
+        g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+        if (save) save->mod_options3 = g_ModGameplayOptions3;
+    }
+
+    if (row == 13)
+    {
+        g_ModGameplayOptions3 ^= MODOPT3_DIRECTIONAL_SHOULDER;
+        g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+        if (save) save->mod_options3 = g_ModGameplayOptions3;
+    }
+
+    if (row == 14)
+    {
+        g_ModTpSightTranslucencyEnabled ^= 1;
+    }
+
+    if (row == 15)
+    {
+        g_ModAntiAliasingEnabled ^= 1;
+    }
+
+    if (row == 9 && !(gamemode == GAMEMODE_MULTI && g_MpViewportLock))
+    {
+        s32 player = get_cur_playernum();
+        s32 enabling = !g_PlayerThirdPerson[player];
+
+        g_PlayerThirdPerson[player] = enabling;
+
+        /* Single-player normally destroys Bond's external body when the
+         * intro camera enters first person.  Third person needs that same
+         * canonical Bond body back.  Build it only when entering third
+         * person; when returning to first person, remove it and rebuild the
+         * two held-gun models from the still-current weapon selections. */
+        if (gamemode != GAMEMODE_MULTI)
+        {
+            if (enabling)
+            {
+                if (g_CurrentPlayer->bodyModel == NULL)
+                    solo_char_load();
+            }
+            else if (g_CurrentPlayer->bodyModel != NULL)
+            {
+                s32 left = get_item_in_hand_or_watch_menu(GUNLEFT);
+                s32 right = get_item_in_hand_or_watch_menu(GUNRIGHT);
+                /* Do not use the retail cinematic cleanup here: collected
+                 * mission props are child props of Bond and that path frees
+                 * every child permanently, which can turn a valid objective
+                 * into FAILED simply by toggling Third Person off. */
+                bondviewRemovePlayerBodyForThirdPersonToggle();
+                currentPlayerEquipWeaponWrapper(GUNLEFT, left);
+                currentPlayerEquipWeaponWrapper(GUNRIGHT, right);
+            }
+        }
+    }
+
+    g_ModWatchSettingsDirty = TRUE;
+    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+}
+
+static void modWatchAdjustThirdPersonCamera(s32 row)
+{
+    s32 delta = (joyGetButtons(PLAYER_1, Z_TRIG) != 0) ? -2 : 2;
+
+    if (row == 11)
+    {
+        s32 step = (joyGetButtons(PLAYER_1, Z_TRIG) != 0) ? -TP_CAM_DISTANCE_STEP : TP_CAM_DISTANCE_STEP;
+        s32 actual = TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust + step;
+
+        if (actual < TP_CAM_DISTANCE_MIN) actual = TP_CAM_DISTANCE_MIN;
+        if (actual > TP_CAM_DISTANCE_MAX) actual = TP_CAM_DISTANCE_MAX;
+        g_ModThirdPersonCameraDistanceAdjust = actual - TP_CAM_DISTANCE_DEFAULT;
+    }
+    else if (row == 12)
+    {
+        s32 value = g_ModThirdPersonCameraHeightAdjust + delta;
+        /* Actual neutral pivot trim = -12 + adjust. */
+        if (value < -48) value = -48;   /* -60 units */
+        if (value > 72) value = 72;     /* +60 units */
+        g_ModThirdPersonCameraHeightAdjust = value;
+    }
+    else if (row == 13)
+    {
+        s32 value = g_ModThirdPersonCameraHorizontalAdjust + delta;
+        if (value < -60) value = -60;  /* actual -84 */
+        if (value > 100) value = 100; /* actual +76 */
+        g_ModThirdPersonCameraHorizontalAdjust = value;
+    }
+    else if (row == 14)
+    {
+        /* Fine adjustment for the steep-downward camera screen-up trim.
+         * 24 is the preferred default.  Keep one-unit steps and leave ample
+         * headroom above the default for user tuning.  Actual value =
+         * 24 + adjust, clamped 0..96 while remaining s8-safe. */
+        s32 step = (joyGetButtons(PLAYER_1, Z_TRIG) != 0) ? -1 : 1;
+        s32 value = g_ModThirdPersonCameraDownFrameAdjust + step;
+        if (value < -24) value = -24; /* actual 0 */
+        if (value > 72) value = 72;   /* actual 96 */
+        g_ModThirdPersonCameraDownFrameAdjust = value;
+    }
+    else if (row == 15)
+    {
+        /* V42 R2: tune the actual displayed/runtime full-crouch drop, not a
+         * free-running adjustment.  Keeping the absolute value in 0..96 makes
+         * the menu number, SRAM value and camera result use one definition. */
+        s32 height = TP_CROUCH_CAM_HEIGHT_DEFAULT
+            + g_ModThirdPersonCrouchCameraHeightAdjust + delta;
+        if (height < 0) height = 0;
+        if (height > 96) height = 96;
+        g_ModThirdPersonCrouchCameraHeightAdjust = height - TP_CROUCH_CAM_HEIGHT_DEFAULT;
+    }
+    else if (row == 16)
+    {
+        s32 step = (joyGetButtons(PLAYER_1, Z_TRIG) != 0) ? -250 : 250;
+        s32 value = g_ModThirdPersonCrosshairRange + step;
+
+        if (value < 500) value = 500;
+        if (value > 10000) value = 10000;
+
+        g_ModThirdPersonCrosshairRange = value;
+    }
+
+    g_ModWatchSettingsDirty = TRUE;
     sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
 }
 
@@ -1094,6 +1324,12 @@ static void modWatchToggleCheat(s32 row)
 {
     CHEAT_ID cheat = modWatchCheatAtRow(row);
     s32 active;
+
+    if (cheat == CHEAT_INVALID)
+    {
+        modWatchRunAction(row);
+        return;
+    }
 
     if (cheat == CHEAT_UNUSED || !modWatchCheatUnlocked(cheat))
     {
@@ -1134,7 +1370,8 @@ void watch_special_options_navigation(void)
     if (pressed & A_BUTTON)
     {
         if (cheatmode) modWatchToggleCheat(row);
-        else if (row < 9) modWatchToggleOption(row);
+        else if (row <= 15) modWatchToggleOption(row);
+        else if (row >= 16 && row <= 21) modWatchAdjustThirdPersonCamera(row - 5);
         else
         {
             MODWATCH_STATE = MODWATCH_CHEAT_MODE;
@@ -1145,12 +1382,13 @@ void watch_special_options_navigation(void)
 
     if (cheatmode)
     {
-        if (pressed & B_BUTTON) MODWATCH_STATE = 9;
+        if (pressed & B_BUTTON) MODWATCH_STATE = 22;
         return;
     }
 
     if ((pressed & (L_CBUTTONS | L_TRIG | L_JPAD)) || sub_GAME_7F0A4FB0())
     {
+        modWatchCommitDeferredSettings();
         watch_screen_index = WATCH_INDEX_GAME_OPTIONS;
         reset_game_options_index();
         set_controlstick_lr_disabled();
@@ -1159,6 +1397,7 @@ void watch_special_options_navigation(void)
 
     if ((pressed & (R_CBUTTONS | R_TRIG | R_JPAD)) || sub_GAME_7F0A4FEC())
     {
+        modWatchCommitDeferredSettings();
         watch_screen_index = WATCH_INDEX_MISSION_BRIEFING;
         sub_GAME_7F0A5210();
         set_controlstick_lr_disabled();
@@ -1777,6 +2016,9 @@ void sub_GAME_7F0A6A80(void)
 
     if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON))
     {
+#ifdef GE_MODDED_CHEATS
+        modWatchCommitDeferredSettings();
+#endif
         set_open_close_solo_watch_menu_to1();
     }
 
@@ -4280,10 +4522,19 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
     s32 selected = MODWATCH_STATE & MODWATCH_ROW_MASK;
     s32 cheatmode = MODWATCH_STATE & MODWATCH_CHEAT_MODE;
     s32 cheatcount = cheatmode ? modWatchCheatCount() : 0;
-    s32 top = selected >= MODWATCH_VISIBLE_ROWS ? selected - (MODWATCH_VISIBLE_ROWS - 1) : 0;
+    s32 rowcount = cheatmode ? cheatcount : MODWATCH_OPTION_ROWS;
+    s32 top = selected >= MODWATCH_VISIBLE_ROWS - 1
+        ? selected - (MODWATCH_VISIBLE_ROWS - 2) : 0;
     char *label;
     char *value;
+    char valuebuf[16];
     u32 colour;
+
+    /* Keep one following row visible where possible.  In particular this
+     * keeps Complete Objectives visibly directly below Normal Animation
+     * instead of hiding the final action until the cursor moves again. */
+    if (top + MODWATCH_VISIBLE_ROWS > rowcount)
+        top = rowcount > MODWATCH_VISIBLE_ROWS ? rowcount - MODWATCH_VISIBLE_ROWS : 0;
 
     gdl = draw_background_health_and_armor(gdl, param_2, 0);
 
@@ -4303,24 +4554,109 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         if (cheatmode)
         {
             CHEAT_ID cheat = modWatchCheatAtRow(row);
-            s32 unlocked = modWatchCheatUnlocked(cheat);
-            label = (char *)frontModGetCheatMenuText(cheat);
-            value = unlocked ? langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[cheatIsActive(cheat) ? 2 : 1]) : "LOCKED";
-            if (!unlocked) colour = 0x40704090;
+            if (cheat == CHEAT_INVALID)
+            {
+                label = modWatchActionLabel(row);
+                value = frontModGetOptionLabel(36);
+            }
+            else
+            {
+                s32 unlocked = modWatchCheatUnlocked(cheat);
+                label = (char *)frontModGetCheatMenuText(cheat);
+                value = unlocked ? langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[cheatIsActive(cheat) ? 2 : 1]) : "LOCKED";
+                if (!unlocked) colour = 0x40704090;
+            }
         }
-        else if (row < 9)
+        else if (row < 10)
         {
             s32 enabled;
             if (row == 0) { label = frontModGetOptionLabel(12); enabled = cur_player_get_headroll_setting(); }
             else if (row == 1) { label = frontModGetOptionLabel(13); enabled = (g_ModGameplayOptions2 & MODOPT2_ENDLESS_DEATHCAM) != 0; }
             else if (row == 2) { label = frontModGetOptionLabel(14); enabled = (g_ModGameplayOptions2 & MODOPT2_REALTIME_COLLAPSE) != 0; }
-            else if (row == 3) { label = frontModGetOptionLabel(15); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_HITSTUN) != 0; }
-            else if (row == 4) { label = frontModGetOptionLabel(30); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_KNOCKBACK) != 0; }
-            else if (row == 5) { label = frontModGetOptionLabel(31); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) != 0; }
+            else if (row == 3) { label = frontModGetOptionLabel(15); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_HITSTUN) == 0; }
+            else if (row == 4) { label = frontModGetOptionLabel(30); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_KNOCKBACK) == 0; }
+            else if (row == 5) { label = frontModGetOptionLabel(31); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) == 0; }
             else if (row == 6) { label = frontModGetOptionLabel(16); enabled = (g_ModGameplayOptions2 & MODOPT2_DAMAGE_FLASH) != 0; }
             else if (row == 7) { label = frontModGetOptionLabel(8); enabled = cur_player_get_crosshair_setting(); }
-            else { label = frontModGetOptionLabel(29); enabled = cur_player_get_damage_sound_setting(); }
-            value = langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[enabled ? 2 : 1]);
+            else if (row == 8) { label = frontModGetOptionLabel(29); enabled = cur_player_get_damage_sound_setting(); }
+            else
+            {
+                label = frontModGetOptionLabel(32);
+                enabled = modThirdPersonActive(get_cur_playernum());
+                if (gamemode == GAMEMODE_MULTI && g_MpViewportLock)
+                {
+                    value = frontModGetOptionLabel(37);
+                    colour = 0x40704090;
+                }
+            }
+            if (!(row == 9 && gamemode == GAMEMODE_MULTI && g_MpViewportLock))
+                value = enabled ? "on" : "off";
+        }
+        else if (row == 10)
+        {
+            label = frontModGetOptionLabel(47);
+            value = modStayInTpOnDeath(get_cur_playernum()) ? "on" : "off";
+        }
+        else if (row == 11)
+        {
+            label = frontModGetOptionLabel(46);
+            value = modMicroOptimizationsEnabled() ? "on" : "off";
+        }
+        else if (row == 12)
+        {
+            label = frontModGetOptionLabel(48);
+            value = (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) ? "on" : "off";
+        }
+        else if (row == 13)
+        {
+            label = frontModGetOptionLabel(49);
+            value = (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) ? "on" : "off";
+        }
+        else if (row == 14)
+        {
+            label = frontModGetOptionLabel(51);
+            value = g_ModTpSightTranslucencyEnabled ? "on" : "off";
+        }
+        else if (row == 15)
+        {
+            label = frontModGetOptionLabel(50);
+            value = g_ModAntiAliasingEnabled ? "on" : "off";
+        }
+        else if (row == 16)
+        {
+            label = "TP Cam Distance";
+            sprintf(valuebuf, "%d", TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust);
+            value = valuebuf;
+        }
+        else if (row == 17)
+        {
+            label = "TP Cam Height";
+            sprintf(valuebuf, "%d", TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust);
+            value = valuebuf;
+        }
+        else if (row == 18)
+        {
+            label = "TP Cam Horizontal";
+            sprintf(valuebuf, "%d", TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust);
+            value = valuebuf;
+        }
+        else if (row == 19)
+        {
+            label = "TP Cam Down Frame";
+            sprintf(valuebuf, "%d", TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust);
+            value = valuebuf;
+        }
+        else if (row == 20)
+        {
+            label = "TP Crouched Cam Height";
+            sprintf(valuebuf, "%d", TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust);
+            value = valuebuf;
+        }
+        else if (row == 21)
+        {
+            label = "TP Crosshair Range";
+            sprintf(valuebuf, "%d", g_ModThirdPersonCrosshairRange);
+            value = valuebuf;
         }
         else
         {

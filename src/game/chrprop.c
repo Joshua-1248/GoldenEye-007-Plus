@@ -35,6 +35,7 @@
 #include "propobj.h"
 #include "objecthandler.h"
 #include "objective_status.h"
+#include "options.h"
 #include "stan.h"
 #include "tex.h"
 
@@ -492,6 +493,26 @@ Gfx *chrpropRender(Gfx * gdl, PropRecord *prop, s32 withalpha)
 }
 
 
+#ifdef GE_MODDED_CHEATS
+extern s32 g_BgCurrentRoom;
+
+/*
+ * The local TP body is physically in Bond's gameplay room, while the chase
+ * camera can cross a portal into an adjacent room as it crowds toward/through
+ * him.  chrpropsRenderPass normally submits a prop only from its own room.
+ * During the proximity-alpha phase that can mean the local body is skipped
+ * from the alpha pass entirely, which looks like the fade got stuck at fully
+ * invisible.  Presentation-only TP rendering follows the camera seed room so
+ * the body is submitted exactly once per pass regardless of that portal split.
+ */
+static s32 chrpropsLocalThirdPersonActive(PropRecord *prop)
+{
+    return g_CurrentPlayer != NULL
+        && prop == g_CurrentPlayer->prop
+        && bondviewThirdPersonPresentationActive(get_cur_playernum());
+}
+#endif
+
 /**
  * Address: 7F03A6F4
 */
@@ -541,18 +562,30 @@ Gfx *chrpropsRenderPass(Gfx *gdl, s32 roomid, s32 renderpass)
                 if (flag != 0)
                 {
                     flag = 0;
-                    chraiGetPropRoomIds(prop, sp48);
-
-                    for (rp = sp48; *rp >= 0; rp++)
+#ifdef GE_MODDED_CHEATS
+                    if (chrpropsLocalThirdPersonActive(prop))
                     {
-                        if (getROOMID_isRendered(*rp))
-                        {
-                            if (roomid == *rp)
-                            {
-                                flag = 1;
-                            }
+                        /* Submit the local body exactly once, from the camera
+                         * seed room.  Do not fall back to Bond's gameplay room
+                         * as well or translucent bodies would double-blend. */
+                        flag = (roomid == g_BgCurrentRoom);
+                    }
+                    else
+#endif
+                    {
+                        chraiGetPropRoomIds(prop, sp48);
 
-                            break;
+                        for (rp = sp48; *rp >= 0; rp++)
+                        {
+                            if (getROOMID_isRendered(*rp))
+                            {
+                                if (roomid == *rp)
+                                {
+                                    flag = 1;
+                                }
+
+                                break;
+                            }
                         }
                     }
 
@@ -573,18 +606,27 @@ Gfx *chrpropsRenderPass(Gfx *gdl, s32 roomid, s32 renderpass)
             if (prop != NULL)
             {
                 flag = 0;
-                chraiGetPropRoomIds(prop, sp48);
-
-                for (rp = sp48; *rp >= 0; rp++)
+#ifdef GE_MODDED_CHEATS
+                if (chrpropsLocalThirdPersonActive(prop))
                 {
-                    if (getROOMID_isRendered(*rp))
-                    {
-                        if (roomid == *rp)
-                        {
-                            flag = 1;
-                        }
+                    flag = (roomid == g_BgCurrentRoom);
+                }
+                else
+#endif
+                {
+                    chraiGetPropRoomIds(prop, sp48);
 
-                        break;
+                    for (rp = sp48; *rp >= 0; rp++)
+                    {
+                        if (getROOMID_isRendered(*rp))
+                        {
+                            if (roomid == *rp)
+                            {
+                                flag = 1;
+                            }
+
+                            break;
+                        }
                     }
                 }
 
@@ -819,15 +861,35 @@ s32 chrpropFindFirstBgHitInConnectedRooms(s32 startroom, coord3d *from, coord3d 
         for (i = 0; i < numneighbours; i++)
         {
 #ifdef GE_PHYSICAL_FASTPATHS
-            u32 neighbour = (u32) neighbours[i] & 0xff;
-            u32 mask = 1u << (neighbour & 31);
-            u32 *word = &queued[neighbour >> 5];
-
-            if ((*word & mask) == 0)
+            if ((u32)neighbours[i] < 256U)
             {
-                *word |= mask;
-                rooms[count] = neighbours[i];
-                count++;
+                u32 neighbour = (u32)neighbours[i];
+                u32 mask = 1u << (neighbour & 31);
+                u32 *word = &queued[neighbour >> 5];
+
+                if ((*word & mask) == 0)
+                {
+                    *word |= mask;
+                    rooms[count] = neighbours[i];
+                    count++;
+                }
+            }
+            else
+            {
+                /* Preserve retail behaviour for malformed/out-of-range room IDs. */
+                for (j = 0; j < count; j++)
+                {
+                    if (rooms[j] == neighbours[i])
+                    {
+                        break;
+                    }
+                }
+
+                if (j == count)
+                {
+                    rooms[count] = neighbours[i];
+                    count++;
+                }
             }
 #else
             for (j = 0; j < count; j++)
@@ -935,6 +997,799 @@ s32 chrpropFindClosestBgHitRoom(s32 unused, coord3d *from, coord3d *to, coord3d 
     return bestroom;
 }
 
+
+#ifdef GE_MODDED_CHEATS
+/*
+ * Test a finite world-space segment against real GoldenEye background
+ * triangles.  Third Person cannot use the retail STAN-selected room as the
+ * authority here because the chase camera can see a valid target while Bond's
+ * physical firing line crosses geometry in another room.
+ */
+static s32 chrpropThirdPersonBgSegmentHit(const coord3d *from, const coord3d *to,
+        HitThing *outhit, s32 *outroom, f32 *outfrac)
+{
+    coord3d dir;
+    coord3d scaledstart;
+    coord3d worldhit;
+    HitThing hit;
+    HitThing besthit;
+    f32 scale;
+    f32 invscale;
+    f32 len2;
+    f32 frac;
+    f32 bestfrac = 2.0f;
+    s32 bestroom = 0;
+    s32 room;
+
+    dir.x = to->x - from->x;
+    dir.y = to->y - from->y;
+    dir.z = to->z - from->z;
+    len2 = dir.x * dir.x + dir.y * dir.y + dir.z * dir.z;
+
+    if (len2 <= 0.000001f)
+    {
+        return FALSE;
+    }
+
+    scale = get_room_data_float1() * bgGetLevelVisibilityScale();
+    invscale = get_room_data_float2();
+    scaledstart.x = from->x * scale;
+    scaledstart.y = from->y * scale;
+    scaledstart.z = from->z * scale;
+
+    for (room = 1; room < getMaxNumRooms(); room++)
+    {
+        if (chrpropRayIntersectsRoomBbox(room, &scaledstart, &dir)
+                && bgTestBulletHitBackground((coord3d *)from, (coord3d *)to,
+                        room, &hit))
+        {
+            worldhit.x = hit.hitpos.x * invscale;
+            worldhit.y = hit.hitpos.y * invscale;
+            worldhit.z = hit.hitpos.z * invscale;
+
+            frac = ((worldhit.x - from->x) * dir.x
+                  + (worldhit.y - from->y) * dir.y
+                  + (worldhit.z - from->z) * dir.z) / len2;
+
+            if (frac >= -0.0005f && frac <= 1.0005f && frac < bestfrac)
+            {
+                bestfrac = frac;
+                bestroom = room;
+                besthit = hit;
+                besthit.hitpos = worldhit;
+            }
+        }
+    }
+
+    if (bestroom <= 0)
+    {
+        return FALSE;
+    }
+
+    if (bestfrac < 0.0f) bestfrac = 0.0f;
+    if (bestfrac > 1.0f) bestfrac = 1.0f;
+
+    *outhit = besthit;
+
+    if (outroom != NULL)
+    {
+        *outroom = bestroom;
+    }
+
+    if (outfrac != NULL)
+    {
+        *outfrac = bestfrac;
+    }
+
+    return TRUE;
+}
+
+/*
+ * Return the first dynamic solid cover hit on a finite Bond-side segment.
+ * This is intentionally separate from the main shot candidate pass: it exists
+ * only to answer whether a crate/door/path blocker physically lies between
+ * Bond and the already-resolved Third Person impact point.
+ */
+static s32 chrpropThirdPersonCoverPropSegmentHit(const coord3d *from,
+        const coord3d *to, coord3d *impact, PropRecord **outprop, f32 *outfrac)
+{
+    PropRecord *playerprop = getCurrentPlayerProp();
+    StandTile *tile;
+    f32 frac;
+
+    if (playerprop == NULL || playerprop->stan == NULL)
+    {
+        return FALSE;
+    }
+
+    tile = playerprop->stan;
+
+    if (stanTestLineUnobstructed(&tile,
+            from->x, from->z, to->x, to->z,
+            CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER,
+            from->y, to->y, from->y, to->y))
+    {
+        return FALSE;
+    }
+
+    if (stanSavedColl_posData == NULL)
+    {
+        return FALSE;
+    }
+
+    frac = stanSavedColl_someMin;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+
+    if (impact != NULL)
+    {
+        impact->x = from->x + (to->x - from->x) * frac;
+        impact->y = from->y + (to->y - from->y) * frac;
+        impact->z = from->z + (to->z - from->z) * frac;
+    }
+
+    if (outprop != NULL)
+    {
+        *outprop = stanSavedColl_posData;
+    }
+
+    if (outfrac != NULL)
+    {
+        *outfrac = frac;
+    }
+
+    return TRUE;
+}
+
+/*
+ * GoldenEye's detailed ray/model tests expect an entering ray.  Third Person
+ * can legitimately place its gameplay start inside a guard or shootable prop
+ * at literal contact range, so detect that one pathological start state and
+ * back the SAME reticle ray out of the overlap before resolving the shot.
+ */
+/*
+ * Return the first solid obstruction on a finite weapon-side segment.  Static
+ * BG and dynamic object/door/path-blocker collision are compared on the same
+ * segment so callers get one physically ordered result.
+ *
+ * Return values:
+ *   0 = clear
+ *   1 = background triangle
+ *   2 = dynamic prop
+ */
+static s32 chrpropThirdPersonWeaponSegmentHit(const coord3d *from,
+        const coord3d *to, HitThing *outbghit, s32 *outroom,
+        PropRecord **outprop, coord3d *outimpact)
+{
+    HitThing bghit;
+    coord3d propimpact;
+    PropRecord *prop = NULL;
+    f32 bgfrac = 2.0f;
+    f32 propfrac = 2.0f;
+    s32 bgroom = 0;
+    s32 hasbg;
+    s32 hasprop;
+
+    hasbg = chrpropThirdPersonBgSegmentHit(from, to, &bghit, &bgroom,
+            &bgfrac);
+    hasprop = chrpropThirdPersonCoverPropSegmentHit(from, to, &propimpact,
+            &prop, &propfrac);
+
+    if (!hasbg && !hasprop)
+    {
+        return 0;
+    }
+
+    if (hasbg && (!hasprop || bgfrac <= propfrac))
+    {
+        if (outbghit != NULL) *outbghit = bghit;
+        if (outroom != NULL) *outroom = bgroom;
+        if (outprop != NULL) *outprop = NULL;
+        if (outimpact != NULL) *outimpact = bghit.hitpos;
+        return 1;
+    }
+
+    if (outroom != NULL) *outroom = 0;
+    if (outprop != NULL) *outprop = prop;
+    if (outimpact != NULL) *outimpact = propimpact;
+    return 2;
+}
+
+
+typedef struct TpThirdPersonReticleResult {
+    coord3d point;
+    PropRecord *prop;
+    BulletHit hit;
+    HitThing bghit;
+    s32 room;
+    s32 kind;              /* 0 = far point, 1 = BG, 2 = prop */
+    s32 hasdetailedhit;    /* populated only during an actual firing tick */
+    s32 weaponblocked;     /* camera intent was replaced by nearer weapon-side cover */
+} TpThirdPersonReticleResult;
+
+/*
+ * Cheap, render-safe finite segment test against a prop's gameplay collision
+ * prism.  This deliberately uses chraiGetCollisionBounds() rather than the
+ * detailed rendered-model bullet path.  The latter depends on live model
+ * render matrices and is not safe to invoke from the late HUD/crosshair pass.
+ */
+static s32 chrpropThirdPersonBoundsSegmentHit(PropRecord *prop,
+        const coord3d *from, const coord3d *to, coord3d *impact, f32 *outfrac)
+{
+    struct rect4f *polygon = NULL;
+    coord2d raystart;
+    coord2d rayend;
+    coord2d edgestart;
+    coord2d edgeend;
+    coord3d point;
+    f32 top = 0.0f;
+    f32 bottom = 0.0f;
+    f32 bestfrac = 2.0f;
+    f32 frac;
+    f32 dy;
+    s32 edges = 0;
+    s32 i;
+    s32 next;
+
+    if (prop == NULL || from == NULL || to == NULL)
+    {
+        return FALSE;
+    }
+
+    chraiGetCollisionBounds(prop, &polygon, &edges, &top, &bottom);
+
+    /*
+     * Characters always use their gameplay collision cylinder for the
+     * visual world-reticle query.  A character can expose a polygon here
+     * which is valid data but is not a reliable representation of the live
+     * gameplay body for this late, render-safe query.  Previously the
+     * cylinder was used only when that polygon was missing, allowing the
+     * reticle to pass through guards which had a non-NULL polygon.
+     *
+     * Objects, weapons and doors retain their existing polygon path.
+     */
+    if (prop->type == PROP_TYPE_CHR
+            || prop->type == PROP_TYPE_VIEWER
+            || polygon == NULL
+            || edges < 3)
+    {
+        if (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER)
+        {
+            f32 radius;
+            f32 height;
+            f32 lower;
+            f32 dx = to->x - from->x;
+            f32 dz = to->z - from->z;
+            f32 ox = from->x - prop->pos.x;
+            f32 oz = from->z - prop->pos.z;
+            f32 a;
+            f32 b;
+            f32 c;
+            f32 disc;
+            f32 root;
+            f32 y;
+
+            chrpropGetCollisionBounds(prop, &radius, &height, &lower);
+            if (radius <= 0.0f) return FALSE;
+
+            a = dx * dx + dz * dz;
+            b = 2.0f * (ox * dx + oz * dz);
+            c = ox * ox + oz * oz - radius * radius;
+
+            if (c <= 0.0f)
+            {
+                root = 0.0f;
+            }
+            else
+            {
+                if (a <= 0.000001f) return FALSE;
+                disc = b * b - 4.0f * a * c;
+                if (disc < 0.0f) return FALSE;
+                root = (-b - sqrtf(disc)) / (2.0f * a);
+                if (root < 0.0f || root > 1.0f) return FALSE;
+            }
+
+            y = from->y + (to->y - from->y) * root;
+            bottom = prop->pos.y + lower;
+            top = prop->pos.y + height;
+            if (y < bottom - 0.01f || y > top + 0.01f) return FALSE;
+
+            if (impact != NULL)
+            {
+                impact->x = from->x + (to->x - from->x) * root;
+                impact->y = y;
+                impact->z = from->z + (to->z - from->z) * root;
+            }
+            if (outfrac != NULL) *outfrac = root;
+            return TRUE;
+        }
+
+        return FALSE;
+    }
+
+    /* If the segment already begins inside the prism, that prop is the nearest
+     * world-reticle target.  This is important at literal contact range. */
+    if (from->y >= bottom && from->y <= top
+            && chrpropTestPointInPolygon((coord3d *)from, polygon, edges))
+    {
+        bestfrac = 0.0f;
+    }
+
+    raystart.x = from->x;
+    raystart.y = from->z;
+    rayend.x = to->x;
+    rayend.y = to->z;
+    dy = to->y - from->y;
+
+    /* Side walls of the vertical collision prism. */
+    for (i = 0; i < edges; i++)
+    {
+        next = (i + 1) % edges;
+
+        if (doSegmentsIntersect(from->x, from->z, to->x, to->z,
+                polygon->points[i].x, polygon->points[i].y,
+                polygon->points[next].x, polygon->points[next].y))
+        {
+            edgestart.x = polygon->points[i].x;
+            edgestart.y = polygon->points[i].y;
+            edgeend.x = polygon->points[next].x;
+            edgeend.y = polygon->points[next].y;
+            frac = calculateSegmentIntersectionFraction(&raystart, &rayend,
+                    &edgestart, &edgeend);
+
+            if (frac >= 0.0f && frac <= 1.0f && frac < bestfrac)
+            {
+                f32 y = from->y + dy * frac;
+
+                if (y >= bottom - 0.01f && y <= top + 0.01f)
+                {
+                    bestfrac = frac;
+                }
+            }
+        }
+    }
+
+    /* Top/bottom caps matter for steep up/down aim, where the X/Z segment can
+     * remain inside the footprint and never cross a side edge. */
+    if (dy < -0.000001f || dy > 0.000001f)
+    {
+        frac = (bottom - from->y) / dy;
+
+        if (frac >= 0.0f && frac <= 1.0f && frac < bestfrac)
+        {
+            point.x = from->x + (to->x - from->x) * frac;
+            point.y = bottom;
+            point.z = from->z + (to->z - from->z) * frac;
+
+            if (chrpropTestPointInPolygon(&point, polygon, edges))
+            {
+                bestfrac = frac;
+            }
+        }
+
+        frac = (top - from->y) / dy;
+
+        if (frac >= 0.0f && frac <= 1.0f && frac < bestfrac)
+        {
+            point.x = from->x + (to->x - from->x) * frac;
+            point.y = top;
+            point.z = from->z + (to->z - from->z) * frac;
+
+            if (chrpropTestPointInPolygon(&point, polygon, edges))
+            {
+                bestfrac = frac;
+            }
+        }
+    }
+
+    if (bestfrac > 1.0f)
+    {
+        return FALSE;
+    }
+
+    if (impact != NULL)
+    {
+        impact->x = from->x + (to->x - from->x) * bestfrac;
+        impact->y = from->y + (to->y - from->y) * bestfrac;
+        impact->z = from->z + (to->z - from->z) * bestfrac;
+    }
+
+    if (outfrac != NULL)
+    {
+        *outfrac = bestfrac;
+    }
+
+    return TRUE;
+}
+
+/*
+ * Resolve the Third Person crosshair to one real world-space point without
+ * touching GoldenEye's rendered-model combat hit routines.
+ *
+ * This function is called from gunDrawSight(), so it must be safe during late
+ * HUD rendering.  Characters use their gameplay collision diamond, ordinary
+ * solid objects/doors use their cached collision hull, and BG uses real level
+ * triangles.  Detailed body-part/model tests are deferred until a real shot.
+ */
+static s32 chrpropThirdPersonResolveReticle(s32 hand,
+        TpThirdPersonReticleResult *result, s32 validateweapon)
+{
+    PropRecord *playerprop;
+    PropRecord *prop;
+    PropRecord **pp;
+    PropRecord *bestprop = NULL;
+    PropRecord *blockprop = NULL;
+    coord3d vieworigin;
+    coord3d viewdir;
+    coord3d cameraorigin;
+    coord3d worlddir;
+    coord3d bondref;
+    coord3d delta;
+    coord3d start;
+    coord3d farend;
+    coord3d propimpact;
+    coord3d muzzle;
+    coord3d handpos;
+    coord3d blockimpact;
+    HitThing bghit;
+    HitThing blockbghit;
+    f32 farlen;
+    f32 depth;
+    f32 bestfrac = 1.0f;
+    f32 propfrac;
+    f32 bgfrac = 2.0f;
+    f32 blockfrac;
+    f32 intentlen2;
+    f32 blocklen2;
+    s32 bgroom = 0;
+    s32 blockroom = 0;
+    s32 blockkind = 0;
+    s32 hasmuzzle;
+    s32 hashand;
+
+    if (result == NULL || g_CurrentPlayer == NULL)
+    {
+        return FALSE;
+    }
+
+    playerprop = getCurrentPlayerProp();
+    if (playerprop == NULL)
+    {
+        return FALSE;
+    }
+
+    result->prop = NULL;
+    result->room = 0;
+    result->kind = 0;
+    result->hasdetailedhit = FALSE;
+    result->weaponblocked = FALSE;
+
+    sub_GAME_7F068190(&vieworigin, &viewdir);
+
+    cameraorigin = vieworigin;
+    mtx4TransformVecInPlace(currentPlayerGetViewToWorldMtxf(), &cameraorigin);
+    worlddir = viewdir;
+    mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &worlddir);
+
+    /* Do not let a chase-camera-only target behind Bond own the reticle. */
+    bondref = g_CurrentPlayer->field_488.collision_position;
+    delta.x = bondref.x - cameraorigin.x;
+    delta.y = bondref.y - cameraorigin.y;
+    delta.z = bondref.z - cameraorigin.z;
+    depth = delta.x * worlddir.x + delta.y * worlddir.y + delta.z * worlddir.z;
+    if (depth < 0.0f) depth = 0.0f;
+
+    start.x = cameraorigin.x + worlddir.x * (depth + 2.0f);
+    start.y = cameraorigin.y + worlddir.y * (depth + 2.0f);
+    start.z = cameraorigin.z + worlddir.z * (depth + 2.0f);
+
+    /* The visual billboard only needs a finite depth anchor.  Keep its no-hit
+     * point comfortably inside matrix/world coordinate range; because it stays
+     * on the exact camera ray, this does not change its screen position.  Real
+     * firing retains the full authored range. */
+    if (getCurrentPlayerWeaponId(hand) == ITEM_LASER)
+        farlen = 300.0f;
+    else if (validateweapon)
+        farlen = 30000.0f;
+    else
+    {
+        farlen = (f32)g_ModThirdPersonCrosshairRange;
+        if (farlen < (f32)TP_CROSSHAIR_RANGE_MIN) farlen = (f32)TP_CROSSHAIR_RANGE_MIN;
+        if (farlen > (f32)TP_CROSSHAIR_RANGE_MAX) farlen = (f32)TP_CROSSHAIR_RANGE_MAX;
+    }
+    farend.x = start.x + worlddir.x * farlen;
+    farend.y = start.y + worlddir.y * farlen;
+    farend.z = start.z + worlddir.z * farlen;
+
+    result->point = farend;
+
+    if (chrpropThirdPersonBgSegmentHit(&start, &farend, &bghit, &bgroom,
+            &bgfrac))
+    {
+        if (bgfrac < 0.0f) bgfrac = 0.0f;
+        if (bgfrac > 1.0f) bgfrac = 1.0f;
+        bestfrac = bgfrac;
+        result->point = bghit.hitpos;
+        result->bghit = bghit;
+        result->room = bgroom;
+        result->kind = 1;
+    }
+
+    /* Render-safe prop target selection.  No chrTestHit(), no object model
+     * matrix probing, and therefore no HUD-time dependency on render_pos. */
+    for (pp = g_LastOnScreenProp; (--pp) >= g_OnScreenPropList;)
+    {
+        prop = *pp;
+
+        if (prop == NULL || prop == playerprop)
+        {
+            continue;
+        }
+
+        if (prop->type == PROP_TYPE_VIEWER
+                && (prop->chr == NULL
+                    || getPlayerPointerIndex(prop) == get_cur_playernum()))
+        {
+            continue;
+        }
+
+        if (prop->type != PROP_TYPE_CHR
+                && prop->type != PROP_TYPE_VIEWER
+                && prop->type != PROP_TYPE_OBJ
+                && prop->type != PROP_TYPE_WEAPON
+                && prop->type != PROP_TYPE_DOOR)
+        {
+            continue;
+        }
+
+        if (chrpropThirdPersonBoundsSegmentHit(prop, &start, &farend,
+                &propimpact, &propfrac)
+                && propfrac >= 0.0f && propfrac < bestfrac)
+        {
+            bestfrac = propfrac;
+            bestprop = prop;
+            result->point = propimpact;
+            result->prop = prop;
+            result->kind = 2;
+            result->room = 0;
+        }
+    }
+
+    if (bestprop == NULL && result->kind != 1)
+    {
+        result->prop = NULL;
+        result->kind = 0;
+    }
+
+    /* Firing uses the weapon side as physical cover authority.  The visual
+     * world reticle deliberately does NOT do this: its screen X/Y must remain
+     * the player's normal free-aim ray and must never snap toward the animated
+     * hand/muzzle.  For the visual reticle, only depth along that same camera
+     * ray is resolved; ordinary Z testing lets Bond/world geometry cover it. */
+    if (validateweapon)
+    {
+        hasmuzzle = gunGetThirdPersonMuzzleOrigin(hand, &muzzle);
+        hashand = gunGetThirdPersonHandOrigin(hand, &handpos);
+
+        if (hasmuzzle && hashand)
+        {
+            blockkind = chrpropThirdPersonWeaponSegmentHit(&handpos, &muzzle,
+                    &blockbghit, &blockroom, &blockprop, &blockimpact);
+        }
+
+        if (blockkind == 0 && hasmuzzle)
+        {
+            blockkind = chrpropThirdPersonWeaponSegmentHit(&muzzle, &result->point,
+                    &blockbghit, &blockroom, &blockprop, &blockimpact);
+        }
+        else if (blockkind == 0 && hashand)
+        {
+            blockkind = chrpropThirdPersonWeaponSegmentHit(&handpos, &result->point,
+                    &blockbghit, &blockroom, &blockprop, &blockimpact);
+        }
+
+        /* The selected object itself is not cover in front of itself. */
+        if (blockkind == 2 && blockprop != NULL && blockprop == result->prop)
+        {
+            blockkind = 0;
+        }
+
+        if (blockkind != 0)
+        {
+            intentlen2 = SQ(result->point.x - (hasmuzzle ? muzzle.x : start.x))
+                       + SQ(result->point.y - (hasmuzzle ? muzzle.y : start.y))
+                       + SQ(result->point.z - (hasmuzzle ? muzzle.z : start.z));
+            blocklen2 = SQ(blockimpact.x - (hasmuzzle ? muzzle.x : start.x))
+                      + SQ(blockimpact.y - (hasmuzzle ? muzzle.y : start.y))
+                      + SQ(blockimpact.z - (hasmuzzle ? muzzle.z : start.z));
+            blockfrac = intentlen2 > 0.0001f ? blocklen2 / intentlen2 : 0.0f;
+
+            if (!(blockkind == 1 && result->kind == 1 && blockfrac >= 0.98f))
+            {
+                result->point = blockimpact;
+                result->prop = blockkind == 2 ? blockprop : NULL;
+                result->kind = blockkind == 1 ? 1 : 2;
+                result->hasdetailedhit = FALSE;
+                result->weaponblocked = TRUE;
+
+                if (blockkind == 1)
+                {
+                    result->bghit = blockbghit;
+                    result->room = blockroom;
+                }
+            }
+        }
+    }
+
+    return TRUE;
+}
+
+/*
+ * Firing-only exact target probe.  Unlike the visual resolver above, this may
+ * use GoldenEye's authored character/object model hit routines because it is
+ * called only from the real hitscan fire handler, where those routines normally
+ * run and their render/model state is valid.
+ */
+static s32 chrpropThirdPersonGetDetailedReticleHit(s32 hand,
+        PropRecord *target, BulletHit *outhit)
+{
+    ShotData probe;
+    BulletHit *besthit = NULL;
+    coord3d cameraorigin;
+    coord3d worlddir;
+    f32 bestdist = M_U32_MAX_VALUE_F;
+    s32 i;
+    bool oldprobestate;
+
+    if (target == NULL || outhit == NULL)
+    {
+        return FALSE;
+    }
+
+    sub_GAME_7F068190(&probe.viewOrigin, &probe.viewDir);
+    probe.weapon = getCurrentPlayerWeaponId(hand);
+    probe.maxdist = M_U32_MAX_VALUE_F;
+
+    cameraorigin = probe.viewOrigin;
+    mtx4TransformVecInPlace(currentPlayerGetViewToWorldMtxf(), &cameraorigin);
+    worlddir = probe.viewDir;
+    mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &worlddir);
+    probe.gunpos = cameraorigin;
+    probe.dir = worlddir;
+
+    for (i = 0; i < 10; i++)
+    {
+        probe.hits[i].prop = NULL;
+        probe.hits[i].hitpart = 0;
+        probe.hits[i].node = 0;
+    }
+
+    oldprobestate = g_ChrTestHitProbeNoSideEffects;
+    g_ChrTestHitProbeNoSideEffects = TRUE;
+
+    if (target->type == PROP_TYPE_CHR
+            || (target->type == PROP_TYPE_VIEWER && target->chr != NULL))
+    {
+        chrTestHit(target, &probe);
+    }
+    else if (target->type == PROP_TYPE_OBJ
+            || target->type == PROP_TYPE_WEAPON
+            || target->type == PROP_TYPE_DOOR)
+    {
+        sub_GAME_7F04E9BC(target, &probe);
+    }
+
+    g_ChrTestHitProbeNoSideEffects = oldprobestate;
+
+    for (i = 0; i < 10; i++)
+    {
+        if (probe.hits[i].prop == target && probe.hits[i].dist < bestdist)
+        {
+            bestdist = probe.hits[i].dist;
+            besthit = &probe.hits[i];
+        }
+    }
+
+    if (besthit == NULL)
+    {
+        return FALSE;
+    }
+
+    *outhit = *besthit;
+    return TRUE;
+}
+
+/* Public visual-only wrapper used by the Third Person world-space reticle. */
+s32 chrpropGetThirdPersonReticlePoint(s32 hand, coord3d *point)
+{
+    TpThirdPersonReticleResult result;
+
+    if (!modThirdPersonActive(get_cur_playernum()) || point == NULL)
+    {
+        return FALSE;
+    }
+
+    if (!chrpropThirdPersonResolveReticle(hand, &result, FALSE))
+    {
+        return FALSE;
+    }
+
+    *point = result.point;
+    return TRUE;
+}
+
+static s32 chrpropThirdPersonPointInsideProp(PropRecord *prop, const coord3d *point)
+{
+    struct rect4f *polygon = NULL;
+    s32 edges = 0;
+    f32 top = 0.0f;
+    f32 bottom = 0.0f;
+
+    if (prop == NULL || point == NULL)
+    {
+        return FALSE;
+    }
+
+    chraiGetCollisionBounds(prop, &polygon, &edges, &top, &bottom);
+
+    return polygon != NULL && edges > 0
+        && point->y >= bottom - 2.0f
+        && point->y <= top + 2.0f
+        && chrpropTestPointInPolygon((coord3d *)point, polygon, edges);
+}
+
+static s32 chrpropThirdPersonPointInsideShootable(const coord3d *point)
+{
+    PropRecord **pp;
+    PropRecord *prop;
+
+    for (pp = g_LastOnScreenProp; (--pp) >= g_OnScreenPropList;)
+    {
+        struct rect4f *polygon = NULL;
+        s32 edges = 0;
+        f32 top = 0.0f;
+        f32 bottom = 0.0f;
+
+        prop = *pp;
+
+        if (prop == NULL)
+        {
+            continue;
+        }
+
+        if (prop->type == PROP_TYPE_VIEWER
+                && (prop->chr == NULL
+                    || getPlayerPointerIndex(prop) == get_cur_playernum()))
+        {
+            continue;
+        }
+
+        if (prop->type != PROP_TYPE_CHR
+                && prop->type != PROP_TYPE_VIEWER
+                && prop->type != PROP_TYPE_OBJ
+                && prop->type != PROP_TYPE_WEAPON
+                && prop->type != PROP_TYPE_DOOR)
+        {
+            continue;
+        }
+
+        chraiGetCollisionBounds(prop, &polygon, &edges, &top, &bottom);
+
+        if (polygon != NULL && edges > 0
+                && point->y >= bottom - 2.0f
+                && point->y <= top + 2.0f
+                && chrpropTestPointInPolygon((coord3d *)point, polygon, edges))
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+#endif
+
+
+
 /*
 * Address: 0x7F03B15C
 *
@@ -979,6 +1834,13 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     s32 k;
     s32 i;
     u8 rooms[2];
+#ifdef GE_MODDED_CHEATS
+    s32 tpactive;
+    s32 tpReticleValid;
+    s32 tpReticleLocked;
+    s32 tpLaserStableMuzzleRay;
+    TpThirdPersonReticleResult tpReticle;
+#endif
 
     hitbgstan = 0;
     hittile = 0;
@@ -987,6 +1849,18 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     playerprop = getCurrentPlayerProp();
     fromtile = playerprop->stan;
     numhits = 0;
+#ifdef GE_MODDED_CHEATS
+    tpactive = modThirdPersonActive(get_cur_playernum());
+    tpReticleValid = FALSE;
+    tpReticleLocked = FALSE;
+    tpLaserStableMuzzleRay = FALSE;
+    if (tpactive)
+    {
+        /* A TP beam is valid only when this exact firing tick publishes the
+         * authoritative physical ray below. */
+        gunClearThirdPersonResolvedBeam(hand);
+    }
+#endif
     bullet_path_from_screen_center(&shotdata.viewOrigin, &shotdata.viewDir, hand);
     shotdata.weapon = getCurrentPlayerWeaponId(hand);
     shotdata.maxdist = M_U32_MAX_VALUE_F;
@@ -1010,6 +1884,283 @@ void chraiDefaultWeaponFireHandler(s32 hand)
 
     mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &shotdata.dir);
 
+#ifdef GE_MODDED_CHEATS
+    if (tpactive)
+    {
+        /* Resolve the exact world-space reticle before the gameplay origin is
+         * moved toward the weapon.  This is the same query used by gunDrawSight,
+         * so visual aim, contact intent and weapon-side cover agree. */
+        tpReticleValid = chrpropThirdPersonResolveReticle(hand, &tpReticle, TRUE);
+    }
+
+    if (tpactive)
+    {
+        /*
+         * Use Epic ShooterGame's stable third-person instant-hit pattern: keep
+         * GoldenEye's camera/reticle firing direction, but advance the gameplay
+         * trace start from the chase camera to Bond's depth on that SAME ray.
+         * There is no muzzle-to-target convergence, so steep pitch and literal
+         * contact cannot whip the shot sideways/upward.
+         */
+        coord3d camorigin = shotdata.gunpos;
+        coord3d exactvieworigin;
+        coord3d exactviewdir;
+        coord3d exactworlddir;
+        coord3d delta;
+        coord3d projectionref;
+        f32 depth;
+
+        /* Unspread reticle axis. */
+        sub_GAME_7F068190(&exactvieworigin, &exactviewdir);
+
+        exactworlddir = exactviewdir;
+        mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &exactworlddir);
+
+        /*
+         * Project Bond's physical player position onto the reticle ray.
+         *
+         *   start = camera + aim * dot(Bond - camera, aim)
+         *
+         * It is still the SAME reticle line, merely advanced to Bond's depth.
+         * Unlike literal muzzle convergence, its direction does not whip
+         * sideways/upward as the target approaches the weapon.
+         */
+        /* While manning the tank with a hand-held weapon, use the visible
+         * third-person weapon muzzle as the physical shot origin.  The older
+         * Bond-depth projection could lag far from the moving tank and made
+         * beams/impact points look detached from the gun.  Tank shells retain
+         * their dedicated vehicle weapon path. */
+        if (g_PlayerIsInTank == 0
+            && shotdata.weapon == ITEM_LASER
+            && gunGetThirdPersonMuzzleOrigin(hand, &shotdata.gunpos))
+        {
+            /*
+             * V82: the Moonraker Laser is a visible penetrating ray, so it must
+             * never use the invisible-bullet projected-origin bridge.  Start the
+             * gameplay/tracer ray at the real rendered muzzle and KEEP the one
+             * camera-derived shot direction.  Glass/doors/crates/characters are
+             * then gathered by GoldenEye's normal penetration pass on this same
+             * line, preventing the apparent refraction/deflection seen after a
+             * penetrable surface in Third Person.
+             */
+            tpLaserStableMuzzleRay = TRUE;
+        }
+        else if (g_PlayerIsInTank != 0
+            && shotdata.weapon != ITEM_TANKSHELLS
+            && gunGetThirdPersonMuzzleOrigin(hand, &shotdata.gunpos))
+        {
+            /* Keep GoldenEye's camera/reticle direction and authored spread;
+             * only the origin becomes the exact rendered muzzle. */
+        }
+        else
+        {
+            /* Project the exact reticle line to the visible weapon side, not
+             * Bond's collision centre.  Using the body centre here makes a
+             * perfectly legal window/ledge shot start too far behind the gun
+             * and causes later cover validation to cut through the sill/floor.
+             * The muzzle is the preferred reference; the reconstructed hand
+             * attachment and finally the player position are safe fallbacks. */
+            if (!gunGetThirdPersonMuzzleOrigin(hand, &projectionref)
+                    && !gunGetThirdPersonHandOrigin(hand, &projectionref))
+            {
+                projectionref = playerprop->pos;
+            }
+
+            delta.x = projectionref.x - camorigin.x;
+            delta.y = projectionref.y - camorigin.y;
+            delta.z = projectionref.z - camorigin.z;
+
+            depth = delta.x * exactworlddir.x
+                  + delta.y * exactworlddir.y
+                  + delta.z * exactworlddir.z;
+
+            if (depth < 0.0f)
+            {
+                depth = 0.0f;
+            }
+
+            shotdata.gunpos.x = camorigin.x + exactworlddir.x * depth;
+            shotdata.gunpos.y = camorigin.y + exactworlddir.y * depth;
+            shotdata.gunpos.z = camorigin.z + exactworlddir.z * depth;
+        }
+
+        /*
+         * shotdata.dir already contains GoldenEye's normal per-weapon spread,
+         * transformed into world space above.  Keep it untouched so Third
+         * Person firing cadence/feel matches the retail weapon path.
+         */
+
+        if (g_PlayerIsInTank == 0 && tpReticleValid
+                && !tpLaserStableMuzzleRay
+                && tpReticle.kind == 2
+                && tpReticle.prop != NULL
+                && !tpReticle.weaponblocked)
+        {
+            coord3d lockorigin;
+            coord3d lockdir;
+            coord3d targetview;
+            coord3d muzzle;
+            coord3d handpos;
+            f32 dx;
+            f32 dy;
+            f32 dz;
+            f32 dist2;
+            f32 locklen;
+            f32 forwarddot;
+            s32 hasmuzzle;
+            s32 hashand;
+            s32 nearcontact = FALSE;
+            s32 contactstep;
+            s32 i_hit;
+
+            hasmuzzle = gunGetThirdPersonMuzzleOrigin(hand, &muzzle);
+            hashand = gunGetThirdPersonHandOrigin(hand, &handpos);
+
+            if (hasmuzzle)
+            {
+                dx = tpReticle.point.x - muzzle.x;
+                dy = tpReticle.point.y - muzzle.y;
+                dz = tpReticle.point.z - muzzle.z;
+                dist2 = dx * dx + dy * dy + dz * dz;
+
+                if (dist2 <= 14400.0f
+                        || chrpropThirdPersonPointInsideProp(tpReticle.prop,
+                            &muzzle))
+                {
+                    nearcontact = TRUE;
+                }
+            }
+            else if (hashand)
+            {
+                dx = tpReticle.point.x - handpos.x;
+                dy = tpReticle.point.y - handpos.y;
+                dz = tpReticle.point.z - handpos.z;
+                dist2 = dx * dx + dy * dy + dz * dz;
+
+                if (dist2 <= 14400.0f
+                        || chrpropThirdPersonPointInsideProp(tpReticle.prop,
+                            &handpos))
+                {
+                    nearcontact = TRUE;
+                }
+            }
+
+            if (nearcontact)
+            {
+                /* The HUD/world-reticle resolver deliberately uses only safe
+                 * gameplay collision bounds.  Now that a REAL shot is happening,
+                 * obtain the authored GE body-part/model hit once from the exact
+                 * camera reticle ray.  Never run this combat probe from HUD draw. */
+                if (chrpropThirdPersonGetDetailedReticleHit(hand,
+                        tpReticle.prop, &tpReticle.hit))
+                {
+                    tpReticle.hasdetailedhit = TRUE;
+                    /* Keep all later impact/tracer reconstruction on the same
+                     * world point represented by the blocked world reticle. */
+                    tpReticle.hit.hit.hitpos = tpReticle.point;
+                }
+                else
+                {
+                    nearcontact = FALSE;
+                }
+            }
+
+            if (nearcontact && tpReticle.hasdetailedhit)
+            {
+                /* The world reticle already proved which guard/prop is under the
+                 * crosshair and the weapon-side query proved there is no nearer
+                 * wall/crate.  Reuse the firing-only authored BulletHit rather
+                 * than asking the translated contact ray to reacquire it. */
+                if (hasmuzzle)
+                {
+                    lockorigin = muzzle;
+                }
+                else if (hashand)
+                {
+                    lockorigin = handpos;
+                }
+                else
+                {
+                    lockorigin = g_CurrentPlayer->field_488.collision_position;
+                }
+
+                dx = tpReticle.point.x - lockorigin.x;
+                dy = tpReticle.point.y - lockorigin.y;
+                dz = tpReticle.point.z - lockorigin.z;
+                forwarddot = dx * exactworlddir.x
+                           + dy * exactworlddir.y
+                           + dz * exactworlddir.z;
+
+                /* If the animated muzzle has already crossed the selected
+                 * surface, prefer the hand/body-side point instead of drawing a
+                 * backwards tracer through the target. */
+                if ((forwarddot <= 1.0f
+                        || chrpropThirdPersonPointInsideProp(tpReticle.prop,
+                            &lockorigin)) && hashand)
+                {
+                    lockorigin = handpos;
+                }
+
+                /* Guarantee an external/camera-side start for the shared ray. */
+                for (contactstep = 0; contactstep < 128
+                        && chrpropThirdPersonPointInsideProp(tpReticle.prop,
+                            &lockorigin);
+                        contactstep++)
+                {
+                    lockorigin.x -= exactworlddir.x * 4.0f;
+                    lockorigin.y -= exactworlddir.y * 4.0f;
+                    lockorigin.z -= exactworlddir.z * 4.0f;
+                }
+
+                dx = tpReticle.point.x - lockorigin.x;
+                dy = tpReticle.point.y - lockorigin.y;
+                dz = tpReticle.point.z - lockorigin.z;
+                locklen = sqrtf(dx * dx + dy * dy + dz * dz);
+
+                if (locklen > 0.001f)
+                {
+                    lockdir.x = dx / locklen;
+                    lockdir.y = dy / locklen;
+                    lockdir.z = dz / locklen;
+
+                    shotdata.gunpos = lockorigin;
+                    shotdata.dir = lockdir;
+                    shotdata.viewOrigin = lockorigin;
+                    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
+                            &shotdata.viewOrigin);
+                    shotdata.viewDir = lockdir;
+                    mtx4RotateVecInPlace(camGetWorldToScreenMtxf(),
+                            &shotdata.viewDir);
+
+                    for (i_hit = 0; i_hit < 10; i_hit++)
+                    {
+                        shotdata.hits[i_hit].prop = NULL;
+                        shotdata.hits[i_hit].hitpart = 0;
+                        shotdata.hits[i_hit].node = 0;
+                    }
+
+                    shotdata.hits[0] = tpReticle.hit;
+                    targetview = tpReticle.point;
+                    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
+                            &targetview);
+                    shotdata.hits[0].dist = -targetview.z;
+                    shotdata.maxdist = -targetview.z + 1.0f;
+                    if (shotdata.maxdist < 0.0f) shotdata.maxdist = 0.0f;
+
+                    tpReticleLocked = TRUE;
+                }
+            }
+        }
+
+        /* GE character/object hit tests operate in view space. */
+        shotdata.viewOrigin = shotdata.gunpos;
+        mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &shotdata.viewOrigin);
+
+        shotdata.viewDir = shotdata.dir;
+        mtx4RotateVecInPlace(camGetWorldToScreenMtxf(), &shotdata.viewDir);
+    }
+#endif
+
     dest.x = (shotdata.dir.x * M_U16_MAX_VALUE_F) + shotdata.gunpos.x;
     dest.y = (shotdata.dir.y * M_U16_MAX_VALUE_F) + shotdata.gunpos.y;
     dest.z = (shotdata.dir.z * M_U16_MAX_VALUE_F) + shotdata.gunpos.z;
@@ -1017,7 +2168,19 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     if (walkTilesBetweenPoints_NoCallback(&fromtile, playerprop->pos.x, playerprop->pos.z, shotdata.gunpos.x, shotdata.gunpos.z))
     {
         distscale = get_room_data_float1() * bgGetLevelVisibilityScale();
-        playerpos = bondviewGetCurrentPlayersPosition();
+#ifdef GE_MODDED_CHEATS
+        if (modThirdPersonActive(get_cur_playernum()))
+        {
+            /* Third Person background collision must use the same projected
+             * reticle-line origin as character/object collision.  The retail
+             * eye-origin path remains untouched in First Person. */
+            playerpos = &shotdata.gunpos;
+        }
+        else
+#endif
+        {
+            playerpos = bondviewGetCurrentPlayersPosition();
+        }
 
         new_var++;
         new_var--;
@@ -1113,22 +2276,399 @@ void chraiDefaultWeaponFireHandler(s32 hand)
         shotdata.maxdist = new_var;
     }
 
-    for (pp = g_LastOnScreenProp; (--pp) >= g_OnScreenPropList;)
+#ifdef GE_MODDED_CHEATS
+    /* Third Person is resolved once below with the stable Bond-depth reticle
+     * ray and real 3-D background collision. First Person keeps the retail
+     * candidate pass unchanged. */
+    if (!tpactive)
     {
-        prop = *pp;
-
-        if (prop != 0)
+#endif
+        for (pp = g_LastOnScreenProp; (--pp) >= g_OnScreenPropList;)
         {
-            if ((prop->type == PROP_TYPE_CHR) || (((prop->type == PROP_TYPE_VIEWER) && (prop->chr != 0)) && (getPlayerPointerIndex(prop) != get_cur_playernum())))
+            prop = *pp;
+
+            if (prop != 0)
             {
-                chrTestHit(prop, &shotdata);
-            }
-            else if (((prop->type == PROP_TYPE_OBJ) || (prop->type == PROP_TYPE_WEAPON)) || (prop->type == PROP_TYPE_DOOR))
-            {
-                sub_GAME_7F04E9BC(prop, &shotdata);
+                if ((prop->type == PROP_TYPE_CHR) || (((prop->type == PROP_TYPE_VIEWER) && (prop->chr != 0)) && (getPlayerPointerIndex(prop) != get_cur_playernum())))
+                {
+                    chrTestHit(prop, &shotdata);
+                }
+                else if (((prop->type == PROP_TYPE_OBJ) || (prop->type == PROP_TYPE_WEAPON)) || (prop->type == PROP_TYPE_DOOR))
+                {
+                    sub_GAME_7F04E9BC(prop, &shotdata);
+                }
             }
         }
+#ifdef GE_MODDED_CHEATS
     }
+#endif
+
+
+#ifdef GE_MODDED_CHEATS
+    if (tpactive)
+    {
+        coord3d tphitorigin;
+        coord3d tpweaponmuzzle;
+        coord3d tpweaponhand;
+        coord3d tpblocksource;
+        coord3d tpblockimpact;
+        coord3d tpblockdir;
+        coord3d tpfarend;
+        coord3d tpendview;
+        coord3d tpbeamend;
+        coord3d tpblockview;
+        HitThing tpphysicalbghit;
+        HitThing tpblockbghit;
+        PropRecord *tpblockprop = NULL;
+        f32 farlen;
+        f32 bgdepth = M_U32_MAX_VALUE_F;
+        f32 beamrayt;
+        f32 tpblocklen = 0.0f;
+        s32 physicalbgroom = 0;
+        s32 physicalbghit = FALSE;
+        s32 tpblockroom = 0;
+        s32 tpblockkind = 0;
+        s32 tpweaponhasmuzzle = FALSE;
+        s32 tpweaponhashand = FALSE;
+        s32 backstep;
+        s32 i_hit;
+
+        g_ChrTestHitProbeNoSideEffects = FALSE;
+
+        if (tpReticleLocked)
+        {
+            f32 dx = tpReticle.point.x - shotdata.gunpos.x;
+            f32 dy = tpReticle.point.y - shotdata.gunpos.y;
+            f32 dz = tpReticle.point.z - shotdata.gunpos.z;
+
+            /* The near world-reticle target is already a proven GE model hit,
+             * and weapon-side cover was already validated by the shared reticle
+             * resolver.  Preserve that candidate exactly; do not reacquire it. */
+            gotbghit = 0;
+            hitbgstan = 0;
+            bestroom = playerprop->stan != NULL ? getTileRoom(playerprop->stan) : 0;
+            besttexture = -1;
+            beamrayt = sqrtf(dx * dx + dy * dy + dz * dz);
+        }
+        else
+        {
+        /*
+         * V56: one stable Third Person shot ray.
+         *
+         * Epic's ShooterGame instant-hit path does not pivot the gameplay ray
+         * from an animated muzzle toward a nearby target. It advances the camera
+         * aim ray to the pawn's depth, then keeps the camera-derived shot
+         * direction. That removes the close-range convergence singularity which
+         * was producing the steep-pitch/upward "deflections" in V52-V55.
+         *
+         * shotdata.gunpos is already that Bond-depth point and shotdata.dir is
+         * GoldenEye's authored spread direction. Never replace shotdata.dir with
+         * a muzzle->target vector here.
+         */
+        tphitorigin = shotdata.gunpos;
+
+        /*
+         * V58 weapon-side legality.
+         *
+         * The stable gameplay ray remains parallel to the camera/reticle ray,
+         * but its projected origin is now referenced to the visible weapon side
+         * (muzzle/hand) rather than Bond's collision centre.  The only special
+         * cover checks are therefore local to the actual weapon geometry:
+         *
+         *   hand -> muzzle              catches a barrel clipped through cover
+         *   muzzle -> projected origin  catches a camera origin across a corner
+         *
+         * There is deliberately NO body-centre -> distant-impact segment.  That
+         * V57 segment could cut through a window sill/floor even while the
+         * visible weapon was already above the opening.
+         */
+        if (g_PlayerIsInTank == 0)
+        {
+            tpweaponhasmuzzle = gunGetThirdPersonMuzzleOrigin(hand,
+                    &tpweaponmuzzle);
+            tpweaponhashand = gunGetThirdPersonHandOrigin(hand,
+                    &tpweaponhand);
+
+            if (tpLaserStableMuzzleRay)
+            {
+                /*
+                 * A penetrable dynamic prop between the hand and muzzle is not
+                 * an absolute blocker for the Moonraker Laser.  The main GE ray
+                 * beginning at the muzzle will resolve all forward object/door
+                 * penetration without changing direction.  We only retain the
+                 * short hand->muzzle check for real BG triangles so an animated
+                 * barrel cannot poke through a solid level wall and fire from the
+                 * far side.
+                 */
+                if (tpweaponhasmuzzle && tpweaponhashand
+                        && chrpropThirdPersonBgSegmentHit(&tpweaponhand,
+                            &tpweaponmuzzle, &tpblockbghit, &tpblockroom, NULL))
+                {
+                    tpblockkind = 1;
+                    tpblocksource = tpweaponhand;
+                    tpblockimpact = tpblockbghit.hitpos;
+                }
+            }
+            else
+            {
+                if (tpweaponhasmuzzle && tpweaponhashand)
+                {
+                    tpblockkind = chrpropThirdPersonWeaponSegmentHit(&tpweaponhand,
+                            &tpweaponmuzzle, &tpblockbghit, &tpblockroom,
+                            &tpblockprop, &tpblockimpact);
+
+                    if (tpblockkind != 0)
+                    {
+                        tpblocksource = tpweaponhand;
+                    }
+                }
+
+                if (tpblockkind == 0 && tpweaponhasmuzzle)
+                {
+                    tpblockkind = chrpropThirdPersonWeaponSegmentHit(&tpweaponmuzzle,
+                            &tphitorigin, &tpblockbghit, &tpblockroom,
+                            &tpblockprop, &tpblockimpact);
+
+                    if (tpblockkind != 0)
+                    {
+                        tpblocksource = tpweaponmuzzle;
+                    }
+                }
+                else if (tpblockkind == 0 && tpweaponhashand)
+                {
+                    tpblockkind = chrpropThirdPersonWeaponSegmentHit(&tpweaponhand,
+                            &tphitorigin, &tpblockbghit, &tpblockroom,
+                            &tpblockprop, &tpblockimpact);
+
+                    if (tpblockkind != 0)
+                    {
+                        tpblocksource = tpweaponhand;
+                    }
+                }
+            }
+        }
+
+        if (tpblockkind != 0)
+        {
+            /* A local weapon-side obstruction wins the complete shot.  This is
+             * the only time V58 changes the stable reticle direction: the shot
+             * terminates immediately on the geometry physically intersecting
+             * the weapon/barrel path, and damage/impact/tracer all use that same
+             * short blocked segment. */
+            tpblockdir.x = tpblockimpact.x - tpblocksource.x;
+            tpblockdir.y = tpblockimpact.y - tpblocksource.y;
+            tpblockdir.z = tpblockimpact.z - tpblocksource.z;
+            tpblocklen = sqrtf(tpblockdir.x * tpblockdir.x
+                    + tpblockdir.y * tpblockdir.y
+                    + tpblockdir.z * tpblockdir.z);
+
+            if (tpblocklen > 0.001f)
+            {
+                tpblockdir.x /= tpblocklen;
+                tpblockdir.y /= tpblocklen;
+                tpblockdir.z /= tpblocklen;
+            }
+            else
+            {
+                tpblockdir = shotdata.dir;
+                tpblocklen = 0.0f;
+            }
+
+            for (i_hit = 0; i_hit < 10; i_hit++)
+            {
+                shotdata.hits[i_hit].prop = NULL;
+                shotdata.hits[i_hit].hitpart = 0;
+                shotdata.hits[i_hit].node = 0;
+            }
+
+            shotdata.gunpos = tpblocksource;
+            shotdata.dir = tpblockdir;
+            shotdata.viewOrigin = shotdata.gunpos;
+            mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
+                    &shotdata.viewOrigin);
+            shotdata.viewDir = shotdata.dir;
+            mtx4RotateVecInPlace(camGetWorldToScreenMtxf(), &shotdata.viewDir);
+
+            tpblockview = tpblockimpact;
+            mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &tpblockview);
+
+            if (tpblockkind == 1)
+            {
+                bghit = tpblockbghit;
+                visiblehitpos = tpblockbghit.hitpos;
+                besthitpos = tpblockbghit.hitpos;
+                bestroom = tpblockroom;
+                besttexture = tpblockbghit.texturenum;
+                gotbghit = 1;
+                hitbgstan = 0;
+                hittile = playerprop->stan;
+                shotdata.maxdist = -tpblockview.z;
+                if (shotdata.maxdist < 0.0f) shotdata.maxdist = 0.0f;
+                negz = shotdata.maxdist;
+            }
+            else
+            {
+                gotbghit = 0;
+                hitbgstan = 0;
+                bestroom = playerprop->stan != NULL
+                        ? getTileRoom(playerprop->stan) : 0;
+                besttexture = -1;
+
+                /* Let GE resolve the exact object model surface just beyond the
+                 * broad collision contact so destructible crates/tables/doors
+                 * still receive their normal objHit path. */
+                shotdata.maxdist = -tpblockview.z + 48.0f;
+                if (shotdata.maxdist < 0.0f) shotdata.maxdist = 0.0f;
+
+                if (tpblockprop != NULL
+                        && (tpblockprop->type == PROP_TYPE_OBJ
+                            || tpblockprop->type == PROP_TYPE_WEAPON
+                            || tpblockprop->type == PROP_TYPE_DOOR))
+                {
+                    sub_GAME_7F04E9BC(tpblockprop, &shotdata);
+                }
+            }
+
+            beamrayt = tpblocklen;
+        }
+        else
+        {
+            /* 3-D raycasts in many engines do not report the collider which
+             * already contains their origin.  At literal contact, back the SAME
+             * stable reticle ray toward the camera until its start is outside
+             * every shootable guard/player/object. */
+            for (backstep = 0;
+                    backstep < 128
+                        && chrpropThirdPersonPointInsideShootable(&tphitorigin);
+                    backstep++)
+            {
+                tphitorigin.x -= shotdata.dir.x * 4.0f;
+                tphitorigin.y -= shotdata.dir.y * 4.0f;
+                tphitorigin.z -= shotdata.dir.z * 4.0f;
+            }
+
+            shotdata.gunpos = tphitorigin;
+            shotdata.viewOrigin = shotdata.gunpos;
+            mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
+                    &shotdata.viewOrigin);
+            shotdata.viewDir = shotdata.dir;
+            mtx4RotateVecInPlace(camGetWorldToScreenMtxf(), &shotdata.viewDir);
+
+            farlen = (shotdata.weapon == 23) ? 300.0f : 30000.0f;
+            tpfarend.x = shotdata.gunpos.x + shotdata.dir.x * farlen;
+            tpfarend.y = shotdata.gunpos.y + shotdata.dir.y * farlen;
+            tpfarend.z = shotdata.gunpos.z + shotdata.dir.z * farlen;
+
+            for (i_hit = 0; i_hit < 10; i_hit++)
+            {
+                shotdata.hits[i_hit].prop = NULL;
+                shotdata.hits[i_hit].hitpart = 0;
+                shotdata.hits[i_hit].node = 0;
+            }
+
+            /* Real background triangles own TP static collision. */
+            physicalbghit = chrpropThirdPersonBgSegmentHit(&shotdata.gunpos,
+                    &tpfarend, &tpphysicalbghit, &physicalbgroom, NULL);
+
+            if (physicalbghit)
+            {
+                bghit = tpphysicalbghit;
+                visiblehitpos = tpphysicalbghit.hitpos;
+                besthitpos = tpphysicalbghit.hitpos;
+                bestroom = physicalbgroom;
+                besttexture = tpphysicalbghit.texturenum;
+                gotbghit = 1;
+                hitbgstan = 0;
+                hittile = playerprop->stan;
+
+                tpendview = tpphysicalbghit.hitpos;
+                mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &tpendview);
+                bgdepth = -tpendview.z;
+                if (bgdepth < 0.0f) bgdepth = 0.0f;
+                negz = bgdepth;
+                shotdata.maxdist = bgdepth;
+            }
+            else
+            {
+                gotbghit = 0;
+                hitbgstan = 0;
+                bestroom = playerprop->stan != NULL
+                        ? getTileRoom(playerprop->stan) : 0;
+                besttexture = -1;
+
+                tpendview = tpfarend;
+                mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &tpendview);
+                shotdata.maxdist = -tpendview.z;
+                if (shotdata.maxdist < 0.0f)
+                {
+                    shotdata.maxdist = M_U32_MAX_VALUE_F;
+                }
+            }
+
+            /* One normal GE candidate pass on the SAME stable ray handles guards,
+             * players, destructible crates/tables, weapon props and doors. */
+            for (pp = g_LastOnScreenProp; (--pp) >= g_OnScreenPropList;)
+            {
+                prop = *pp;
+
+                if (prop != 0)
+                {
+                    if ((prop->type == PROP_TYPE_CHR)
+                            || (((prop->type == PROP_TYPE_VIEWER)
+                                && (prop->chr != 0))
+                                && (getPlayerPointerIndex(prop)
+                                    != get_cur_playernum())))
+                    {
+                        chrTestHit(prop, &shotdata);
+                    }
+                    else if ((prop->type == PROP_TYPE_OBJ)
+                            || (prop->type == PROP_TYPE_WEAPON)
+                            || (prop->type == PROP_TYPE_DOOR))
+                    {
+                        sub_GAME_7F04E9BC(prop, &shotdata);
+                    }
+                }
+            }
+
+            if (gotbghit && shotdata.maxdist + 0.01f < bgdepth)
+            {
+                gotbghit = 0;
+                hitbgstan = 0;
+            }
+
+            beamrayt = farlen;
+            if (shotdata.viewDir.z < -0.0001f || shotdata.viewDir.z > 0.0001f)
+            {
+                f32 resolvedt = (-shotdata.maxdist - shotdata.viewOrigin.z)
+                        / shotdata.viewDir.z;
+
+                if (resolvedt >= 0.0f && resolvedt < beamrayt)
+                {
+                    beamrayt = resolvedt;
+                }
+            }
+        }
+
+        }
+
+        /* The beam uses the exact same resolved ray.  Clear shots keep the
+         * stable reticle ray; locally obstructed weapon shots terminate on the
+         * same hand/muzzle-side blocker used by damage and impact processing. */
+        if (beamrayt > 26.0f)
+        {
+            beamrayt -= 26.0f;
+        }
+
+        tpbeamend.x = shotdata.gunpos.x + shotdata.dir.x * beamrayt;
+        tpbeamend.y = shotdata.gunpos.y + shotdata.dir.y * beamrayt;
+        tpbeamend.z = shotdata.gunpos.z + shotdata.dir.z * beamrayt;
+        gunSetThirdPersonResolvedBeam(hand, &shotdata.gunpos, &tpbeamend);
+    }
+    else
+    {
+        g_ChrTestHitProbeNoSideEffects = FALSE;
+    }
+#endif
 
     for (k = 0; k < 10; k++)
     {
@@ -1420,40 +2960,64 @@ void chraiFistAttackHandler(s32 hand, s32 item_id)
             reach = 100.0f;
         }
 
-        modelGetAxisExtents(chr->model, &max0, &min0, 0);
-
-        if (!(0.0f <= max0))
+#ifdef GE_MODDED_CHEATS
+        if (modThirdPersonActive(get_cur_playernum()))
         {
-            continue;
+            /* Retail melee is camera-space: it checks whether a target model
+             * crosses the centre of the first-person view, then uses the view
+             * centre ray as the attack direction.  In a chase camera that makes
+             * the camera position/orientation determine melee reach.  Anchor TP
+             * melee to Bond instead: the target must be within Bond's authored
+             * reach and in the forward hemisphere of his body. */
+            f32 dx = prop->pos.x - playerprop->pos.x;
+            f32 dz = prop->pos.z - playerprop->pos.z;
+            f32 distsq = dx * dx + dz * dz;
+            f32 forwarddot = dx * g_CurrentPlayer->field_488.theta_transform.f[0]
+                           + dz * g_CurrentPlayer->field_488.theta_transform.f[2];
+
+            if (distsq > reach * reach || forwarddot <= 0.0f)
+            {
+                continue;
+            }
         }
-
-        if (!(min0 <= 0.0f))
+        else
+#endif
         {
-            continue;
-        }
+            modelGetAxisExtents(chr->model, &max0, &min0, 0);
 
-        modelGetAxisExtents(chr->model, &max1, &min1, 1);
+            if (!(0.0f <= max0))
+            {
+                continue;
+            }
 
-        if (!(0.0f <= max1))
-        {
-            continue;
-        }
+            if (!(min0 <= 0.0f))
+            {
+                continue;
+            }
 
-        if (!(min1 <= 0.0f))
-        {
-            continue;
-        }
+            modelGetAxisExtents(chr->model, &max1, &min1, 1);
 
-        modelGetAxisExtents(chr->model, &max2, &min2, 2);
+            if (!(0.0f <= max1))
+            {
+                continue;
+            }
 
-        if (!(min2 <= 0.0f))
-        {
-            continue;
-        }
+            if (!(min1 <= 0.0f))
+            {
+                continue;
+            }
 
-        if (!((-reach) <= max2))
-        {
-            continue;
+            modelGetAxisExtents(chr->model, &max2, &min2, 2);
+
+            if (!(min2 <= 0.0f))
+            {
+                continue;
+            }
+
+            if (!((-reach) <= max2))
+            {
+                continue;
+            }
         }
 
         tile = playerprop->stan;
@@ -1479,8 +3043,19 @@ void chraiFistAttackHandler(s32 hand, s32 item_id)
 
         if (g_musicSfxBufferPtr && g_musicSfxBufferPtr);
 
-        bullet_path_from_screen_center(&from, &vector, hand);
-        mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &vector);
+#ifdef GE_MODDED_CHEATS
+        if (modThirdPersonActive(get_cur_playernum()))
+        {
+            vector.f[0] = g_CurrentPlayer->field_488.theta_transform.f[0];
+            vector.f[1] = 0.0f;
+            vector.f[2] = g_CurrentPlayer->field_488.theta_transform.f[2];
+        }
+        else
+#endif
+        {
+            bullet_path_from_screen_center(&from, &vector, hand);
+            mtx4RotateVecInPlace(currentPlayerGetViewToWorldMtxf(), &vector);
+        }
 
         if (handles_shot_actors(chr, hitpart, &vector, item_id, 1))
         {
@@ -1784,14 +3359,7 @@ s32 chrpropIsFarFromPlayers(PropRecord* prop)
         pos_diff.x = player_prop->pos.x - prop->pos.x;
         pos_diff.y = player_prop->pos.y - prop->pos.y;
         pos_diff.z = player_prop->pos.z - prop->pos.z;
-#ifdef GE_PHYSICAL_FASTPATHS
-        /* sqrt(d2) < 400 is exactly equivalent to d2 < 160000 for the
-         * non-negative squared distance (and both reject NaN). This path is
-         * used while deciding whether regenerating props are close to players. */
-        if (((pos_diff.x * pos_diff.x) + (pos_diff.y * pos_diff.y) + (pos_diff.z * pos_diff.z)) < 160000.0f)
-#else
         if (sqrtf((pos_diff.x * pos_diff.x) + (pos_diff.y * pos_diff.y) + (pos_diff.z * pos_diff.z)) < 400.0f)
-#endif
         {
             rc = 0;
             break;
@@ -1976,7 +3544,21 @@ void chrpropTick(void)
                 // Update MP character bullet tracers.
                 if (prop->chr != NULL)
                 {
-                    if (getPlayerCount() >= 2)
+                    /*
+                     * Retail advances player-character world-space beams only
+                     * in multiplayer because the local single-player beam is
+                     * normally owned/rendered by the first-person hand. Third
+                     * Person deliberately uses chr->beams[] for the local
+                     * Moonraker/Watch Laser so the beam exists in world space.
+                     * Advance that timer in 1P Third Person too; otherwise the
+                     * last generated beam never expires and remains frozen in
+                     * the world indefinitely.
+                     */
+                    if (getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+                        || modThirdPersonActive(playernum)
+#endif
+                    )
                     {
                         chr = prop->chr;
                         gunAdvanceBeamTimer(&chr->beams[0]);
@@ -2081,7 +3663,11 @@ void propsTick(void)
 		prop = propprev;
     }
 
-    if (get_player_position_in_shuffled(get_cur_playernum()) == 0)
+    if (get_player_position_in_shuffled(get_cur_playernum()) == 0
+#ifdef GE_MODDED_CHEATS
+        || (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+#endif
+    )
     {
         handle_alarm_gas_timer_calldamage();
         loop_set_sound_effect_all_slots();
@@ -2579,6 +4165,19 @@ void chrpropUpdateAutoaimTarget(void)
             {
                 continue;
             }
+
+#ifdef GE_MODDED_CHEATS
+            /* Human Co-Op partners are friendlies, never auto-aim targets.
+             * Keep viewer targeting intact for competitive multiplayer.
+             * Do this before bounds/LOS scoring so Co-Op also avoids wasting
+             * CPU on a candidate that can never win. */
+            if (gamemode == GAMEMODE_MULTI
+                    && get_scenario() == SCENARIO_COOP
+                    && candidate_prop->type == PROP_TYPE_VIEWER)
+            {
+                continue;
+            }
+#endif
 
             candidate_chr = candidate_prop->chr;
 
