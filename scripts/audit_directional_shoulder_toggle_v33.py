@@ -47,12 +47,13 @@ check('SP watch exposes the setting',
       ('#define MODWATCH_OPTION_ROWS 20' in OPT or
        '#define MODWATCH_OPTION_ROWS 21' in OPT or
        '#define MODWATCH_OPTION_ROWS 22' in OPT or
-       '#define MODWATCH_OPTION_ROWS 23' in OPT) and
+       '#define MODWATCH_OPTION_ROWS 23' in OPT or
+       '#define MODWATCH_OPTION_ROWS 24' in OPT) and
       'frontModGetOptionLabel(49)' in OPT and
       'MODOPT3_DIRECTIONAL_SHOULDER' in OPT and
       'row == 13' in OPT)
 check('MP watch exposes the setting',
-      ('mode == 2 ? 15' in MP or 'mode == 2 ? 16' in MP or 'mode == 2 ? 17' in MP) and 'frontModGetOptionLabel(49)' in MP and
+      ('mode == 2 ? 15' in MP or 'mode == 2 ? 16' in MP or 'mode == 2 ? 17' in MP or 'if (mode == 2) return 17;' in MP) and 'frontModGetOptionLabel(49)' in MP and
       'MODOPT3_DIRECTIONAL_SHOULDER' in MP)
 check('current compact label is present',
       'Directional Shoulder' in SPEC and

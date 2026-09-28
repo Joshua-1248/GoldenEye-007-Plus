@@ -183,6 +183,10 @@ LEVELID langGetLangBankIndexFromStagenum(LEVELID level)
         case LEVELID_CAVERNS:
             return_id = LCAVE;
             break;
+        case LEVELID_CITADEL:
+            /* Plus V90 R3: Citadel already has the retail LcatE/LcatJ bank. */
+            return_id = LCAT;
+            break;
         case LEVELID_CRADLE:
             return_id = LCRAD;
             break;

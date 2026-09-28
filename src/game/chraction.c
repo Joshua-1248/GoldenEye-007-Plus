@@ -2808,6 +2808,9 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
     f32 subroty; // 76
     f32 atan; // 72
     f32 norm; // any
+#ifdef GE_MODDED_CHEATS
+    f32 kineticmult;
+#endif
     s32 sp40; // 64
     f32 phi_f12; // any
     struct explosion_death_animation *sp38; // 56
@@ -2852,14 +2855,17 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
 
         norm = (5.0f * damage) / sqrtf(((sp2C.f[0] * sp2C.f[0]) + (sp2C.f[1] * sp2C.f[1])) + (sp2C.f[2] * sp2C.f[2]));
 #ifdef GE_MODDED_CHEATS
-        /* Kinetic Explosions preserves normal explosion damage/range and only
-         * amplifies the guard death impulse.  Keep this here at the canonical
-         * fallspeed assignment so every explosion source inherits it without
-         * mission- or weapon-specific hooks. */
+        /* V85 kinetic stack.  CHEAT_KINETIC_EXPLOSIONS keeps its stable ID
+         * but is presented as Super Kinetics.  Ultra Kinetics is x3.5 by
+         * itself; enabling both adds the authored x1.5 + x3.5 strengths for
+         * an exact x5.0 base explosion-death impulse.  Damage and explosion
+         * radius remain untouched. */
+        kineticmult = 1.0f;
         if (cheatIsActive(CHEAT_KINETIC_EXPLOSIONS))
-        {
-            norm *= 1.5f;
-        }
+            kineticmult = 1.5f;
+        if (cheatIsActive(CHEAT_ULTRA_KINETICS))
+            kineticmult = kineticmult > 1.0f ? 5.0f : 3.5f;
+        norm *= kineticmult;
 #endif
         phi_f12 = atan - subroty;
 
@@ -2871,11 +2877,11 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
         self->fallspeed.f[1] = sp2C.f[1];
         self->fallspeed.f[2] = sp2C.f[2];
 #ifdef GE_MODDED_CHEATS
-        if (cheatIsActive(CHEAT_KINETIC_EXPLOSIONS))
+        if (kineticmult > 1.0f)
         {
-            /* Add a guaranteed upward component so floor-level blasts launch
-             * bodies visibly higher instead of only increasing radial speed. */
-            self->fallspeed.f[1] += 4.0f * damage;
+            /* Preserve Super Kinetics' existing +4*damage launch lift at
+             * x1.5, and scale that helper proportionally for x3.5/x5.0. */
+            self->fallspeed.f[1] += (2.6666667f * kineticmult) * damage;
         }
 #endif
 

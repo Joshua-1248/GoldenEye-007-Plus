@@ -26,11 +26,14 @@ s32 osEepromLongRead(OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes) {
             return status;
         }
 
-        nbytes -= 8;
+        nbytes -= EEPROM_BLOCK_SIZE;
         address += 1;
-        buffer += 8;
+        buffer += EEPROM_BLOCK_SIZE;
+#ifndef GE_SAVE_EEPROM16K
+        /* Retail-era path retained exactly; later libultra does not delay reads. */
         osSetTimer(&__osEepromTimer, 12000 * osClockRate / 1000000, 0, &__osEepromTimerQ, __osEepromTimerMsg);
         osRecvMesg(&__osEepromTimerQ, NULL, OS_MESG_BLOCK);
+#endif
     }
 
     return status;

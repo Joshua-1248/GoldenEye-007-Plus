@@ -29,20 +29,46 @@ def parse_images_def(images_def_path):
     return image_names
 
 def read_old_imagelist(csv_path):
-    """Read old imagelist.u.csv and extract offset/size pairs"""
+    """Read imagelist.u.csv, including the historical final padding row."""
     entries = []
-    
+
     with open(csv_path, 'r') as f:
         for line in f:
             line = line.strip()
             if line:
                 parts = line.split(',')
-                if len(parts) >= 2:
+                if len(parts) >= 3:
                     offset = int(parts[0])
                     size = int(parts[1])
-                    entries.append({'offset': offset, 'size': size})
-    
+                    path = parts[2]
+                    entries.append({'offset': offset, 'size': size, 'path': path})
+
     return entries
+
+
+def split_rom_entries(old_entries):
+    """Return (real_retail_entries, append_offset).
+
+    The US extraction CSV has 2698 real retail images followed by an 8-byte
+    image2698.bin row that exists only to describe the original end/padding
+    boundary.  It is not a 2699th retail texture.  Treating it as one makes the
+    first Plus-added texture masquerade as a retail row and obscures whether the
+    image namespace was actually extended.
+    """
+    if len(old_entries) >= 2:
+        tail = old_entries[-1]
+        prev = old_entries[-2]
+        tail_name = Path(tail.get('path', '')).name.lower()
+
+        if (tail_name == 'image2698.bin' and tail['size'] == 8
+                and tail['offset'] == prev['offset'] + prev['size']):
+            return old_entries[:-1], tail['offset']
+
+    # Fallback for alternate CSVs without the historical padding sentinel.
+    if old_entries:
+        return old_entries, old_entries[-1]['offset'] + old_entries[-1]['size']
+
+    return [], 0
 
 def generate_named_imagelist(image_names, old_entries, output_csv, split_dir):
     """Generate new imagelist.csv with proper names and actual sizes
@@ -53,44 +79,40 @@ def generate_named_imagelist(image_names, old_entries, output_csv, split_dir):
     """
     import os
     
-    rom_image_count = len(old_entries)
+    rom_entries, append_offset = split_rom_entries(old_entries)
+    rom_image_count = len(rom_entries)
     total_images = len(image_names)
-    
+
     if total_images < rom_image_count:
-        print(f"WARNING: images.def has {total_images} images but CSV has {rom_image_count} entries")
+        print(f"WARNING: images.def has {total_images} images but CSV has {rom_image_count} real retail images")
         print(f"Using first {total_images} entries from CSV")
         rom_image_count = total_images
     elif total_images > rom_image_count:
-        print(f"INFO: images.def has {total_images} images, CSV has {rom_image_count} (ROM) entries")
-        print(f"Will calculate offsets for {total_images - rom_image_count} new images")
-    
-    # Start offset calculation from beginning
-    current_offset = old_entries[0]['offset'] if rom_image_count > 0 else 0
-    
+        print(f"INFO: images.def has {total_images} images, CSV has {rom_image_count} real retail images")
+        print(f"Will append {total_images - rom_image_count} new image(s) after the retail image boundary")
+
+    current_offset = append_offset
+
     with open(output_csv, 'w') as f:
-        # Write ROM images with CSV offsets but recalculated sizes
+        # Write real retail images with CSV offsets but recalculated sizes.
         for i in range(rom_image_count):
             name = image_names[i]
             path = f"{split_dir}/{name}.bin"
-            
-            # Use ROM offset from CSV
-            offset = old_entries[i]['offset']
+
+            # Use ROM offset from CSV.
+            offset = rom_entries[i]['offset']
             
             # Get actual file size (recalculate, don't trust CSV)
             if os.path.exists(path):
                 size = os.path.getsize(path)
             else:
                 # Fall back to CSV size if file missing
-                size = old_entries[i]['size']
+                size = rom_entries[i]['size']
                 print(f"WARNING: {path} not found, using CSV size 0x{size:X}")
             
             f.write(f"{offset},{size},{path},0,1\n")
             
-            # Track offset for new images
-            if i == rom_image_count - 1:
-                current_offset = offset + size
-        
-        # Write new images with calculated offsets and actual sizes
+        # Write Plus-added images at the preserved retail end boundary.
         for i in range(rom_image_count, total_images):
             name = image_names[i]
             path = f"{split_dir}/{name}.bin"
@@ -106,7 +128,7 @@ def generate_named_imagelist(image_names, old_entries, output_csv, split_dir):
             f.write(f"{current_offset},{size},{path},0,1\n")
             current_offset += size
     
-    print(f"Generated {output_csv} with {total_images} entries ({rom_image_count} from ROM, {total_images - rom_image_count} new)")
+    print(f"Generated {output_csv} with {total_images} entries ({rom_image_count} retail, {total_images - rom_image_count} appended)")
     print(f"All sizes recalculated from actual .bin files (CSV offsets preserved for ROM images)")
     return total_images
 
@@ -170,8 +192,13 @@ def main():
     
     # Optionally update images.def with sizes
     if update_def:
-        print(f"\nUpdating {images_def} with sizes from CSV...")
-        sizes = [entry['size'] for entry in old_entries[:len(image_names)]]
+        print(f"\nUpdating {images_def} with sizes from generated image list...")
+        sizes = []
+        with open(output_csv, 'r') as generated:
+            for line in generated:
+                parts = line.strip().split(',')
+                if len(parts) >= 2:
+                    sizes.append(int(parts[1]))
         update_images_def_sizes(images_def, sizes)
         print("✓ images.def updated")
     else:

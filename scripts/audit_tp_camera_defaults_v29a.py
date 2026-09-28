@@ -3,8 +3,7 @@ from pathlib import Path
 import re, sys
 ROOT=Path(__file__).resolve().parents[1]
 h=(ROOT/'src/game/options.h').read_text(errors='replace')
-root_h_path=ROOT/'options.h'
-hroot=root_h_path.read_text(errors='replace') if root_h_path.exists() else h
+hroot=(ROOT/'options.h').read_text(errors='replace')
 o=(ROOT/'src/game/options.c').read_text(errors='replace')
 b=(ROOT/'src/game/bondview2.c').read_text(errors='replace')
 f=(ROOT/'src/game/file2.c').read_text(errors='replace')

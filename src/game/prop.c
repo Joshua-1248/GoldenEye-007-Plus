@@ -59,6 +59,133 @@ void sub_GAME_7F00324C(struct BoundPadRecord *arg0, s32 *arg1, s32 *arg2, struct
 void setupDoor(s32 arg0, struct DoorRecord *door, s32 arg2);
 
 
+#ifdef GE_MODDED_CHEATS
+/* V90: Zoinkity Citadel multiplayer runtime pad/intro handoff.
+ *
+ * The 2005 restoration loaded its Citadel setup normally, then redirected
+ * g_CurrentSetup.intro and g_CurrentSetup.pads to runtime-ready data embedded
+ * in Citadel.bin.  Keep that architecture here, but resolve STAN links by name
+ * instead of using hard-coded RDRAM addresses. */
+typedef struct CitadelMpPadTemplate
+{
+    coord3d pos;
+    coord3d up;
+    coord3d look;
+    char *stanName;
+} CitadelMpPadTemplate;
+
+static CitadelMpPadTemplate g_CitadelMpPadTemplates[48] = {
+    { {906.790894f, 161.348511f, 1997.19531f}, {0.0f, 1.0f, 0.0f}, {0.493941993f, 0.0f, 0.869494975f}, "p1298d1" },
+    { {878.068115f, 161.348511f, -717.105042f}, {0.0f, 1.0f, 0.0f}, {0.992645919f, 0.0f, -0.121054374f}, "p1093e6" },
+    { {2002.39856f, 7.11361074f, -1291.46204f}, {0.0f, 1.0f, 0.0f}, {0.5f, 0.0f, -0.866024971f}, "p1105f" },
+    { {-2492.71069f, 170.023163f, -1003.17767f}, {0.0f, 1.0f, 0.0f}, {0.572181582f, 0.0f, -0.820126951f}, "p805c3" },
+    { {-2267.35669f, 32.9636765f, 1376.95813f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p468a5" },
+    { {-1787.55786f, 32.9636765f, 2882.29956f}, {0.0f, 1.0f, 0.0f}, {1.0f, -1.0f, 0.0f}, "p1769h6" },
+    { {1307.17456f, -431.99765f, -124.999413f}, {0.0f, 1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, "p503b4" },
+    { {-499.99765f, 32.9636765f, 506.937347f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, "p691a6" },
+    { {-2565.19287f, 16.1580276f, -1535.79736f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p905f4" },
+    { {-1980.42651f, 16.1580276f, -1162.20691f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p905f4" },
+    { {1920.66833f, 6.85920048f, 1915.74792f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1293d" },
+    { {-499.107727f, 0.0f, -3132.66724f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p46a" },
+    { {3163.41626f, 0.0f, 494.881683f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, "p65a1" },
+    { {-516.28125f, 0.0f, 4155.96973f}, {0.0f, -1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, "p20a1" },
+    { {-2316.1311f, 6.86361074f, 2316.71069f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1716h2" },
+    { {-502.721375f, -1093.74219f, 857.248779f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p604e4" },
+    { {-4218.17725f, 161.348511f, 539.127441f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, "p35a1" },
+    { {1023.03278f, 277.271088f, -2076.71069f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1135f6" },
+    { {1057.43726f, 285.757355f, -791.223999f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1153g2" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {-507.094971f, 607.977661f, 206.372772f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p671a1" },
+    { {-434.576263f, -525.977661f, 504.648529f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p527c1" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {-1724.32751f, -826.600098f, 492.59964f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p564d2" },
+    { {-458.913391f, -839.614746f, -789.778931f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p650f6" },
+    { {-2908.90234f, 16.1319084f, 2892.12964f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1742h4" },
+    { {-1813.0061f, 16.1319084f, 1771.46204f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1690h" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {-1261.87158f, -516.715149f, 502.696533f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p527c1" },
+    { {-191.65593f, 616.715149f, 765.200073f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p699b" },
+    { {-783.129578f, 616.715149f, 767.465149f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p699b" },
+    { {-2006.63965f, 1017.4845f, -1424.5686f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p784b6" },
+    { {-3152.94873f, 565.056885f, -534.309814f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p752a6" },
+    { {-2977.32886f, 821.056885f, -1762.97974f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p772b3" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {1657.72632f, 16.1473484f, 2920.46606f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1288c7" },
+    { {725.393677f, 16.1473484f, 2783.31396f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1303d2" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {-2510.2439f, 7.59738064f, -1140.32751f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p905f4" },
+    { {702.163757f, -826.600098f, 506.239532f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p556d" },
+    { {587.225586f, 286.110535f, -2076.12964f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1135f6" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {1022.50305f, 286.110535f, -1667.46204f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p1135f6" },
+    { {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "" },
+    { {519.080505f, -516.715149f, 526.453552f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, "p527c1" },
+};
+
+static PadRecord g_CitadelMpPads[49];
+
+static s32 g_CitadelMpIntro[] = {
+    0x00000000, 0x0000000B, 0x00000000,
+    0x00000000, 0x0000000C, 0x00000000,
+    0x00000000, 0x0000000D, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000001, 0x00000000,
+    0x00000000, 0x00000010, 0x00000000,
+    0x00000000, 0x00000003, 0x00000000,
+    0x00000000, 0x00000004, 0x00000000,
+    0x00000000, 0x00000005, 0x00000000,
+    0x00000000, 0x00000006, 0x00000000,
+    0x00000000, 0x00000007, 0x00000000,
+    0x00000001, 0x00000001, 0xFFFFFFFF, 0x00000000,
+    0x00000005, 0x00000002,
+    0x00000009
+};
+
+static void citadelApplyMultiplayerSetupOverrides(enum LEVELID stageId)
+{
+    s32 i;
+
+    if (stageId != LEVELID_CITADEL
+            || gamemode != GAMEMODE_MULTI
+            || get_scenario() == SCENARIO_COOP)
+    {
+        return;
+    }
+
+    for (i = 0; i < 48; i++)
+    {
+        g_CitadelMpPads[i].pos = g_CitadelMpPadTemplates[i].pos;
+        g_CitadelMpPads[i].up = g_CitadelMpPadTemplates[i].up;
+        g_CitadelMpPads[i].look = g_CitadelMpPadTemplates[i].look;
+        g_CitadelMpPads[i].plink = g_CitadelMpPadTemplates[i].stanName;
+
+        if (g_CitadelMpPadTemplates[i].stanName[0] != '\0')
+        {
+            g_CitadelMpPads[i].stan = (StandTile *)stanMatchTileName(g_CitadelMpPadTemplates[i].stanName);
+        }
+        else
+        {
+            g_CitadelMpPads[i].stan = NULL;
+        }
+    }
+
+    /* Keep the pad table iterable by normal Plus systems such as Mirrored
+     * Levels, while preserving all 48 indices from Zoinkity's runtime table. */
+    g_CitadelMpPads[48].pos.x = 0.0f;
+    g_CitadelMpPads[48].pos.y = 0.0f;
+    g_CitadelMpPads[48].pos.z = 0.0f;
+    g_CitadelMpPads[48].plink = NULL;
+    g_CitadelMpPads[48].stan = NULL;
+
+    g_CurrentSetup.intro = g_CitadelMpIntro;
+    g_CurrentSetup.pads = g_CitadelMpPads;
+}
+#endif
+
+
 s32 load_proptype(PROPDEF_TYPE type)
 {
     PropDefHeaderRecord *propdef = (PropDefHeaderRecord *) g_CurrentSetup.propDefs;
@@ -1471,6 +1598,10 @@ void proplvreset2(enum LEVELID stageId)
         // PD rejoins here
 
 #ifdef GE_MODDED_CHEATS
+        /* V90: reproduce Zoinkity's original Citadel runtime handoff using
+         * symbols and STAN names rather than 2005-era absolute RAM hooks. */
+        citadelApplyMultiplayerSetupOverrides(stageId);
+
         /* Mirrored Levels transforms setup pads before any stage props/guards
          * are instantiated, so initial placement is born in mirrored space. */
         mirrorLevelsApplySetupIfNeeded();

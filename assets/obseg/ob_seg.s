@@ -101,9 +101,6 @@ bg_file_seg bg_ear_all_p_seg, bg_ear_all_p
 bg_file_seg bg_len_all_p_seg, bg_len_all_p
 bg_file_seg bg_pam_all_p_seg, bg_pam_all_p
 bg_file_seg bg_wax_all_p_seg, bg_wax_all_p
-.ifdef GE_MAP_MAKER
-bg_file_seg bg_mapmaker_all_p_seg, bg_mapmaker_all_p
-.endif
 
 obseg_file_rz chr, CarmourguardZ
 obseg_file_rz chr, CbaronsamediZ
@@ -650,9 +647,6 @@ obseg_file_Z stan, Tbg_sevx_all_p_stanZ
 obseg_file_Z stan, Tbg_silo_all_p_stanZ
 obseg_file_Z stan, Tbg_stat_all_p_stanZ
 obseg_file_Z stan, Tbg_tra_all_p_stanZ
-.ifdef GE_MAP_MAKER
-obseg_file_Z stan, Tbg_mapmaker_all_p_stanZ
-.endif
 
 
 obseg_file_rz brief, UbriefarchZ
@@ -711,9 +705,6 @@ obseg_file_Z setup, UsetupsevxbZ
 obseg_file_Z setup, UsetupsiloZ
 obseg_file_Z setup, UsetupstatueZ
 obseg_file_Z setup, UsetuptraZ
-.ifdef GE_MAP_MAKER
-obseg_file_Z setup, UsetupmapmakerZ
-.endif
 
 
 obseg_file_rz text, LameE
@@ -936,6 +927,16 @@ obseg_file_rz text, LwaxJ
 .ifdef VERSION_EU
 obseg_file_rz text, LwaxP
 .endif
+
+# GoldenEye Plus appended resources.  Keep this physical order identical to
+# the appended file_resource_table entries so obInit's next-address size
+# calculation remains valid without renumbering any retail resource IDs.
+.ifdef GE_MAP_MAKER
+bg_file_seg bg_mapmaker_all_p_seg, bg_mapmaker_all_p
+obseg_file_Z stan, Tbg_mapmaker_all_p_stanZ
+obseg_file_Z setup, UsetupmapmakerZ
+.endif
+obseg_file_Z setup, Ump_setupcatZ
 
 .global ob__ob_end_seg
 ob__ob_end_seg:

@@ -1925,13 +1925,12 @@ s32 sub_GAME_7F01FC10(Model *model, coord3d *src, coord3d *dst, f32 *ground_y)
                     || g_CameraMode == CAMERAMODE_MP)
                 && (getPlayerCount() >= 2 || bondviewThirdPersonPresentationActive(tpPlayerNum)))
             {
-                /* V81: movement-owned player Y is a LIVE GAMEPLAY contract.
-                 * Do not leak it into POSEND cinematic bodies just because the
-                 * Third Person preference remains latched (or because this is
-                 * campaign Co-Op). Dam's bungee ending uses root translation
-                 * from ANIM_dam_jump; forcing the cinematic viewer back onto
-                 * player stanHeight/field_70 corrupts the first/third camera
-                 * cuts and prevents the authored fall from being followed. */
+                /* V81: movement-owned player Y belongs only to live gameplay.
+                 * A Third Person preference remains latched through POSEND, but
+                 * the freshly rebuilt cinematic Bond must use GoldenEye's stock
+                 * character/root-animation vertical path.  Dam's bungee ending
+                 * depends on that root translation in its first/third camera
+                 * segments and especially during the authored fall. */
                 tpPlayerVerticalY = TRUE;
             }
         }

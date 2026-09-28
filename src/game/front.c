@@ -46,6 +46,9 @@
 #include "ob.h"
 #include "gbi_extension.h"
 #include "model.h"
+#ifdef GE_MODDED_CHEATS
+#include "levelmodifiers.h"
+#endif
 #ifdef GE_MAP_MAKER
 #include "mapmaker.h"
 #endif
@@ -606,9 +609,10 @@ struct mp_stage_setup multi_stage_setups[] = {
     {getStringID(LTITLE, TITLE_STR_172_EGYPTIANTEMPLEMP), getStringID(LTITLE, TITLE_STR_173_EGYPTIANMP), IMG_MP_EGYPT, LEVELID_EGYPT, SP_LEVEL_EGYPT, 1, 4},
 #ifdef GE_MODDED_CHEATS
     {getStringID(LTITLE, TITLE_STR_178_STAT), getStringID(LTITLE, TITLE_STR_179_STAT2), IMG_MP_STATUE, LEVELID_STATUE, SP_LEVEL_STATUE, 1, 4},
-    {getStringID(LTITLE, TITLE_STR_180_CRAD), getStringID(LTITLE, TITLE_STR_181_CRADLE2), IMG_MP_CRADLE, LEVELID_CRADLE, SP_LEVEL_CRADLE, 1, 4}
+    {getStringID(LTITLE, TITLE_STR_180_CRAD), getStringID(LTITLE, TITLE_STR_181_CRADLE2), IMG_MP_CRADLE, LEVELID_CRADLE, SP_LEVEL_CRADLE, 1, 4},
+    {getStringID(LTITLE, TITLE_STR_174_CITADEL), getStringID(LTITLE, TITLE_STR_175_CITADEL2), IMG_MP_CITADEL, LEVELID_CITADEL, -1, 1, 4}
 #endif
-  //{getStringID(LTITLE, TITLE_STR_174_CITADEL), getStringID(LTITLE, TITLE_STR_175_CITADEL2), IMG_MP_RANDOM, LEVELID_CITADEL, -1, 1, 4}, //Citadel (old format setup)
+  // Citadel restored for multiplayer in GoldenEye Plus using Zoinkity's hand-reclipped collision/setup work.
   //{getStringID(LTITLE, TITLE_STR_176_DEST), getStringID(LTITLE, TITLE_STR_177_DEST2), IMG_MP_FRIGATE, LEVELID_FRIGATE, SP_LEVEL_FRIGATE, 1, 4}, //dest (has xbla setup)
   //{getStringID(LTITLE, TITLE_STR_178_STAT), getStringID(LTITLE, TITLE_STR_179_STAT2), IMG_MP_STATUE, LEVELID_STATUE, SP_LEVEL_STATUE, 1, 4}, //stat (works)
   //{getStringID(LTITLE, TITLE_STR_180_CRAD), getStringID(LTITLE, TITLE_STR_181_CRADLE2), IMG_MP_CRADLE, LEVELID_CRADLE, SP_LEVEL_CRADLE, 1, 4}, //crad (works)
@@ -7182,15 +7186,15 @@ Gfx * constructor_menu12_mpstage(Gfx *DL)
                     gDPSetFogColor(DL++, 0xff, 0xff, 0xff, 0x0a);
                     gDPSetRenderMode(DL++, G_RM_FOG_PRIM_A, G_RM_AA_OPA_SURF2);
 
-                    display_image_at_position(&DL, &spD8.f[0], &spD0.f[0], 0x44, 0x2C, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, simage->level > 0, 1);
+                    display_image_at_position(&DL, &spD8.f[0], &spD0.f[0], simage->width, simage->height, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, simage->level > 0, 1);
                 }
                 else if (check_if_mp_stage_unlocked(stageindex) != 0)
                 {
-                    display_image_at_position(&DL, &spD8.f[0], &spD0.f[0], 0x44, 0x2C, 0, 0, 1, 0x6E, 0x6E, 0x6E, 0xFF, simage->level > 0, 0);
+                    display_image_at_position(&DL, &spD8.f[0], &spD0.f[0], simage->width, simage->height, 0, 0, 1, 0x6E, 0x6E, 0x6E, 0xFF, simage->level > 0, 0);
                 }
                 else
                 {
-                    display_image_at_position(&DL, &spD8.f[0], &spD0.f[0], 0x44, 0x2C, 0, 0, 1, 0xF, 0xF, 0xF, 0xFF, simage->level > 0, 0);
+                    display_image_at_position(&DL, &spD8.f[0], &spD0.f[0], simage->width, simage->height, 0, 0, 1, 0xF, 0xF, 0xF, 0xFF, simage->level > 0, 0);
                 }
             }
 
@@ -8991,6 +8995,9 @@ static s32 frontModIsHiddenCheat(s32 cheat)
         case CHEAT_NO_CLIPPING:
         case CHEAT_FLY_MODE:
         case CHEAT_KINETIC_EXPLOSIONS:
+        case CHEAT_ULTRA_KINETICS:
+        case CHEAT_LEVEL_NEVER_ENDS:
+        case CHEAT_FREEZE_TIMER:
         case CHEAT_SUPER_TANK:
         case CHEAT_MIRRORED_LEVELS:
             return TRUE;
@@ -9017,7 +9024,10 @@ u8 *frontModGetCheatMenuText(s32 cheat)
         case CHEAT_RAPID_FIRE: return (u8 *)"Rapid Fire";
         case CHEAT_NO_CLIPPING: return (u8 *)"No-Clipping";
         case CHEAT_FLY_MODE: return (u8 *)frontModGetOptionLabel(42);
-        case CHEAT_KINETIC_EXPLOSIONS: return (u8 *)"Kinetic Explosions";
+        case CHEAT_KINETIC_EXPLOSIONS: return (u8 *)"Super Kinetics";
+        case CHEAT_ULTRA_KINETICS: return (u8 *)"Ultra Kinetics";
+        case CHEAT_LEVEL_NEVER_ENDS: return (u8 *)"Level Never Ends";
+        case CHEAT_FREEZE_TIMER: return (u8 *)"Freeze Timer";
         case CHEAT_SUPER_TANK: return (u8 *)"Super Tank";
         case CHEAT_MIRRORED_LEVELS: return (u8 *)"Mirrored Levels";
     }
@@ -9029,8 +9039,11 @@ static void frontModBuildCheatPage(s32 page)
     static const u8 hiddencheats[] = {
         CHEAT_RAPID_FIRE,
         CHEAT_KINETIC_EXPLOSIONS,
+        CHEAT_ULTRA_KINETICS,
         CHEAT_SUPER_TANK,
         CHEAT_MIRRORED_LEVELS,
+        CHEAT_LEVEL_NEVER_ENDS,
+        CHEAT_FREEZE_TIMER,
         CHEAT_NO_CLIPPING,
         CHEAT_FLY_MODE,
         CHEAT_EXTRA_MP_CHARS,
@@ -9375,6 +9388,10 @@ static s32 g_ModOptionsPage;
 static s32 g_ModOptionsUnlockHover;
 static s32 g_ModOptionsUnlockConfirm;
 static s32 g_ModOptionsUnlockChoice;
+static s32 g_ModOptionsLevelModifiersHover;
+static s32 g_LevelModifiersCategoryChoice;
+static s32 g_LevelModifiersLevelChoice;
+static s32 g_LevelModifiersListTop;
 #ifdef GE_MAP_MAKER
 static s32 g_ModOptionsMapMakerHover;
 static s32 g_ModOptionsStartPage2;
@@ -9409,6 +9426,7 @@ void init_menu_mod_options(void)
     g_ModOptionsUnlockHover = FALSE;
     g_ModOptionsUnlockConfirm = FALSE;
     g_ModOptionsUnlockChoice = 0;
+    g_ModOptionsLevelModifiersHover = FALSE;
 
     if (save && !(save->options & OPTION_R21_MIGRATED))
     {
@@ -9679,7 +9697,14 @@ void interface_menu_mod_options(void)
 #ifdef GE_MAP_MAKER
         g_ModOptionsMapMakerHover = g_ModOptionsPage
             && cursor_h_pos >= 250.0f && cursor_h_pos <= 382.0f
-            && cursor_v_pos >= 83.0f && cursor_v_pos <= 103.0f;
+            && cursor_v_pos >= 83.0f && cursor_v_pos <= 101.0f;
+        g_ModOptionsLevelModifiersHover = g_ModOptionsPage
+            && cursor_h_pos >= 250.0f && cursor_h_pos <= 412.0f
+            && cursor_v_pos >= 102.0f && cursor_v_pos <= 121.0f;
+#else
+        g_ModOptionsLevelModifiersHover = g_ModOptionsPage
+            && cursor_h_pos >= 250.0f && cursor_h_pos <= 412.0f
+            && cursor_v_pos >= 83.0f && cursor_v_pos <= 102.0f;
 #endif
 
         /* Special Options is rendered at a tighter 16-pixel row pitch than
@@ -9689,9 +9714,9 @@ void interface_menu_mod_options(void)
             (g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT);
         if (row < 0) row = 0; if (row > maxrow) row = maxrow;
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover)
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover)
 #else
-        if (!g_ModOptionsUnlockHover)
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover)
 #endif
         {
             g_ModOptionsHighlighted = row;
@@ -9728,11 +9753,29 @@ void interface_menu_mod_options(void)
             return;
         }
 #endif
+        if (g_ModOptionsLevelModifiersHover && (pressed & (START_BUTTON|Z_TRIG|A_BUTTON)))
+        {
+            if (g_ModOptionsDirty)
+            {
+                save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+                if (save)
+                {
+                    fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+                    fileStoreExtendedSettings(save);
+#endif
+                }
+                g_ModOptionsDirty = FALSE;
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            frontChangeMenu(MENU_LEVEL_MODIFIERS, FALSE);
+            return;
+        }
 
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
 #else
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
 #endif
         {
             save_data *save = fileGetSaveForFoldernum(selected_folder_num);
@@ -9762,18 +9805,18 @@ void interface_menu_mod_options(void)
         }
 
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && (pressed & (L_JPAD|L_CBUTTONS)))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && (pressed & (L_JPAD|L_CBUTTONS)))
 #else
-        if (!g_ModOptionsUnlockHover && (pressed & (L_JPAD|L_CBUTTONS)))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && (pressed & (L_JPAD|L_CBUTTONS)))
 #endif
         {
             frontModOptionsChange(-1);
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         }
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
 #else
-        if (!g_ModOptionsUnlockHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
 #endif
         {
             frontModOptionsChange(1);
@@ -9855,7 +9898,19 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
             DL = microcode_constructor_related_to_menus(DL,250,83,252 + mw + 2,100,0x32);
         }
         DL = frontPrintText(DL,&x,&y,"Map Maker",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+        x = 252;
+        y = 103;
+#else
+        x = 252;
+        y = 84;
 #endif
+        if (g_ModOptionsLevelModifiersHover && !tab_prev_highlight && !tab_next_highlight)
+        {
+            s32 lh, lw;
+            textMeasure(&lh, &lw, "Level Modifiers", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,250,y-1,252 + lw + 2,y+16,0x32);
+        }
+        DL = frontPrintText(DL,&x,&y,"Level Modifiers",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
     }
 
     for (i=0;i<count;i++)
@@ -9865,9 +9920,9 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
         char *label = frontModGetOptionLabel(g_ModOptionsPage ? page2labels[i] : page1labels[i]);
         y=MOD_OPTIONS_FIRST_ROW_Y+i*(g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT); x=55;
 #ifdef GE_MAP_MAKER
-        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !tab_prev_highlight && !tab_next_highlight)
+        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !tab_prev_highlight && !tab_next_highlight)
 #else
-        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !tab_prev_highlight && !tab_next_highlight)
+        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !tab_prev_highlight && !tab_next_highlight)
 #endif
         {
             s32 lh, lw;
@@ -9929,6 +9984,201 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
 }
 #endif
 
+
+
+//********************************************************************************************************
+//LEVEL MODIFIERS FRONTEND
+//********************************************************************************************************
+#define LEVELMOD_FRONT_VISIBLE_ROWS 10
+
+static Gfx *frontLevelModifiersText(Gfx *DL, s32 x, s32 y, const char *text, u32 colour)
+{
+    return textRenderOutlined(DL, &x, &y, (s8 *)text, ptrFontZurichBoldChars,
+            ptrFontZurichBold, colour, 0x000000E0, viGetX(), viGetY(), 0, 0);
+}
+
+void init_menu_level_modifiers(void)
+{
+    g_LevelModifiersCategoryChoice = 0;
+    g_LevelModifiersLevelChoice = 0;
+    g_LevelModifiersListTop = 0;
+    load_walletbond();
+}
+
+void update_menu_level_modifiers(void) { }
+
+void interface_menu_level_modifiers(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
+    if (pressed & (U_JPAD | U_CBUTTONS))
+        g_LevelModifiersCategoryChoice = (g_LevelModifiersCategoryChoice + LEVELMOD_CATEGORY_COUNT - 1) % LEVELMOD_CATEGORY_COUNT;
+    if (pressed & (D_JPAD | D_CBUTTONS))
+        g_LevelModifiersCategoryChoice = (g_LevelModifiersCategoryChoice + 1) % LEVELMOD_CATEGORY_COUNT;
+
+    if (pressed & B_BUTTON)
+    {
+#ifdef GE_MAP_MAKER
+        g_ModOptionsStartPage2 = 1;
+#endif
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+    {
+        g_LevelModifiersLevelChoice = 0;
+        g_LevelModifiersListTop = 0;
+        frontChangeMenu(MENU_LEVEL_MODIFIERS_LEVELS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        return;
+    }
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_level_modifiers(Gfx *DL)
+{
+    static const char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player", "Multiplayer", "Miscellaneous"};
+    s32 i;
+    s32 y;
+
+    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+    DL = microcode_constructor_related_to_menus(DL,42,26,422,230,0x000000B8);
+    DL = frontLevelModifiersText(DL,55,42,"Level Modifiers",0xFFE070FF);
+    for (i = 0; i < LEVELMOD_CATEGORY_COUNT; i++)
+    {
+        y = 86 + i * 30;
+        if (i == g_LevelModifiersCategoryChoice)
+            DL = microcode_constructor_related_to_menus(DL,70,y-2,370,y+18,0x76561CB0);
+        DL = frontLevelModifiersText(DL,74,y,categories[i],i == g_LevelModifiersCategoryChoice ? 0xFFE070FF : 0xFFFFFFFF);
+    }
+    DL = frontLevelModifiersText(DL,74,198,"Choose a level category.  B: Back",0xB8B8B8FF);
+    return frontDrawCursor(DL);
+}
+
+void init_menu_level_modifiers_levels(void)
+{
+    g_LevelModifiersLevelChoice = 0;
+    g_LevelModifiersListTop = 0;
+    load_walletbond();
+}
+
+void update_menu_level_modifiers_levels(void) { }
+
+void interface_menu_level_modifiers_levels(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 count = levelModifiersGetLevelCount(g_LevelModifiersCategoryChoice);
+
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
+    if (pressed & (U_JPAD | U_CBUTTONS))
+    {
+        if (g_LevelModifiersLevelChoice > 0) g_LevelModifiersLevelChoice--;
+        else g_LevelModifiersLevelChoice = count - 1;
+    }
+    if (pressed & (D_JPAD | D_CBUTTONS))
+    {
+        g_LevelModifiersLevelChoice++;
+        if (g_LevelModifiersLevelChoice >= count) g_LevelModifiersLevelChoice = 0;
+    }
+    if (g_LevelModifiersLevelChoice < g_LevelModifiersListTop)
+        g_LevelModifiersListTop = g_LevelModifiersLevelChoice;
+    if (g_LevelModifiersLevelChoice >= g_LevelModifiersListTop + LEVELMOD_FRONT_VISIBLE_ROWS)
+        g_LevelModifiersListTop = g_LevelModifiersLevelChoice - LEVELMOD_FRONT_VISIBLE_ROWS + 1;
+
+    if (pressed & B_BUTTON)
+    {
+        frontChangeMenu(MENU_LEVEL_MODIFIERS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+    {
+        if (levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice))
+        {
+            frontChangeMenu(MENU_LEVEL_MODIFIERS_SILO, FALSE);
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else
+        {
+            sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
+        }
+        return;
+    }
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_level_modifiers_levels(Gfx *DL)
+{
+    static const char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player", "Multiplayer", "Miscellaneous"};
+    s32 i;
+    s32 index;
+    s32 count = levelModifiersGetLevelCount(g_LevelModifiersCategoryChoice);
+    s32 y;
+    u32 colour;
+
+    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+    DL = microcode_constructor_related_to_menus(DL,42,26,422,252,0x000000B8);
+    DL = frontLevelModifiersText(DL,55,34,"Level Modifiers",0xFFE070FF);
+    DL = frontLevelModifiersText(DL,55,54,categories[g_LevelModifiersCategoryChoice],0xD8D8D8FF);
+    for (i = 0; i < LEVELMOD_FRONT_VISIBLE_ROWS; i++)
+    {
+        index = g_LevelModifiersListTop + i;
+        if (index >= count) break;
+        y = 78 + i * 16;
+        colour = levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice,index) ? 0xFFFFFFFF : 0x606060C0;
+        if (index == g_LevelModifiersLevelChoice)
+        {
+            DL = microcode_constructor_related_to_menus(DL,68,y-1,360,y+15,0x76561CB0);
+            if (levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice,index)) colour = 0xFFE070FF;
+        }
+        DL = frontLevelModifiersText(DL,74,y,levelModifiersGetLevelName(g_LevelModifiersCategoryChoice,index),colour);
+    }
+    DL = frontLevelModifiersText(DL,286,224,"B: Back",0xB8B8B8FF);
+    return frontDrawCursor(DL);
+}
+
+void init_menu_level_modifiers_silo(void)
+{
+    load_walletbond();
+}
+
+void update_menu_level_modifiers_silo(void) { }
+
+void interface_menu_level_modifiers_silo(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f,10000.0f); viSetUseZBuf(FALSE);
+    if (pressed & B_BUTTON)
+    {
+        frontChangeMenu(MENU_LEVEL_MODIFIERS_LEVELS,FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr,DOOR_METAL_CLOSE2_SFX,NULL);
+        return;
+    }
+    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | L_JPAD | R_JPAD | L_CBUTTONS | R_CBUTTONS))
+    {
+        levelModifiersSetSiloBetaVentPreload(!levelModifiersGetSiloBetaVentPreload());
+        sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);
+    }
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_level_modifiers_silo(Gfx *DL)
+{
+    const char *value = levelModifiersGetSiloBetaVentPreload() ? "On" : "Off";
+    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+    DL = microcode_constructor_related_to_menus(DL,42,26,422,210,0x000000B8);
+    DL = frontLevelModifiersText(DL,55,42,"Level Modifiers - Silo",0xFFE070FF);
+    DL = microcode_constructor_related_to_menus(DL,70,91,370,111,0x76561CB0);
+    DL = frontLevelModifiersText(DL,74,94,"Beta Vent Start",0xFFE070FF);
+    DL = frontLevelModifiersText(DL,300,94,value,0xFFFFFFFF);
+    DL = frontLevelModifiersText(DL,74,142,"Starts Bond at preserved beta vent pad 230 and",0xD0D0D0FF);
+    DL = frontLevelModifiersText(DL,74,160,"restores the matching historical Silo collision layout.",0xD0D0D0FF);
+    DL = frontLevelModifiersText(DL,74,190,"A/Left/Right: Toggle     B: Back",0xB8B8B8FF);
+    return frontDrawCursor(DL);
+}
 
 #ifdef GE_MAP_MAKER
 //********************************************************************************************************
@@ -11244,6 +11494,9 @@ void menu_init(void)
             case MENU_CHEAT:                  update_menu15_cheat();                break;
 #ifdef GE_MODDED_CHEATS
             case MENU_MOD_OPTIONS:            update_menu_mod_options();            break;
+            case MENU_LEVEL_MODIFIERS:        update_menu_level_modifiers();        break;
+            case MENU_LEVEL_MODIFIERS_LEVELS: update_menu_level_modifiers_levels(); break;
+            case MENU_LEVEL_MODIFIERS_SILO:   update_menu_level_modifiers_silo();   break;
             case MENU_MP_SETTINGS:             update_menu_mp_settings();             break;
             case MENU_MP_PLAYER_OPTIONS:       update_menu_mp_player_options();        break;
 #ifdef GE_MAP_MAKER
@@ -11293,6 +11546,9 @@ void menu_init(void)
             case MENU_CHEAT:                  init_menu15_cheat();                  break;
 #ifdef GE_MODDED_CHEATS
             case MENU_MOD_OPTIONS:            init_menu_mod_options();              break;
+            case MENU_LEVEL_MODIFIERS:        init_menu_level_modifiers();          break;
+            case MENU_LEVEL_MODIFIERS_LEVELS: init_menu_level_modifiers_levels();   break;
+            case MENU_LEVEL_MODIFIERS_SILO:   init_menu_level_modifiers_silo();     break;
             case MENU_MP_SETTINGS:             init_menu_mp_settings();               break;
             case MENU_MP_PLAYER_OPTIONS:       init_menu_mp_player_options();          break;
 #ifdef GE_MAP_MAKER
@@ -11331,6 +11587,9 @@ void menu_init(void)
         case MENU_CHEAT:                  interface_menu15_cheat();                 break;
 #ifdef GE_MODDED_CHEATS
         case MENU_MOD_OPTIONS:            interface_menu_mod_options();             break;
+        case MENU_LEVEL_MODIFIERS:        interface_menu_level_modifiers();         break;
+        case MENU_LEVEL_MODIFIERS_LEVELS: interface_menu_level_modifiers_levels();  break;
+        case MENU_LEVEL_MODIFIERS_SILO:   interface_menu_level_modifiers_silo();    break;
         case MENU_MP_SETTINGS:             interface_menu_mp_settings();              break;
         case MENU_MP_PLAYER_OPTIONS:       interface_menu_mp_player_options();         break;
 #ifdef GE_MAP_MAKER
@@ -11472,6 +11731,15 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
 #ifdef GE_MODDED_CHEATS
         case MENU_MOD_OPTIONS:
             DL = constructor_menu_mod_options(DL);
+            break;
+        case MENU_LEVEL_MODIFIERS:
+            DL = constructor_menu_level_modifiers(DL);
+            break;
+        case MENU_LEVEL_MODIFIERS_LEVELS:
+            DL = constructor_menu_level_modifiers_levels(DL);
+            break;
+        case MENU_LEVEL_MODIFIERS_SILO:
+            DL = constructor_menu_level_modifiers_silo(DL);
             break;
         case MENU_MP_SETTINGS:
             DL = constructor_menu_mp_settings(DL);

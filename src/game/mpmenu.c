@@ -21,6 +21,7 @@
 #include "options.h"
 #include "cheat.h"
 #include "debugmenu_handler.h"
+#include "levelmodifiers.h"
 #include "assets/obseg/text/LmpmenuE.h"
 #include "assets/obseg/text/LoptionE.h"
 
@@ -58,14 +59,12 @@ u16 g_AwardNames[] = {
 void mpwatchPlayBeep(void);
 /* R21 MP watch configuration hub.  MENU_OBJECTIVES is repurposed outside the
  * old experimental objectives card as the inserted player-settings card. */
-static u8 mpcfg_mode[MAX_PLAYER_COUNT];      /* 0 hub, 1 options, 2 special, 3 cheats */
+static u8 mpcfg_mode[MAX_PLAYER_COUNT];      /* 0 hub, 1 options, 2 special, 3 cheats, 4+ level modifiers */
 static u8 mpcfg_row[MAX_PLAYER_COUNT];
 static u8 mpcfg_modal[MAX_PLAYER_COUNT];
 static u8 mpcfg_choice[MAX_PLAYER_COUNT];
 static u8 mpcfg_yready[MAX_PLAYER_COUNT] = {1,1,1,1};
-#define MPWATCH_BASE_CHEATS (CHEAT_INVALID - 2)
-#define MPWATCH_MIRRORED_ROW MPWATCH_BASE_CHEATS
-#define MPWATCH_TOGGLE_ROWS (MPWATCH_BASE_CHEATS + 1)
+#define MPWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)
 
 static s32 mpwatchIsDebugCheat(CHEAT_ID cheat)
 {
@@ -78,12 +77,19 @@ static s32 mpwatchIsDebugCheat(CHEAT_ID cheat)
 
 static CHEAT_ID mpwatchCheatAtRow(s32 row)
 {
-    /* Match the SP Watch ordering exactly: retail/preserved cheats first,
-     * then mod-added cheats in enum order at the bottom. */
-    if (row < MPWATCH_BASE_CHEATS)
+    /* Match the SP Watch ordering exactly while preserving all pre-V85 mod
+     * cheat IDs: Ultra Kinetics is displayed immediately after Super
+     * Kinetics even though its stable ID is appended after Mirrored Levels. */
+    if (row < CHEAT_KINETIC_EXPLOSIONS)
         return (CHEAT_ID)(row + 1);
-    if (row == MPWATCH_MIRRORED_ROW)
-        return CHEAT_MIRRORED_LEVELS;
+    if (row == CHEAT_KINETIC_EXPLOSIONS)
+        return CHEAT_ULTRA_KINETICS;
+    if (row == CHEAT_ULTRA_KINETICS)
+        return CHEAT_LEVEL_NEVER_ENDS;
+    if (row == CHEAT_LEVEL_NEVER_ENDS)
+        return CHEAT_FREEZE_TIMER;
+    if (row < MPWATCH_TOGGLE_ROWS)
+        return (CHEAT_ID)row;
     return CHEAT_INVALID;
 }
 
@@ -94,7 +100,15 @@ static s32 mpwatchCheatUnlocked(CHEAT_ID cheat)
 
 static s32 mpwatchConfigRows(s32 mode)
 {
-    return mode == 0 ? 3 : mode == 1 ? 8 : mode == 2 ? 17 : MPWATCH_TOGGLE_ROWS + 5;
+    if (mode == 0) return 4;
+    if (mode == 1) return 8;
+    if (mode == 2) return 17;
+    if (mode == 3) return MPWATCH_TOGGLE_ROWS + 5;
+    if (mode == 4) return LEVELMOD_CATEGORY_COUNT;
+    if (mode == 5) return levelModifiersGetLevelCount(LEVELMOD_CATEGORY_SINGLE_PLAYER);
+    if (mode == 6) return levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MULTIPLAYER);
+    if (mode == 7) return levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MISCELLANEOUS);
+    return 1;
 }
 
 static void mpwatchConfigMove(s32 player, s32 dir)
@@ -222,6 +236,7 @@ static s32 mpwatchConfigHandleInput(s32 player)
     u32 pressed = joyGetButtonsPressedThisFrame(player, 0xffff);
     s32 sy = joyGetStickYInRange(player, -2, 1);
     s32 mode = mpcfg_mode[player];
+    s32 category;
 
     if (sy == 0 || sy == -1) mpcfg_yready[player] = 1;
 
@@ -255,6 +270,9 @@ static s32 mpwatchConfigHandleInput(s32 player)
 
     if (pressed & B_BUTTON)
     {
+        if (mode == 4) { mpcfg_mode[player]=0; mpcfg_row[player]=2; mpwatchPlayBeep(); return 1; }
+        if (mode >= 5 && mode <= 7) { mpcfg_row[player]=mode-5; mpcfg_mode[player]=4; mpwatchPlayBeep(); return 1; }
+        if (mode == 8) { mpcfg_mode[player]=5; mpcfg_row[player]=5; mpwatchPlayBeep(); return 1; }
         if (mode) { mpcfg_mode[player]=0; mpcfg_row[player]=0; mpwatchPlayBeep(); return 1; }
         return 0;
     }
@@ -262,14 +280,18 @@ static s32 mpwatchConfigHandleInput(s32 player)
     if (pressed & A_BUTTON)
     {
         s32 row = mpcfg_row[player];
-        if (mode == 0) { mpcfg_mode[player]=row+1; mpcfg_row[player]=0; mpwatchPlayBeep(); }
+        if (mode == 0)
+        {
+            mpcfg_mode[player] = row == 0 ? 1 : row == 1 ? 2 : row == 2 ? 4 : 3;
+            mpcfg_row[player]=0; mpwatchPlayBeep();
+        }
         else if (mode == 1)
         {
             mpcfg_choice[player]=mpwatchConfigOptionBit(player,row);
             mpcfg_modal[player]=1; mpwatchPlayBeep();
         }
         else if (mode == 2) { mpwatchConfigToggleSpecial(player,row); mpwatchPlayBeep(); }
-        else
+        else if (mode == 3)
         {
             if (row >= MPWATCH_TOGGLE_ROWS)
             {
@@ -287,6 +309,31 @@ static s32 mpwatchConfigHandleInput(s32 player)
                     g_CheatActivated[cheat]=!active; g_AppendCheatSinglePlayer=TRUE; mpwatchPlayBeep();
                 }
             }
+        }
+        else if (mode == 4)
+        {
+            mpcfg_mode[player]=5+row;
+            mpcfg_row[player]=0;
+            mpwatchPlayBeep();
+        }
+        else if (mode >= 5 && mode <= 7)
+        {
+            category = mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER
+                : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER
+                : LEVELMOD_CATEGORY_MISCELLANEOUS;
+            if (levelModifiersLevelImplemented(category,row)
+                && levelModifiersLevelAvailableInCurrentStage(category,row))
+            {
+                mpcfg_mode[player]=8;
+                mpcfg_row[player]=0;
+                mpwatchPlayBeep();
+            }
+            else mpwatchPlayBeep();
+        }
+        else if (mode == 8)
+        {
+            if (!levelModifiersSiloBetaVentActive() && levelModifiersActivateSiloBetaVent()) mpwatchPlayBeep();
+            else mpwatchPlayBeep();
         }
         return 1;
     }
@@ -1608,7 +1655,8 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 /* Player-settings hub/submenus own this inserted watch card.
                  * Use the stock watch header path so there is only one title. */
                 text = mpcfg_mode[curplayernum] == 2 ? "SPECIAL"
-                    : mpcfg_mode[curplayernum] == 3 ? "CHEATS" : "OPTIONS";
+                    : mpcfg_mode[curplayernum] == 3 ? "CHEATS"
+                    : mpcfg_mode[curplayernum] >= 4 ? "LEVEL MODIFIERS" : "OPTIONS";
                 break;
 #endif
             case MENU_FINISHED:
@@ -1975,8 +2023,8 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
 
             if (mode == 0)
             {
-                static char *hub[3] = {"Options","Special Options","In-Game Cheats"};
-                for (i=0;i<3;i++)
+                static char *hub[4] = {"Options","Special Options","Level Modifiers","In-Game Cheats"};
+                for (i=0;i<4;i++)
                 {
                     text=hub[i]; textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0);
                     x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+48+i*16+MPMENU_YOFF;
@@ -2012,7 +2060,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     value=mpwatchConfigSpecialValue(curplayernum,row);
                     vtext=(row == 9 && g_MpViewportLock) ? frontModGetOptionLabel(37) : (value ? "on" : "off");
                 }
-                else
+                else if (mode == 3)
                 {
                     if (row >= MPWATCH_TOGGLE_ROWS)
                     {
@@ -2026,13 +2074,35 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                         if (mpwatchCheatUnlocked(cheat)) vtext=(char *)langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[cheatIsActive(cheat)+1]); else vtext="Locked";
                     }
                 }
+                else if (mode == 4)
+                {
+                    static char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player","Multiplayer","Miscellaneous"};
+                    label=categories[row]; vtext=">";
+                }
+                else if (mode >= 5 && mode <= 7)
+                {
+                    s32 category = mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER
+                        : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS;
+                    label=(char *)levelModifiersGetLevelName(category,row);
+                    if (levelModifiersLevelImplemented(category,row) && levelModifiersLevelAvailableInCurrentStage(category,row)) vtext=">";
+                    else vtext="---";
+                }
+                else
+                {
+                    label="Beta Vent Start";
+                    vtext=levelModifiersSiloBetaVentActive()?"ACTIVE":"ACTIVATE";
+                }
 
                 textMeasure(&textheight,&textwidth,label,ptrFontBankGothicChars,ptrFontBankGothic,0);
                 x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+57+MPMENU_YOFF;
-                gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,(mode == 2 && row == 9 && g_MpViewportLock) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
+                gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 9 && g_MpViewportLock)
+                    || (mode >= 5 && mode <= 7 && !(levelModifiersLevelImplemented(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row) && levelModifiersLevelAvailableInCurrentStage(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row)))
+                    || (mode == 8 && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
                 textMeasure(&textheight,&textwidth,vtext,ptrFontBankGothicChars,ptrFontBankGothic,0);
                 x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+75+MPMENU_YOFF;
-                gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,(mode == 2 && row == 9 && g_MpViewportLock) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
+                gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 9 && g_MpViewportLock)
+                    || (mode >= 5 && mode <= 7 && !(levelModifiersLevelImplemented(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row) && levelModifiersLevelAvailableInCurrentStage(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row)))
+                    || (mode == 8 && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
 
                 if (mode == 1 && mpcfg_modal[curplayernum])
                 {

@@ -6,7 +6,7 @@ This repository contains **source code and project material only**. It is not a 
 
 ## Current development snapshot
 
-This source refresh represents the current **R22-derived GoldenEye 007 Plus development tree through internal checkpoint V83 (2026-09-27)**. It supersedes the older public GitHub source snapshot from 2026-09-12.
+This source refresh represents the current **R22-derived GoldenEye 007 Plus development tree through internal checkpoint V90 (2026-09-28)**. It supersedes the older public GitHub source snapshot from 2026-09-27.
 
 Major work present in this tree includes:
 
@@ -23,6 +23,8 @@ Major work present in this tree includes:
 - Co-Op mission report/statistics routing;
 - Mirrored Levels support and live-toggle safety work;
 - Basic/Advanced Map Maker development with a dedicated native Map Maker stage architecture;
+- Citadel restored as a dedicated multiplayer stage, using community restoration work by Krijy and Zoinkity;
+- a Perfect Dark-inspired, room-aware and cylinder-aware STAN ground-support backport used generically rather than as a Citadel-specific hack;
 - selective, evidence-based Perfect Dark backports where the underlying behavior is genuinely equivalent or appropriate.
 
 The project deliberately keeps GoldenEye behavior as the baseline. Perfect Dark and related Rare-era material are references, not wholesale replacements.
@@ -95,7 +97,7 @@ Useful areas include:
 - `tools/` — build and conversion utilities;
 - `docs/` — project documentation where applicable.
 
-Generated/extracted retail assets, ROMs, object files and local build products are intentionally excluded.
+Generated/extracted retail assets, ROMs, object files and local build products are intentionally excluded. The additive `MP_CITADEL.bin` portrait is tracked explicitly because it is part of the Plus Citadel integration rather than a retail extracted image.
 
 ## Development principles
 
@@ -105,6 +107,15 @@ Generated/extracted retail assets, ROMs, object files and local build products a
 4. **Backport selectively.** Perfect Dark or related-engine code is used only when the function/algorithm is genuinely equivalent or clearly appropriate for GoldenEye.
 5. **Separate game bugs from emulator/plugin bugs.** Reproduce and document the distinction before altering game code.
 6. **Campaign Co-Op objectives are team-wide.** Mission-objective truth and required mission-item authority must not become accidentally player-local.
+
+## Citadel restoration credits
+
+Special thanks to **Krijy** and **Zoinkity** for their foundational work on Citadel.
+
+- **Krijy** was the first to discover Citadel and make it playable for the wider GoldenEye community. His original playable implementation reused **Cradle's setup**, which was a practical solution because Cradle keeps all of its rooms loaded at once.
+- **Zoinkity** later reworked Citadel's STAN/clipping data so the level could function correctly with the final GoldenEye engine's collision system.
+
+GoldenEye 007 Plus builds on those community efforts while integrating Citadel as its own dedicated level rather than replacing or reusing another retail stage.
 
 ## Documentation and provenance
 

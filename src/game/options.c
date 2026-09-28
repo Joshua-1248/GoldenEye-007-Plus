@@ -24,6 +24,7 @@
 #include "cheat.h"
 #include "file2.h"
 #include "debugmenu_handler.h"
+#include "levelmodifiers.h"
 #endif
 #ifdef GE_MODDED_CHEATS
 s32 currentPlayerEquipWeaponWrapper(GUNHAND hand, s32 next_weapon);
@@ -75,12 +76,18 @@ u32 game_options_index = 0;
 /* D_80040990 is unused by retail.  RC5 repurposes it for the sixth single-
  * player watch page without growing the player structure or CODE.bss. */
 #define MODWATCH_STATE D_80040990
-#define MODWATCH_CHEAT_MODE 0x100
 #define MODWATCH_ROW_MASK 0xff
-#define MODWATCH_OPTION_ROWS 23
-#define MODWATCH_BASE_CHEATS (CHEAT_INVALID - 2)
-#define MODWATCH_MIRRORED_ROW MODWATCH_BASE_CHEATS
-#define MODWATCH_TOGGLE_ROWS (MODWATCH_BASE_CHEATS + 1)
+#define MODWATCH_MODE_MASK 0x700
+#define MODWATCH_MODE_SPECIAL 0x000
+#define MODWATCH_MODE_CHEATS 0x100
+#define MODWATCH_MODE_LEVEL_CATEGORIES 0x200
+#define MODWATCH_MODE_LEVEL_SP 0x300
+#define MODWATCH_MODE_LEVEL_MP 0x400
+#define MODWATCH_MODE_LEVEL_MISC 0x500
+#define MODWATCH_MODE_LEVEL_SILO 0x600
+#define MODWATCH_CHEAT_MODE MODWATCH_MODE_CHEATS
+#define MODWATCH_OPTION_ROWS 24
+#define MODWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)
 #define MODWATCH_ACTION_ROWS 5
 #define MODWATCH_VISIBLE_ROWS 7
 static u8 g_ModWatchSettingsDirty = FALSE;
@@ -1070,13 +1077,19 @@ static s32 modWatchCheatCount(void)
 
 static CHEAT_ID modWatchCheatAtRow(s32 row)
 {
-    /* Keep the established in-game cheat ordering intact.  Mod-added cheat
-     * IDs are appended immediately before CHEAT_INVALID, so newer cheats
-     * naturally appear at the bottom of the toggle-cheat list. */
-    if (row < MODWATCH_BASE_CHEATS)
+    /* V85: Ultra Kinetics is appended after the existing mod IDs so old
+     * Super Tank/Mirrored Levels IDs stay stable.  Present it directly after
+     * Super Kinetics in the Watch without changing the underlying IDs. */
+    if (row < CHEAT_KINETIC_EXPLOSIONS)
         return (CHEAT_ID)(row + 1);
-    if (row == MODWATCH_MIRRORED_ROW)
-        return CHEAT_MIRRORED_LEVELS;
+    if (row == CHEAT_KINETIC_EXPLOSIONS)
+        return CHEAT_ULTRA_KINETICS;
+    if (row == CHEAT_ULTRA_KINETICS)
+        return CHEAT_LEVEL_NEVER_ENDS;
+    if (row == CHEAT_LEVEL_NEVER_ENDS)
+        return CHEAT_FREEZE_TIMER;
+    if (row < MODWATCH_TOGGLE_ROWS)
+        return (CHEAT_ID)row;
     return CHEAT_INVALID;
 }
 
@@ -1349,42 +1362,132 @@ static void modWatchToggleCheat(s32 row)
 void watch_special_options_navigation(void)
 {
     s32 row = MODWATCH_STATE & MODWATCH_ROW_MASK;
-    s32 cheatmode = MODWATCH_STATE & MODWATCH_CHEAT_MODE;
-    s32 rows = cheatmode ? modWatchCheatCount() : MODWATCH_OPTION_ROWS;
+    s32 mode = MODWATCH_STATE & MODWATCH_MODE_MASK;
+    s32 rows;
+    s32 category;
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+
+    if (mode == MODWATCH_MODE_CHEATS)
+        rows = modWatchCheatCount();
+    else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        rows = LEVELMOD_CATEGORY_COUNT;
+    else if (mode == MODWATCH_MODE_LEVEL_SP)
+        rows = levelModifiersGetLevelCount(LEVELMOD_CATEGORY_SINGLE_PLAYER);
+    else if (mode == MODWATCH_MODE_LEVEL_MP)
+        rows = levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MULTIPLAYER);
+    else if (mode == MODWATCH_MODE_LEVEL_MISC)
+        rows = levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MISCELLANEOUS);
+    else if (mode == MODWATCH_MODE_LEVEL_SILO)
+        rows = 1;
+    else
+        rows = MODWATCH_OPTION_ROWS;
 
     if ((pressed & (U_CBUTTONS | U_JPAD)) || sub_GAME_7F0A5088())
     {
         row = row ? row - 1 : rows - 1;
-        MODWATCH_STATE = cheatmode | row;
+        MODWATCH_STATE = mode | row;
         disable_watch_stick_y_nav_ready();
     }
     else if ((pressed & (D_CBUTTONS | D_JPAD)) || sub_GAME_7F0A50C4())
     {
         row++;
         if (row >= rows) row = 0;
-        MODWATCH_STATE = cheatmode | row;
+        MODWATCH_STATE = mode | row;
         disable_watch_stick_y_nav_ready();
     }
 
     if (pressed & A_BUTTON)
     {
-        if (cheatmode) modWatchToggleCheat(row);
-        else if (row <= 15) modWatchToggleOption(row);
-        else if (row >= 16 && row <= 21) modWatchAdjustThirdPersonCamera(row - 5);
+        if (mode == MODWATCH_MODE_CHEATS)
+        {
+            modWatchToggleCheat(row);
+        }
+        else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        {
+            MODWATCH_STATE = (MODWATCH_MODE_LEVEL_SP + row * 0x100);
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (mode == MODWATCH_MODE_LEVEL_SP || mode == MODWATCH_MODE_LEVEL_MP || mode == MODWATCH_MODE_LEVEL_MISC)
+        {
+            category = mode == MODWATCH_MODE_LEVEL_SP ? LEVELMOD_CATEGORY_SINGLE_PLAYER
+                : mode == MODWATCH_MODE_LEVEL_MP ? LEVELMOD_CATEGORY_MULTIPLAYER
+                : LEVELMOD_CATEGORY_MISCELLANEOUS;
+            if (levelModifiersLevelImplemented(category, row)
+                && levelModifiersLevelAvailableInCurrentStage(category, row))
+            {
+                MODWATCH_STATE = MODWATCH_MODE_LEVEL_SILO;
+                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            }
+            else
+            {
+                sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
+            }
+        }
+        else if (mode == MODWATCH_MODE_LEVEL_SILO)
+        {
+            if (levelModifiersSiloBetaVentActive())
+            {
+                sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
+            }
+            else if (levelModifiersActivateSiloBetaVent())
+            {
+                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            }
+            else
+            {
+                sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
+            }
+        }
+        else if (row <= 15)
+        {
+            modWatchToggleOption(row);
+        }
+        else if (row >= 16 && row <= 21)
+        {
+            modWatchAdjustThirdPersonCamera(row - 5);
+        }
+        else if (row == 22)
+        {
+            MODWATCH_STATE = MODWATCH_MODE_LEVEL_CATEGORIES;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
         else
         {
-            MODWATCH_STATE = MODWATCH_CHEAT_MODE;
+            MODWATCH_STATE = MODWATCH_MODE_CHEATS;
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         return;
     }
 
-    if (cheatmode)
+    if (pressed & B_BUTTON)
     {
-        if (pressed & B_BUTTON) MODWATCH_STATE = 22;
-        return;
+        if (mode == MODWATCH_MODE_CHEATS)
+        {
+            MODWATCH_STATE = 23;
+            return;
+        }
+        if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        {
+            MODWATCH_STATE = 22;
+            return;
+        }
+        if (mode == MODWATCH_MODE_LEVEL_SP || mode == MODWATCH_MODE_LEVEL_MP || mode == MODWATCH_MODE_LEVEL_MISC)
+        {
+            category = mode == MODWATCH_MODE_LEVEL_SP ? LEVELMOD_CATEGORY_SINGLE_PLAYER
+                : mode == MODWATCH_MODE_LEVEL_MP ? LEVELMOD_CATEGORY_MULTIPLAYER
+                : LEVELMOD_CATEGORY_MISCELLANEOUS;
+            MODWATCH_STATE = MODWATCH_MODE_LEVEL_CATEGORIES | category;
+            return;
+        }
+        if (mode == MODWATCH_MODE_LEVEL_SILO)
+        {
+            MODWATCH_STATE = MODWATCH_MODE_LEVEL_SP | 5;
+            return;
+        }
     }
+
+    if (mode != MODWATCH_MODE_SPECIAL)
+        return;
 
     if ((pressed & (L_CBUTTONS | L_TRIG | L_JPAD)) || sub_GAME_7F0A4FB0())
     {
@@ -4520,38 +4623,70 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
     s32 row;
     s32 y;
     s32 selected = MODWATCH_STATE & MODWATCH_ROW_MASK;
-    s32 cheatmode = MODWATCH_STATE & MODWATCH_CHEAT_MODE;
-    s32 cheatcount = cheatmode ? modWatchCheatCount() : 0;
-    s32 rowcount = cheatmode ? cheatcount : MODWATCH_OPTION_ROWS;
-    s32 top = selected >= MODWATCH_VISIBLE_ROWS - 1
-        ? selected - (MODWATCH_VISIBLE_ROWS - 2) : 0;
+    s32 mode = MODWATCH_STATE & MODWATCH_MODE_MASK;
+    s32 rowcount;
+    s32 top;
+    s32 category = -1;
     char *label;
     char *value;
     char valuebuf[16];
     u32 colour;
+    const char *title;
 
-    /* Keep one following row visible where possible.  In particular this
-     * keeps Complete Objectives visibly directly below Normal Animation
-     * instead of hiding the final action until the cursor moves again. */
+    if (mode == MODWATCH_MODE_CHEATS)
+    {
+        rowcount = modWatchCheatCount();
+        title = "IN-GAME CHEATS";
+    }
+    else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+    {
+        rowcount = LEVELMOD_CATEGORY_COUNT;
+        title = "LEVEL MODIFIERS";
+    }
+    else if (mode == MODWATCH_MODE_LEVEL_SP)
+    {
+        category = LEVELMOD_CATEGORY_SINGLE_PLAYER;
+        rowcount = levelModifiersGetLevelCount(category);
+        title = "SINGLE-PLAYER";
+    }
+    else if (mode == MODWATCH_MODE_LEVEL_MP)
+    {
+        category = LEVELMOD_CATEGORY_MULTIPLAYER;
+        rowcount = levelModifiersGetLevelCount(category);
+        title = "MULTIPLAYER";
+    }
+    else if (mode == MODWATCH_MODE_LEVEL_MISC)
+    {
+        category = LEVELMOD_CATEGORY_MISCELLANEOUS;
+        rowcount = levelModifiersGetLevelCount(category);
+        title = "MISCELLANEOUS";
+    }
+    else if (mode == MODWATCH_MODE_LEVEL_SILO)
+    {
+        rowcount = 1;
+        title = "SILO MODIFIERS";
+    }
+    else
+    {
+        rowcount = MODWATCH_OPTION_ROWS;
+        title = "SPECIAL OPTIONS";
+    }
+
+    top = selected >= MODWATCH_VISIBLE_ROWS - 1 ? selected - (MODWATCH_VISIBLE_ROWS - 2) : 0;
     if (top + MODWATCH_VISIBLE_ROWS > rowcount)
         top = rowcount > MODWATCH_VISIBLE_ROWS ? rowcount - MODWATCH_VISIBLE_ROWS : 0;
 
     gdl = draw_background_health_and_armor(gdl, param_2, 0);
-
     if (check_watch_page_transistion_running() == 1) return gdl;
-
     gdl = microcode_constructor(gdl);
-    gdl = draw_watch_mod_text(gdl, 0xa0, 0x24,
-            cheatmode ? "IN-GAME CHEATS" : "SPECIAL OPTIONS",
-            0xa0ffa0f0, 1, 0);
+    gdl = draw_watch_mod_text(gdl, 0xa0, 0x24, (char *)title, 0xa0ffa0f0, 1, 0);
 
-    for (row = top, y = 0x3f; row < top + MODWATCH_VISIBLE_ROWS; row++, y += 0x12)
+    for (row = top, y = 0x3f; row < top + MODWATCH_VISIBLE_ROWS && row < rowcount; row++, y += 0x12)
     {
-        if (cheatmode && row >= cheatcount) break;
-
         colour = row == selected ? 0xa0ffa0f0 : 0x00ff00b0;
+        value = "";
 
-        if (cheatmode)
+        if (mode == MODWATCH_MODE_CHEATS)
         {
             CHEAT_ID cheat = modWatchCheatAtRow(row);
             if (cheat == CHEAT_INVALID)
@@ -4566,6 +4701,26 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
                 value = unlocked ? langGet(game_options_entries[PLAYER_OPTION_AUTOAIM].text[cheatIsActive(cheat) ? 2 : 1]) : "LOCKED";
                 if (!unlocked) colour = 0x40704090;
             }
+        }
+        else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        {
+            static char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player", "Multiplayer", "Miscellaneous"};
+            label = categories[row];
+            value = ">";
+        }
+        else if (category >= 0)
+        {
+            label = (char *)levelModifiersGetLevelName(category,row);
+            if (levelModifiersLevelImplemented(category,row) && levelModifiersLevelAvailableInCurrentStage(category,row))
+                value = ">";
+            else
+                colour = 0x40704090;
+        }
+        else if (mode == MODWATCH_MODE_LEVEL_SILO)
+        {
+            label = "Beta Vent Start";
+            value = levelModifiersSiloBetaVentActive() ? "ACTIVE" : "ACTIVATE";
+            if (levelModifiersSiloBetaVentActive()) colour = row == selected ? 0x809080d0 : 0x40704090;
         }
         else if (row < 10)
         {
@@ -4589,90 +4744,29 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
                     colour = 0x40704090;
                 }
             }
-            if (!(row == 9 && gamemode == GAMEMODE_MULTI && g_MpViewportLock))
-                value = enabled ? "on" : "off";
+            if (!(row == 9 && gamemode == GAMEMODE_MULTI && g_MpViewportLock)) value = enabled ? "on" : "off";
         }
-        else if (row == 10)
-        {
-            label = frontModGetOptionLabel(47);
-            value = modStayInTpOnDeath(get_cur_playernum()) ? "on" : "off";
-        }
-        else if (row == 11)
-        {
-            label = frontModGetOptionLabel(46);
-            value = modMicroOptimizationsEnabled() ? "on" : "off";
-        }
-        else if (row == 12)
-        {
-            label = frontModGetOptionLabel(48);
-            value = (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) ? "on" : "off";
-        }
-        else if (row == 13)
-        {
-            label = frontModGetOptionLabel(49);
-            value = (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) ? "on" : "off";
-        }
-        else if (row == 14)
-        {
-            label = frontModGetOptionLabel(51);
-            value = g_ModTpSightTranslucencyEnabled ? "on" : "off";
-        }
-        else if (row == 15)
-        {
-            label = frontModGetOptionLabel(50);
-            value = g_ModAntiAliasingEnabled ? "on" : "off";
-        }
-        else if (row == 16)
-        {
-            label = "TP Cam Distance";
-            sprintf(valuebuf, "%d", TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust);
-            value = valuebuf;
-        }
-        else if (row == 17)
-        {
-            label = "TP Cam Height";
-            sprintf(valuebuf, "%d", TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust);
-            value = valuebuf;
-        }
-        else if (row == 18)
-        {
-            label = "TP Cam Horizontal";
-            sprintf(valuebuf, "%d", TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust);
-            value = valuebuf;
-        }
-        else if (row == 19)
-        {
-            label = "TP Cam Down Frame";
-            sprintf(valuebuf, "%d", TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust);
-            value = valuebuf;
-        }
-        else if (row == 20)
-        {
-            label = "TP Crouched Cam Height";
-            sprintf(valuebuf, "%d", TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust);
-            value = valuebuf;
-        }
-        else if (row == 21)
-        {
-            label = "TP Crosshair Range";
-            sprintf(valuebuf, "%d", g_ModThirdPersonCrosshairRange);
-            value = valuebuf;
-        }
-        else
-        {
-            label = "In-Game Cheats";
-            value = ">";
-        }
+        else if (row == 10) { label = frontModGetOptionLabel(47); value = modStayInTpOnDeath(get_cur_playernum()) ? "on" : "off"; }
+        else if (row == 11) { label = frontModGetOptionLabel(46); value = modMicroOptimizationsEnabled() ? "on" : "off"; }
+        else if (row == 12) { label = frontModGetOptionLabel(48); value = (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) ? "on" : "off"; }
+        else if (row == 13) { label = frontModGetOptionLabel(49); value = (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) ? "on" : "off"; }
+        else if (row == 14) { label = frontModGetOptionLabel(51); value = g_ModTpSightTranslucencyEnabled ? "on" : "off"; }
+        else if (row == 15) { label = frontModGetOptionLabel(50); value = g_ModAntiAliasingEnabled ? "on" : "off"; }
+        else if (row == 16) { label = "TP Cam Distance"; sprintf(valuebuf,"%d",TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust); value=valuebuf; }
+        else if (row == 17) { label = "TP Cam Height"; sprintf(valuebuf,"%d",TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust); value=valuebuf; }
+        else if (row == 18) { label = "TP Cam Horizontal"; sprintf(valuebuf,"%d",TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust); value=valuebuf; }
+        else if (row == 19) { label = "TP Cam Down Frame"; sprintf(valuebuf,"%d",TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust); value=valuebuf; }
+        else if (row == 20) { label = "TP Crouched Cam Height"; sprintf(valuebuf,"%d",TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust); value=valuebuf; }
+        else if (row == 21) { label = "TP Crosshair Range"; sprintf(valuebuf,"%d",g_ModThirdPersonCrosshairRange); value=valuebuf; }
+        else if (row == 22) { label = "Level Modifiers"; value = ">"; }
+        else { label = "In-Game Cheats"; value = ">"; }
 
-        gdl = draw_watch_mod_text(gdl, 0x40, y, label, colour, 0, 0);
-        gdl = draw_watch_mod_text(gdl, 0x10e, y, value, colour, 0, 1);
+        gdl = draw_watch_mod_text(gdl,0x40,y,label,colour,0,0);
+        gdl = draw_watch_mod_text(gdl,0x10e,y,value,colour,0,1);
     }
 
-    if (cheatmode)
-    {
-        gdl = draw_watch_mod_text(gdl, 0xa0, 0xc8, "B: BACK", 0x00800080, 1, 0);
-    }
-
+    if (mode != MODWATCH_MODE_SPECIAL)
+        gdl = draw_watch_mod_text(gdl,0xa0,0xc8,"B: BACK",0x00800080,1,0);
     return gdl;
 }
 #endif

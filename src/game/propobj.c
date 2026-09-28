@@ -56,6 +56,7 @@
 
 
 #ifdef GE_MODDED_CHEATS
+#include "cheat.h"
 #include "game/mirroredlevels.h"
 #endif
 #if defined(VERSION_JP) || defined(VERSION_EU)
@@ -14714,7 +14715,11 @@ bool countdownTimerIsRunning(void)
 
 void if_enabled_reset_clock(void)
 {
-    if (clock_enable != 0) {
+    if (clock_enable != 0
+#ifdef GE_MODDED_CHEATS
+        && !cheatIsActive(CHEAT_FREEZE_TIMER)
+#endif
+    ) {
         clock_time = clock_time - g_GlobalTimerDelta;
     }
 }

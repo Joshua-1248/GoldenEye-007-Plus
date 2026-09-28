@@ -78,7 +78,8 @@ f32 inv_level_scale = 1.0;
 u8 list_of_tilesizes[] = {
     0x20,0x20,0x20,0x20,
     0x28,0x30,0x38,0x40,
-    0x48,0x50,0x58,0x00
+    0x48,0x50,0x58,0x60,
+    0x68,0x70,0x78,0x80
 };
 //D:80040F58
 struct StandTile * standTileStart = NULL;
@@ -168,6 +169,8 @@ s32 stanCheckLinkedSpecialTile(StandTile *tile, s32 pointIdx, s32 arg2, s32 arg3
 #endif
 s32 sub_GAME_7F0B21B0(StandTile **tileStack, f32 target_x, f32 target_z, f32 radius, s32 *rooms, s32 *count_rtn, s32 bufMax);
 f32 getShortest2dDispToInfTripleEdge(StandTile *tile, s32 start3index, f32 p_x, f32 p_z);
+f32 getShortest2dDispToInfTileEdge(StandTile *tile, s32 index, f32 p_x, f32 p_z);
+bool stanTileHasZeroArea(StandTile *tile);
 StanCollisionResult sub_GAME_7F0B1DDC(struct StandTile**, f32, f32, f32, standTileLocusCallback_A_t, standTileLocusCallback_B_t, standTileLocusCallback_C_t, struct StandTileLocusCallbackRecord*);
 s32 stanLocusAddTileRoomIfNew(StandTile *tile, struct StandTileLocusCallbackRecord *rec);
 s32 stanGetLocusField0(struct StandTileLocusCallbackRecord *arg0);
@@ -360,6 +363,14 @@ s32 stanMirrorLevelsIsEnabled(void)
 {
     return g_StanMirrorLevelsEnabled;
 }
+
+void stanRebuildRoomData(void)
+{
+    if (stan_prefix != NULL && stan_prefix->ptr_firstroom != NULL)
+    {
+        stanBuildRoomData();
+    }
+}
 #endif
 
 
@@ -537,6 +548,335 @@ next_room:
         
     return bestTile;
 }
+
+#ifdef GE_MODDED_CHEATS
+/**
+ * Perfect Dark-style ground resolver for GoldenEye STAN.
+ *
+ * PD's later collision code resolves floor support in two phases: first prefer
+ * polygons containing the player's centre, then (only when no centre polygon
+ * is usable) allow the player's cylinder radius to remain supported by a
+ * nearby polygon edge/vertex.  This prevents a stacked lower floor from
+ * winning merely because the player's centre has crossed an upper ledge.
+ *
+ * GoldenEye's STAN is a different data format, so this is a semantic backport:
+ * room filtering and STAN geometry stay native to GoldenEye.
+ */
+static bool stanTileContainsPointAllEdges(StandTile *tile, f32 scaledX, f32 scaledZ)
+{
+    s32 pointCount;
+    s32 i;
+    s32 j;
+    s32 inside;
+
+    pointCount = (tile->tail.half >> 12) & 0xf;
+
+    if (pointCount < 3)
+    {
+        return FALSE;
+    }
+
+    /* The retail helper only checks the three tail-header extreme points; the
+     * original comments explicitly note that triangle encloses only MOST of a
+     * tile.  PD's later floor code tests the real polygon.  Use a full polygon
+     * crossing test here so large 12/13-point STANs are not rejected by their
+     * approximate three-point bounds. */
+    inside = FALSE;
+    j = pointCount - 1;
+
+    for (i = 0; i < pointCount; i++)
+    {
+        f32 xi;
+        f32 zi;
+        f32 xj;
+        f32 zj;
+        f32 dx;
+        f32 dz;
+        f32 lenSq;
+        f32 t;
+        f32 px;
+        f32 pz;
+        f32 offX;
+        f32 offZ;
+
+        xi = (f32)stanMirrorPointX(&tile->points[i]);
+        zi = (f32)tile->points[i].z;
+        xj = (f32)stanMirrorPointX(&tile->points[j]);
+        zj = (f32)tile->points[j].z;
+
+        /* Treat points within the retail two-STAN-unit edge tolerance as
+         * inside before doing the crossing test. */
+        dx = xi - xj;
+        dz = zi - zj;
+        lenSq = dx * dx + dz * dz;
+
+        if (lenSq > 0.0f)
+        {
+            t = ((scaledX - xj) * dx + (scaledZ - zj) * dz) / lenSq;
+
+            if (t < 0.0f)
+            {
+                t = 0.0f;
+            }
+            else if (t > 1.0f)
+            {
+                t = 1.0f;
+            }
+
+            px = xj + dx * t;
+            pz = zj + dz * t;
+            offX = scaledX - px;
+            offZ = scaledZ - pz;
+
+            if (offX * offX + offZ * offZ <= 4.0f)
+            {
+                return TRUE;
+            }
+        }
+
+        if (((zi > scaledZ) != (zj > scaledZ))
+            && scaledX < (xj - xi) * (scaledZ - zi) / (zj - zi) + xi)
+        {
+            inside = !inside;
+        }
+
+        j = i;
+    }
+
+    return inside != FALSE;
+}
+
+static f32 stanTileClosestPoint2dSq(StandTile *tile, f32 scaledX, f32 scaledZ,
+        f32 *closestX, f32 *closestZ)
+{
+    f32 bestDistSq;
+    f32 bestX;
+    f32 bestZ;
+    s32 pointCount;
+    s32 i;
+
+    pointCount = (tile->tail.half >> 12) & 0xf;
+    bestDistSq = 3.4028235e38f;
+    bestX = scaledX;
+    bestZ = scaledZ;
+
+    for (i = 0; i < pointCount; i++)
+    {
+        s32 next;
+        f32 ax;
+        f32 az;
+        f32 bx;
+        f32 bz;
+        f32 dx;
+        f32 dz;
+        f32 lenSq;
+        f32 t;
+        f32 px;
+        f32 pz;
+        f32 offX;
+        f32 offZ;
+        f32 distSq;
+
+        next = (i + 1) % pointCount;
+        ax = (f32)stanMirrorPointX(&tile->points[i]);
+        az = (f32)tile->points[i].z;
+        bx = (f32)stanMirrorPointX(&tile->points[next]);
+        bz = (f32)tile->points[next].z;
+        dx = bx - ax;
+        dz = bz - az;
+        lenSq = dx * dx + dz * dz;
+
+        if (lenSq > 0.0f)
+        {
+            t = ((scaledX - ax) * dx + (scaledZ - az) * dz) / lenSq;
+
+            if (t < 0.0f)
+            {
+                t = 0.0f;
+            }
+            else if (t > 1.0f)
+            {
+                t = 1.0f;
+            }
+
+            px = ax + dx * t;
+            pz = az + dz * t;
+        }
+        else
+        {
+            px = ax;
+            pz = az;
+        }
+
+        offX = scaledX - px;
+        offZ = scaledZ - pz;
+        distSq = offX * offX + offZ * offZ;
+
+        if (distSq < bestDistSq)
+        {
+            bestDistSq = distSq;
+            bestX = px;
+            bestZ = pz;
+        }
+    }
+
+    *closestX = bestX;
+    *closestZ = bestZ;
+    return bestDistSq;
+}
+
+static bool stanRoomIsInFilter(s32 room, u8 *rooms)
+{
+    s32 i;
+
+    if (rooms == NULL)
+    {
+        return TRUE;
+    }
+
+    for (i = 0; i < 8 && rooms[i] != 0xff; i++)
+    {
+        if (rooms[i] == room)
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+StandTile *stanFindGroundAtCyl(coord3d *pos, f32 radius, u8 *rooms, f32 *yRtn)
+{
+    StandTile *bestCenterTile;
+    StandTile *bestRadiusTile;
+    f32 bestCenterY;
+    f32 bestRadiusY;
+    f32 scaledX;
+    f32 scaledY;
+    f32 scaledZ;
+    f32 scaledRadius;
+    f32 radiusSq;
+    s32 room;
+    StandTile **roomFirstTiles;
+
+    bestCenterTile = NULL;
+    bestRadiusTile = NULL;
+    bestCenterY = -3.4028235e38f;
+    bestRadiusY = -3.4028235e38f;
+
+    scaledX = pos->x * level_scale;
+    scaledY = pos->y * level_scale;
+    scaledZ = pos->z * level_scale;
+    scaledRadius = radius * level_scale;
+    radiusSq = scaledRadius * scaledRadius;
+
+    if (scaledY > 32767.0f)
+    {
+        scaledY = 32767.0f;
+    }
+    else if (scaledY < -32767.0f)
+    {
+        scaledY = -32767.0f;
+    }
+
+    room = 0;
+    roomFirstTiles = (StandTile **)&firststaninroom;
+
+    while (room < dword_CODE_bss_8007B9DC)
+    {
+        StandTile *tile;
+
+        tile = *roomFirstTiles;
+
+        if (tile != NULL && stanRoomIsInFilter(room, rooms))
+        {
+            StanRoomBounds *bounds;
+
+            bounds = &g_StanRoomBounds[room];
+
+            if (!(scaledX + scaledRadius < bounds->minX
+                    || scaledX - scaledRadius > bounds->maxX
+                    || scaledZ + scaledRadius < bounds->minZ
+                    || scaledZ - scaledRadius > bounds->maxZ
+                    || scaledY < bounds->minY))
+            {
+                while ((*((u32 *)tile) != 0) && tile->room == room)
+                {
+                    s32 pointCount;
+                    s32 tailhalf;
+
+                    pointCount = (tile->tail.half >> 12) & 0xf;
+
+                    if (pointCount >= 3 && !stanTileHasZeroArea(tile))
+                    {
+                        if (stanTileContainsPointAllEdges(tile, scaledX, scaledZ))
+                        {
+                            f32 tileY;
+
+                            tileY = stanGetPositionYValue(tile, pos->x, pos->z);
+
+                            if (tileY <= pos->y && tileY > bestCenterY)
+                            {
+                                bestCenterY = tileY;
+                                bestCenterTile = tile;
+                            }
+                        }
+                        else if (bestCenterTile == NULL)
+                        {
+                            f32 closestX;
+                            f32 closestZ;
+                            f32 distSq;
+
+                            distSq = stanTileClosestPoint2dSq(tile, scaledX, scaledZ,
+                                    &closestX, &closestZ);
+
+                            if (distSq <= radiusSq)
+                            {
+                                f32 tileY;
+                                f32 worldX;
+                                f32 worldZ;
+
+                                worldX = closestX * inv_level_scale;
+                                worldZ = closestZ * inv_level_scale;
+                                tileY = stanGetPositionYValue(tile, worldX, worldZ);
+
+                                if (tileY <= pos->y && tileY > bestRadiusY)
+                                {
+                                    bestRadiusY = tileY;
+                                    bestRadiusTile = tile;
+                                }
+                            }
+                        }
+                    }
+
+                    tailhalf = tile->tail.half;
+                    tile = (StandTile *)(((u8 *)tile) + list_of_tilesizes[(tailhalf >> 12) & 0xf]);
+                }
+            }
+        }
+
+        room++;
+        roomFirstTiles++;
+    }
+
+    if (bestCenterTile != NULL)
+    {
+        if (yRtn != NULL)
+        {
+            *yRtn = bestCenterY;
+        }
+
+        return bestCenterTile;
+    }
+
+    if (bestRadiusTile != NULL && yRtn != NULL)
+    {
+        *yRtn = bestRadiusY;
+    }
+
+    return bestRadiusTile;
+}
+#endif
 
 
 void stanLoadFile(struct StanPrefixRecord *file)

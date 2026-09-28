@@ -36,6 +36,7 @@ assets/ge007.u.123040.efont_chardata.bin
 assets/ge007.u.29E560.Globalimagetable_commandblock.bin
 #images
 assets/images/split/*.bin*
+!assets/images/split/MP_CITADEL.bin
 assets/images/combined/*.bin*
 assets/images/out/*
 assets/images/split/png/*
@@ -55,6 +56,7 @@ assets/obseg/gun/*/Model.c
 assets/obseg/ob__ob_end.seg
 assets/obseg/prop/*/Model.c
 assets/obseg/setup/*.bin
+!assets/obseg/setup/Ump_setupcatZ.bin
 assets/obseg/setup/[eju]/*.bin
 assets/obseg/stan/*.bin
 assets/obseg/text/*.bin
@@ -94,8 +96,6 @@ uld_c.c
 umerge_c.c
 uopt_c.c
 usplit_c.c
-
-#exclude local user scripts in root folder
 /my_*.sh
 assets/obseg/em/data/alien8.seg
 assets/obseg/em/data/atic.seg
@@ -108,12 +108,9 @@ assets/obseg/em/data/pssst.seg
 assets/obseg/em/data/sabre.seg
 assets/obseg/em/data/spec_rom.seg
 assets/obseg/em/data/under.seg
-
 scripts/local/
 scripts/make/local/
 scripts/__pycache__/generate_prop_model_c.cpython-310.pyc
-
-# N64 ROMs
 *.z64
 *.n64
 *.v64

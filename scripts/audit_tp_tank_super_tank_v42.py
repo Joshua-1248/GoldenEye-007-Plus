@@ -16,16 +16,15 @@ def ck(desc, ok):
     print(('[PASS] ' if ok else '[FAIL] ') + desc)
 
 const=files['const']; cheat=files['cheat']; front=files['front']; bond=files['bond']; chrprop=files['chrprop']
-ck('Super Tank remains after Kinetic Explosions and before newer appended cheats',
+ck('Super Tank ID remains after legacy Super Kinetics and before Mirrored Levels',
    const.find('CHEAT_KINETIC_EXPLOSIONS') < const.find('CHEAT_SUPER_TANK') < const.find('CHEAT_MIRRORED_LEVELS') < const.find('CHEAT_INVALID'))
 ck('Super Tank is a global SP/MP toggle cheat',
    'CHEAT_SUPER_TANK' in cheat and 'CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME' in cheat)
 ck('main Cheats menu names and exposes Super Tank',
    'case CHEAT_SUPER_TANK: return (u8 *)"Super Tank";' in front and 'CHEAT_SUPER_TANK,' in front)
 ck('in-game cheat enumeration remains dynamic through CHEAT_INVALID',
-   '#define MODWATCH_BASE_CHEATS (CHEAT_INVALID - 2)' in files['opt']
-   and '#define MODWATCH_MIRRORED_ROW MODWATCH_BASE_CHEATS' in files['opt']
-   and '#define MODWATCH_TOGGLE_ROWS (MODWATCH_BASE_CHEATS + 1)' in files['opt'])
+   '#define MODWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)' in files['opt']
+   and 'if (row < MODWATCH_TOGGLE_ROWS)' in files['opt'])
 ck('Third Person presentation is no longer disabled merely by tank occupancy',
    'g_PlayerIsInTank != 0)\n    {\n        return FALSE;' not in bond[bond.find('s32 bondviewThirdPersonPresentationActive'):bond.find('s32 bondviewThirdPersonReticleOcclusionPassActive')])
 ck('tank Third Person has dedicated farther vehicle camera',

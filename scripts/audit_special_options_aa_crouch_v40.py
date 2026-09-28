@@ -27,7 +27,7 @@ ck('legacy SRAM sync preserves extension-only Anti-Aliasing state', ('record.res
 ck('VI AA Off uses resample-only mode and disables divot', '0x00000200u' in FR and '0x00000010u' in FR and 'viApplyAntiAliasingSetting' in FR)
 ck('TP Crouched Cam Height default remains 46', '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in (R/'src/game/options.h').read_text() and '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in (R/'options.h').read_text())
 ck('TP Crouched Cam Height now directly controls full-crouch camera drop', 'anchor.f[1] -= ((f32)TP_CROUCH_CAM_HEIGHT_DEFAULT' in BV and 'crouchfraction = g_CurrentPlayer->ducking_height_offset / FULL_CROUCH_OFFSET;' in BV)
-ck('SP watch row expansion keeps all six TP tuners and cheats reachable', '#define MODWATCH_OPTION_ROWS 23' in OPT and 'row >= 16 && row <= 21' in OPT and 'MODWATCH_STATE = 22' in OPT and 'TP Crosshair Range' in OPT)
+ck('SP watch row expansion keeps all six TP tuners, Level Modifiers and cheats reachable', '#define MODWATCH_OPTION_ROWS 24' in OPT and 'row >= 16 && row <= 21' in OPT and 'row == 22' in OPT and 'MODWATCH_STATE = 23' in OPT and 'TP Crosshair Range' in OPT and 'Level Modifiers' in OPT)
 ck('V40 audit is mandatory build prerequisite', 'special-options-v40-audit:' in MAKE and 'special-options-v40-audit' in MAKE.split('prerequisites:',1)[1].split('\n',1)[0])
 fail=[n for n,c in checks if not c]
 print(f"\nSPECIAL OPTIONS/AA/CROUCH V40 AUDIT: {'PASS' if not fail else 'FAIL'} ({len(checks)-len(fail)}/{len(checks)})")

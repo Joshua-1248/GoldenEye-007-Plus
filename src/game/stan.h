@@ -105,7 +105,9 @@ s32 isPointInsideTriStandTileUnscaled_Maybe(struct StandTile *tile, f32 p_x, f32
 s32 sub_GAME_7F0B21B0(StandTile **tileStack, f32 target_x, f32 target_z, f32 radius, s32 *rooms, s32 *count_rtn, s32 bufMax);
 StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
 #ifdef GE_MODDED_CHEATS
+StandTile *stanFindGroundAtCyl(coord3d *pos, f32 radius, u8 *rooms, f32 *yRtn);
 void stanMirrorLevelsSetEnabled(s32 enabled);
 s32 stanMirrorLevelsIsEnabled(void);
+void stanRebuildRoomData(void);
 #endif
 #endif

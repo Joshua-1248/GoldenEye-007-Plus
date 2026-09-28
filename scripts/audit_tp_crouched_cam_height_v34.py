@@ -6,8 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BV = (ROOT/'src/game/bondview2.c').read_text(errors='replace')
 OPT = (ROOT/'src/game/options.c').read_text(errors='replace')
 OPTH = (ROOT/'src/game/options.h').read_text(errors='replace')
-root_opth_path = ROOT/'options.h'
-ROOTOPTH = root_opth_path.read_text(errors='replace') if root_opth_path.exists() else OPTH
+ROOTOPTH = (ROOT/'options.h').read_text(errors='replace')
 FRONT = (ROOT/'src/game/front.c').read_text(errors='replace')
 MP = (ROOT/'src/game/mpmenu.c').read_text(errors='replace')
 F2 = (ROOT/'src/game/file2.c').read_text(errors='replace')
@@ -29,7 +28,8 @@ check('SP Special Options has a twentieth row for the new tuner',
       ('#define MODWATCH_OPTION_ROWS 20' in OPT or
        '#define MODWATCH_OPTION_ROWS 21' in OPT or
        '#define MODWATCH_OPTION_ROWS 22' in OPT or
-       '#define MODWATCH_OPTION_ROWS 23' in OPT) and
+       '#define MODWATCH_OPTION_ROWS 23' in OPT or
+       '#define MODWATCH_OPTION_ROWS 24' in OPT) and
       'label = "TP Crouched Cam Height";' in OPT and
       ('else if (row == 19)' in OPT or 'else if (row == 20)' in OPT))
 check('new tuner is in-game only',
@@ -47,7 +47,12 @@ check('In-Game Cheats moves down one row cleanly',
         'label = "TP Crosshair Range";' in OPT) or
        ('if (pressed & B_BUTTON) MODWATCH_STATE = 22;' in OPT and
         'else if (row >= 16 && row <= 21) modWatchAdjustThirdPersonCamera(row - 5);' in OPT and
-        'label = "TP Crosshair Range";' in OPT)))
+        'label = "TP Crosshair Range";' in OPT) or
+       ('MODWATCH_STATE = 23;' in OPT and
+        'else if (row >= 16 && row <= 21)' in OPT and
+        'modWatchAdjustThirdPersonCamera(row - 5);' in OPT and
+        'label = "TP Crosshair Range";' in OPT and
+        'label = "Level Modifiers"; value = ">";' in OPT)))
 check('adjustment uses the same two-unit camera tuning cadence',
       'g_ModThirdPersonCrouchCameraHeightAdjust + delta' in OPT)
 check('adjustment is clamped to the authored 0..96 crouch-height range',

@@ -874,6 +874,8 @@ typedef enum FILEINDEXID
     BG_MAPMAKER_ALL_P_STAN,
     SETUPMAPMAKER,
 #endif
+    /* V90: appended after all existing resources so no prior ID moves. */
+    MP_SETUPCAT,
     OBENDSEG
 } FILEINDEXID;
 

@@ -1,0 +1,7 @@
+R21 RC10 - Co-Op Game Over stat value alignment
+
+- Co-Op GAME OVER KILLS values moved up 2 px to match normal MP Game Over value grid.
+- Co-Op GAME OVER DEATHS values moved up 2 px to match normal MP Game Over value grid.
+- Co-Op GAME OVER FRIENDLY KILLS values moved up 2 px to match normal MP Game Over value grid.
+- Co-Op pause/watch stat value positions remain on the same already-correct 2 px-up grid.
+- Normal MP positions are otherwise unchanged.

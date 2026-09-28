@@ -4,8 +4,7 @@ import re
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 OPTH=(ROOT/'src/game/options.h').read_text(errors='replace')
-root_opth_path=ROOT/'options.h'
-ROOTOPTH=root_opth_path.read_text(errors='replace') if root_opth_path.exists() else OPTH
+ROOTOPTH=(ROOT/'options.h').read_text(errors='replace')
 OPT=(ROOT/'src/game/options.c').read_text(errors='replace')
 V32=(ROOT/'scripts/audit_tp_controls_watch_surface_v32.py').read_text(errors='replace')
 PROP=(ROOT/'src/game/propobj.c').read_text(errors='replace')

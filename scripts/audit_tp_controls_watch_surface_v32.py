@@ -66,7 +66,7 @@ check('main-menu Special Options exposes TP Crouch Cam',
 check('SP watch exposes TP Crouch Cam',
       'MODWATCH_OPTION_ROWS' in OPT and 'frontModGetOptionLabel(48)' in OPT and 'MODOPT3_TP_CROUCH_CAM' in OPT)
 check('MP watch exposes TP Crouch Cam',
-      ('mode == 2 ? 14' in MP or 'mode == 2 ? 15' in MP or 'mode == 2 ? 16' in MP or 'mode == 2 ? 17' in MP) and 'frontModGetOptionLabel(48)' in MP and 'MODOPT3_TP_CROUCH_CAM' in MP)
+      (('mode == 2 ? 14' in MP or 'mode == 2 ? 15' in MP or 'mode == 2 ? 16' in MP or 'mode == 2 ? 17' in MP or 'if (mode == 2) return 17;' in MP)) and 'frontModGetOptionLabel(48)' in MP and 'MODOPT3_TP_CROUCH_CAM' in MP)
 check('TP Crouch Cam label is exact',
       'TP Crouch Cam' in SPEC and '0x54502043' in SPEC and '0x726F7563' in SPEC)
 check('V32 audit is mandatory build prerequisite',

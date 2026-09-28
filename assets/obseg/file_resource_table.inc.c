@@ -873,6 +873,7 @@ struct fileentry file_resource_table[] = {
     {BG_MAPMAKER_ALL_P_STAN, "Tbg_mapmaker_all_p_stanZ", &Tbg_mapmaker_all_p_stanZ},
     {SETUPMAPMAKER, "UsetupmapmakerZ", &UsetupmapmakerZ},
 #endif
+    {MP_SETUPCAT, "Ump_setupcatZ", &Ump_setupcatZ},
     
     {OBENDSEG, "ob/ob_end.seg", &ob__ob_end_seg},
     {0},

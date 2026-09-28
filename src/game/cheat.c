@@ -774,6 +774,9 @@ CheatInfo g_CheatInfo[] = {
     {     CHEAT_KINETIC_EXPLOSIONS,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
     {             CHEAT_SUPER_TANK,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
     {        CHEAT_MIRRORED_LEVELS,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {        CHEAT_ULTRA_KINETICS,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {      CHEAT_LEVEL_NEVER_ENDS,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
+    {           CHEAT_FREEZE_TIMER,    0, 0, 0,                0,                             0, 0, CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME},
 #endif
     {0}
 };
@@ -1197,6 +1200,9 @@ void cheatButtonHandleCheatsTurnedOn(CHEAT_ID cheat_id)
         case CHEAT_RAPID_FIRE:
         case CHEAT_FLY_MODE:
         case CHEAT_KINETIC_EXPLOSIONS:
+        case CHEAT_ULTRA_KINETICS:
+        case CHEAT_LEVEL_NEVER_ENDS:
+        case CHEAT_FREEZE_TIMER:
         case CHEAT_SUPER_TANK:
             return;
         case CHEAT_MIRRORED_LEVELS:
@@ -1586,6 +1592,9 @@ void cheatButtonHandleCheatsTurnedOff(CHEAT_ID cheat_id)
         case CHEAT_RAPID_FIRE:
         case CHEAT_FLY_MODE:
         case CHEAT_KINETIC_EXPLOSIONS:
+        case CHEAT_ULTRA_KINETICS:
+        case CHEAT_LEVEL_NEVER_ENDS:
+        case CHEAT_FREEZE_TIMER:
         case CHEAT_SUPER_TANK:
             return;
         case CHEAT_MIRRORED_LEVELS:

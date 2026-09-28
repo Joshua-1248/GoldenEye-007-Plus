@@ -31,7 +31,17 @@
 .endif
 .word  0x00000000 # unknown
 .word  0x0000004E # cartridge
-.ascii "GE"       # cartridge ID
+.ifdef GE_MODDED_CHEATS
+/*
+ * V84: use the de-facto N64 homebrew/flashcart configuration header for
+ * GoldenEye 007 Plus.  EverDrive OS and modern universal flashcart menus
+ * recognize ROM ID "ED" and interpret byte 0x3f as save/config metadata.
+ * Retail/non-modded builds deliberately retain GoldenEye's original "GE" ID.
+ */
+.ascii "ED"       # homebrew flashcart configuration ROM ID
+.else
+.ascii "GE"       # retail GoldenEye cartridge ID
+.endif
 .ifdef LANG_US
 .ascii "E"        # country
 .endif
@@ -42,7 +52,16 @@
 .ascii "P"        # country
 .endif
 .ifdef GE_MODDED_CHEATS
-.byte  0x15       # modded branch revision 21
+/* Homebrew header config byte (offset 0x3f): high nibble is save type. */
+.ifdef GE_SAVE_EEPROM16K
+.byte  0x20       # EEPROM 16 Kbit (2 KiB), no RTC, fixed region
+.else
+.ifdef GE_SAVE_SRAM
+.byte  0x30       # SRAM 256 Kbit (32 KiB), no RTC, fixed region
+.else
+.byte  0x00       # no cartridge save backend requested
+.endif
+.endif
 .else
 .ifdef GE_UNLOCK_SAVE1
 .byte  0x10       # physical optimized revision 16, everything unlocked

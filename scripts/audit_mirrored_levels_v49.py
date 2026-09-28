@@ -44,10 +44,12 @@ ck('Mirrored Levels remains a global SP/MP toggle',
    'CHEAT_MASK_TOGGLE | CHEAT_MASK_GLOBAL | CHEAT_MASK_MPGAME | CHEAT_MASK_SPGAME' in files['cheat'])
 ck('main Cheats menu names Mirrored Levels',
    'case CHEAT_MIRRORED_LEVELS: return (u8 *)"Mirrored Levels";' in files['front'])
-ck('SP Watch explicitly maps Mirrored Levels',
-   'MODWATCH_MIRRORED_ROW' in files['opt'] and 'return CHEAT_MIRRORED_LEVELS;' in files['opt'])
-ck('MP/Co-Op Watch explicitly maps Mirrored Levels',
-   'MPWATCH_MIRRORED_ROW' in files['mp'] and 'return CHEAT_MIRRORED_LEVELS;' in files['mp'])
+ck('SP Watch mapping still reaches stable Mirrored Levels ID',
+   '#define MODWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)' in files['opt'] and
+   'return (CHEAT_ID)row;' in files['opt'])
+ck('MP/Co-Op Watch mapping still reaches stable Mirrored Levels ID',
+   '#define MPWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)' in files['mp'] and
+   'return (CHEAT_ID)row;' in files['mp'])
 ck('toggle handlers queue mirror state',
    files['cheat'].count('mirrorLevelsSetEnabled(') >= 2)
 ck('implementation is exact X sign reflection, no pivot',

@@ -506,7 +506,7 @@ OBJCOPY := $(TOOLCHAIN)objcopy
 .NOTPARALLEL: print_info create_directories $(APPROM) checksum
 
 # Phony Recipes - These targets are not files, Get Make to do something
-.PHONY: autoshot-resource-audit coop-mission-item-audit tp-camera-settings-v29-audit print_info create_directories build_tools prerequisites optimized-preflight optimized optimized-clean optimized-profile-force physical physical-source-audit mapmaker-stage-isolation-audit physical-audit physical-clean checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets forceextractassets textures convert_props convert_chrs convert_guns extract_u extract_e extract_j force_extract_u force_extract_e force_extract_j extract_rsp
+.PHONY: autoshot-resource-audit coop-mission-item-audit flashcart-eeprom16-v84-audit tp-camera-settings-v29-audit print_info create_directories build_tools prerequisites optimized-preflight optimized optimized-clean optimized-profile-force physical physical-source-audit mapmaker-stage-isolation-audit physical-audit physical-clean checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets forceextractassets textures convert_props convert_chrs convert_guns extract_u extract_e extract_j force_extract_u force_extract_e force_extract_j extract_rsp
 
 
 # this file references variables defined above: BUILD_DIR, CFLAGWARNING, INCLUDE, LCDEFS
@@ -529,12 +529,25 @@ $(BUILD_DIR)/src/%.o: src/%.s
 
 #Build Images
 # Generate imagelist by syncing imagelist.u.csv (ROM offsets/sizes) with images.def (names)
-$(BUILD_DIR)/imagelist.csv: imagelist.u.csv assets/images.def
+$(BUILD_DIR)/imagelist.csv: imagelist.u.csv assets/images.def scripts/make/sync_imagelist_with_def.py
 	@mkdir -p $(BUILD_DIR)
 	python3 scripts/make/sync_imagelist_with_def.py $@
 
-assets/images/combined/combined.bin: $(BUILD_DIR)/imagelist.csv
+IMAGE_SPLIT_BINS := $(wildcard assets/images/split/*.bin)
+
+assets/images/combined/combined.bin: $(BUILD_DIR)/imagelist.csv $(IMAGE_SPLIT_BINS)
 	scripts/make/combine_images_named.sh $(BUILD_DIR)/imagelist.csv assets/images/combined
+
+# images.def is compiled into g_Textures[] by src/game/image.c.  Without this
+# explicit dependency an incremental mod build can keep a stale image.o after a
+# new texture ID is appended, leaving the old sentinel at the new ID and making
+# texLoad read the following data as the next texture offset.
+$(BUILD_DIR)/src/game/image.o: assets/images.def
+$(BUILD_DIR)/assets/oddtextures.o: assets/images.def
+
+# ob.c directly includes the generated resource ID/table data.
+$(BUILD_DIR)/src/game/ob.o: assets/obseg/file_resource_id_enums.h assets/obseg/file_resource_table.inc.c
+
 
 $(BUILD_DIR)/assets/images/combined/%.o: assets/images/combined/combined.bin
 	$(LD) -r -b binary $< -o $@
@@ -639,6 +652,9 @@ $(BUILD_DIR)/assets/%.o: assets/%.s
 
 #Build Obseg
 $(BUILD_DIR)/assets/obseg/%.o: assets/obseg/%.s $(OBSEG_RZ)
+
+# Citadel resources are pulled into ob_seg.s via .incbin; make cannot infer these.
+$(BUILD_DIR)/assets/obseg/ob_seg.o: $(BUILD_DIR)/assets/obseg/setup/Ump_setupcatZ.rz $(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz
 	$(AS) $(ASFLAGS) -o $@ $<
 
 #Build C files in assets/
@@ -688,7 +704,7 @@ build_tools:
 	$(info Building tools...)
 	scripts/make/build_tools.sh "$(MAKE)"
 
-autoshot-resource-audit: build_tools
+autoshot-resource-audit:
 	python3 scripts/audit_autoshot_resource_pipeline.py
 
 coop-mission-item-audit:
@@ -760,6 +776,27 @@ dam-posend-teleport-v80-audit:
 coop-objective-team-v83-audit:
 	python3 scripts/audit_coop_objective_team_v83.py
 
+flashcart-eeprom16-v84-audit:
+	python3 scripts/audit_flashcart_eeprom16_v84.py
+
+super-ultra-kinetics-v85-audit:
+	python3 scripts/audit_super_ultra_kinetics_v85.py
+
+level-never-ends-v86-audit:
+	python3 scripts/audit_level_never_ends_v86.py
+
+freeze-timer-v87-audit:
+	python3 scripts/audit_freeze_timer_v87.py
+
+fly-turbo-tp-y-v88-audit:
+	python3 scripts/audit_fly_turbo_tp_y_v88.py
+
+level-modifiers-v89-audit:
+	python3 scripts/audit_level_modifiers_v89.py
+
+mp-citadel-v90-audit:
+	python3 scripts/audit_mp_citadel_v90.py
+
 eeprom16-backend-v46-audit:
 	python3 scripts/audit_eeprom16_backend_v46.py
 
@@ -793,7 +830,7 @@ crouch-default-v44-audit:
 crouch-default-v45-audit:
 	python3 scripts/audit_crouch_default_v45.py
 
-prerequisites: autoshot-resource-audit coop-mission-item-audit playtester-bugfix-audit mipmap-metadata-audit tp-camera-settings-v29-audit tp-camera-defaults-v29a-audit stay-tp-death-v30-audit mainmenu-special-highlight-v30a-audit tp-camera-default-reset-v30b-audit tp-camera-default-reset-v30c-audit tp-death-animation-v30d-audit tp-death-speed-v30e-audit jungle-natalya-tp-v30h-audit mapmaker-hardware-v31-audit tp-controls-watch-surface-v32-audit directional-shoulder-toggle-v33-audit tp-crouched-cam-height-v34-audit sram-backend-v35-audit sram-extended-settings-v36-audit coop-autoaim-v37-audit surface2-world-item-v38-audit v38r1-defaults-compat-audit special-options-v40-audit kinetic-explosions-v41-audit crouch-default-v41r3-audit tp-tank-super-tank-v42-audit print_info create_directories build_tools extractassets sram-frontend-special-v39-audit tp-crouch-super-tank-watch-v42r2-audit crouch-default-v44-audit crouch-default-v45-audit eeprom16-backend-v46-audit mirrored-levels-v49-audit tp-sight-distance-v74-audit tp-camera-legacy-sync-v75-audit surface2-posend-coop-v79-audit dam-posend-teleport-v80-audit coop-objective-team-v83-audit
+prerequisites: autoshot-resource-audit coop-mission-item-audit playtester-bugfix-audit mipmap-metadata-audit tp-camera-settings-v29-audit tp-camera-defaults-v29a-audit stay-tp-death-v30-audit mainmenu-special-highlight-v30a-audit tp-camera-default-reset-v30b-audit tp-camera-default-reset-v30c-audit tp-death-animation-v30d-audit tp-death-speed-v30e-audit jungle-natalya-tp-v30h-audit mapmaker-hardware-v31-audit tp-controls-watch-surface-v32-audit directional-shoulder-toggle-v33-audit tp-crouched-cam-height-v34-audit sram-backend-v35-audit sram-extended-settings-v36-audit coop-autoaim-v37-audit surface2-world-item-v38-audit v38r1-defaults-compat-audit special-options-v40-audit kinetic-explosions-v41-audit crouch-default-v41r3-audit tp-tank-super-tank-v42-audit print_info create_directories build_tools extractassets sram-frontend-special-v39-audit tp-crouch-super-tank-watch-v42r2-audit crouch-default-v44-audit crouch-default-v45-audit eeprom16-backend-v46-audit mirrored-levels-v49-audit tp-sight-distance-v74-audit tp-camera-legacy-sync-v75-audit surface2-posend-coop-v79-audit dam-posend-teleport-v80-audit coop-objective-team-v83-audit flashcart-eeprom16-v84-audit super-ultra-kinetics-v85-audit level-never-ends-v86-audit freeze-timer-v87-audit fly-turbo-tp-y-v88-audit level-modifiers-v89-audit mp-citadel-v90-audit
 
 optimized-preflight:
 ifeq ($(OPTIMIZED_ROM), YES)

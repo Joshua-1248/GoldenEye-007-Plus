@@ -20,21 +20,33 @@ s32 osEepromWrite(OSMesgQueue *mq, u8 address, u8 *buffer)
     ptr = (u8 *)&__osEepPifRam.ramarray;
 
 #ifdef GE_SAVE_EEPROM16K
+    /* V84: later libultra-style 4K-vs-16K EEPROM discrimination. */
     __osSiGetAccess();
     ret = __osEepStatus(mq, &sdata);
-    type = sdata.type & (CONT_EEPROM | CONT_EEP16K);
+
+    if (ret == 0) {
+        type = sdata.type & (CONT_EEPROM | CONT_EEP16K);
+
+        switch (type) {
+        case CONT_EEPROM:
+            if (address >= EEPROM_MAXBLOCKS) {
+                ret = -1;
+            }
+            break;
+        case CONT_EEPROM | CONT_EEP16K:
+            if ((u32)address >= EEP16K_MAXBLOCKS) {
+                ret = -1;
+            }
+            break;
+        default:
+            ret = CONT_NO_RESPONSE_ERROR;
+            break;
+        }
+    }
+
     if (ret != 0) {
         __osSiRelAccess();
-        return CONT_NO_RESPONSE_ERROR;
-    }
-    if (type == CONT_EEPROM) {
-        if (address >= EEPROM_MAXBLOCKS) {
-            __osSiRelAccess();
-            return -1;
-        }
-    } else if (type != (CONT_EEPROM | CONT_EEP16K)) {
-        __osSiRelAccess();
-        return CONT_NO_RESPONSE_ERROR;
+        return ret;
     }
 #else
     if (address > EEPROM_MAXBLOCKS)
@@ -60,6 +72,10 @@ s32 osEepromWrite(OSMesgQueue *mq, u8 address, u8 *buffer)
     ret = __osSiRawStartDma(OS_WRITE, &__osEepPifRam);
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
 
+#ifdef GE_SAVE_EEPROM16K
+    /* Keep the write command/response transaction intact, as in later libultra. */
+    ret = __osSiRawStartDma(OS_READ, &__osEepPifRam);
+#else
     for (i = 0; i < ARRLEN(__osEepPifRam.ramarray) + 1; i++)
     {
         __osEepPifRam.ramarray[i] = CONT_CMD_NOP;
@@ -68,6 +84,7 @@ s32 osEepromWrite(OSMesgQueue *mq, u8 address, u8 *buffer)
     __osEepPifRam.pifstatus = CONT_CMD_REQUEST_STATUS;
 
     ret = __osSiRawStartDma(OS_READ, &__osEepPifRam);
+#endif
     __osContLastCmd = CONT_CMD_WRITE_EEPROM;
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
 
@@ -91,10 +108,12 @@ static void __osPackEepWriteData(u8 address, u8 *buffer)
     int i;
     ptr = (u8 *)&__osEepPifRam.ramarray;
 
-    for (i = 0; i < ARRLEN(__osEepPifRam.ramarray) + 1; i++) // buffer overflow?
+#ifndef GE_SAVE_EEPROM16K
+    for (i = 0; i < ARRLEN(__osEepPifRam.ramarray) + 1; i++) // retail-era buffer preparation
     {
         __osEepPifRam.ramarray[i] = CONT_CMD_NOP;
     }
+#endif
 
     __osEepPifRam.pifstatus = CONT_CMD_EXE;
 
@@ -156,7 +175,12 @@ s32 __osEepStatus(OSMesgQueue *mq, OSContStatus *data)
 
     ret = __osSiRawStartDma(OS_WRITE, &__osEepPifRam);
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
+#ifdef GE_SAVE_EEPROM16K
+    /* Later libultra marks a status request as END, not as a write command. */
+    __osContLastCmd = CONT_CMD_END;
+#else
     __osContLastCmd = CONT_CMD_WRITE_EEPROM;
+#endif
     ret = __osSiRawStartDma(OS_READ, &__osEepPifRam);
     osRecvMesg(mq, NULL, OS_MESG_BLOCK);
 

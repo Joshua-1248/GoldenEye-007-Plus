@@ -17,16 +17,16 @@ ck('ordinary SRAM saves persist exact displayed height', 'record.crouch_camera_h
 ck('load converts exact stored height back to runtime adjustment', 'record->crouch_camera_height_adjust - TP_CROUCH_CAM_HEIGHT_DEFAULT' in F)
 ck('watch adjustment clamps actual height, not a free-running trim', 's32 height = TP_CROUCH_CAM_HEIGHT_DEFAULT' in O and 'if (height < 0) height = 0;' in O and 'if (height > 96) height = 96;' in O)
 ck('runtime and watch display consume the same base-plus-adjust value', 'TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust' in O and 'TP_CROUCH_CAM_HEIGHT_DEFAULT' in B and 'g_ModThirdPersonCrouchCameraHeightAdjust' in B)
-ck('SP in-game cheat ordering remains sequential',
-   'if (row < MODWATCH_BASE_CHEATS)' in O
+ck('SP in-game cheat ordering remains complete with stable IDs',
+   'if (row < CHEAT_KINETIC_EXPLOSIONS)' in O
    and 'return (CHEAT_ID)(row + 1);' in O
-   and 'if (row == MODWATCH_MIRRORED_ROW)' in O
-   and 'return CHEAT_MIRRORED_LEVELS;' in O)
-ck('MP in-game cheat ordering remains sequential',
-   'if (row < MPWATCH_BASE_CHEATS)' in M
+   and 'return CHEAT_ULTRA_KINETICS;' in O
+   and 'return (CHEAT_ID)row;' in O)
+ck('MP in-game cheat ordering remains complete with stable IDs',
+   'if (row < CHEAT_KINETIC_EXPLOSIONS)' in M
    and 'return (CHEAT_ID)(row + 1);' in M
-   and 'if (row == MPWATCH_MIRRORED_ROW)' in M
-   and 'return CHEAT_MIRRORED_LEVELS;' in M)
+   and 'return CHEAT_ULTRA_KINETICS;' in M
+   and 'return (CHEAT_ID)row;' in M)
 C=(R/'src/bondconstants.h').read_text(errors='replace')
 ck('Super Tank remains before Mirrored Levels and CHEAT_INVALID', C.find('CHEAT_SUPER_TANK') < C.find('CHEAT_MIRRORED_LEVELS') < C.find('CHEAT_INVALID'))
 ck('V42 R2 audit is mandatory prerequisite', 'tp-crouch-super-tank-watch-v42r2-audit:' in MK and 'tp-crouch-super-tank-watch-v42r2-audit' in MK.split('prerequisites:',1)[1].split('\n',1)[0])

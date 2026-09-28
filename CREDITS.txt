@@ -41,6 +41,17 @@ Perfect Dark is used as an engine-lineage research and selective backport
 reference. GoldenEye 007 Plus does not treat Perfect Dark as a wholesale
 replacement for GoldenEye behavior.
 
+CITADEL RESTORATION
+-------------------
+Krijy — first discovered Citadel and made it broadly playable for the GoldenEye
+community. The early playable implementation reused Cradle's setup, taking
+advantage of Cradle's behavior of keeping all rooms loaded at once.
+
+Zoinkity — later reworked Citadel's STAN/clipping data for compatibility with
+the final GoldenEye engine's collision system. GoldenEye 007 Plus preserves
+credit for this reclip/restoration work while integrating Citadel as its own
+dedicated stage.
+
 GOLDENEYE 007 PLUS PROJECT
 --------------------------
 Design, integration, optimization, testing, menu/UI work, co-op expansion,

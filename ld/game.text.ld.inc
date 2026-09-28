@@ -96,6 +96,7 @@
       build/OUTCODE/src/game/cobjdata.o (.text);
       build/OUTCODE/src/game/cheat.o (.text);
       build/OUTCODE/src/game/mirroredlevels.o (.text);
+      build/OUTCODE/src/game/levelmodifiers.o (.text);
       build/OUTCODE/src/game/line_tri_intersect.o (.text);
       build/OUTCODE/src/game/unk_092E50.o (.text);
       build/OUTCODE/src/game/sky.o (.text);

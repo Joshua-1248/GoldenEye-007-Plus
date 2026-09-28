@@ -52,20 +52,35 @@ License:
   MIT License, Copyright (c) 2022 Ryan Dwyer.
   See LICENSES_AND_NOTICES.txt and the upstream Perfect Dark LICENSE file.
 
-5. GOLDFINGER 64 / SUBDRAG
+5. CITADEL COMMUNITY RESTORATION
+--------------------------------
+Krijy:
+  Credited with first discovering Citadel and making it playable for the wider
+  GoldenEye community. The early playable implementation reused Cradle's setup,
+  which was practical because Cradle keeps all of its rooms loaded at once.
+
+Zoinkity:
+  Credited with the later Citadel restoration/reclip work, including the
+  hand-reworked STAN/clipping data used to make Citadel compatible with the
+  final GoldenEye engine's collision system.
+
+GoldenEye 007 Plus preserves this provenance while integrating Citadel as its
+own dedicated stage instead of replacing or borrowing another retail stage.
+
+6. GOLDFINGER 64 / SUBDRAG
 --------------------------
 Role:
   Community modding/research reference for GoldenEye engine behavior, assets,
   level/model structures and historical modding techniques.
 
-6. GOLDENEYE SETUP EDITOR
+7. GOLDENEYE SETUP EDITOR
 -------------------------
 Role:
   GoldenEye/Perfect Dark modding ecosystem reference and interoperability
   target. GoldenEye 007 Plus development may compare formats/workflows with
   Setup Editor while retaining standalone project architecture.
 
-7. GOLDENEYE XBLA PROTOTYPES
+8. GOLDENEYE XBLA PROTOTYPES
 ----------------------------
 Role:
   Reverse-engineering/reference material for symbols, function matching,
@@ -74,7 +89,7 @@ Role:
 Prototype-derived information should be treated as research provenance; do
 not assume that prototype content is freely redistributable.
 
-8. TIMESPLITTERS ENGINE-LINEAGE RESEARCH
+9. TIMESPLITTERS ENGINE-LINEAGE RESEARCH
 ----------------------------------------
 Role:
   Later Free Radical / Rare-lineage material can provide names and algorithmic
@@ -82,8 +97,8 @@ Role:
   lineage. Platform/compiler differences do not by themselves invalidate a
   match, but unrelated descendant code should not be forced into GoldenEye.
 
-9. PROJECT64
-------------
+10. PROJECT64
+-------------
 Project:
   https://www.pj64-emu.com/
 
@@ -91,7 +106,7 @@ Role:
   Primary emulator test environment used during current GoldenEye 007 Plus
   development.
 
-10. GLIDEN64
+11. GLIDEN64
 ------------
 Project:
   https://github.com/gonetz/GLideN64
@@ -99,13 +114,13 @@ Project:
 Role:
   Graphics plugin used for testing.
 
-11. NINTENDO 64 / LIBULTRA MATERIAL
+12. NINTENDO 64 / LIBULTRA MATERIAL
 -----------------------------------
 The source tree includes/reconstructs N64 runtime interfaces and build-era
 material required by the upstream decompilation. Ownership and licensing of
 such material are not superseded by GoldenEye 007 Plus documentation.
 
-12. THIRD-PARTY BUILD TOOLS
+13. THIRD-PARTY BUILD TOOLS
 ---------------------------
 The repository contains build/recompilation/conversion tools with their own
 licenses and authors. Preserve the notices stored in their directories.
@@ -113,7 +128,7 @@ licenses and authors. Preserve the notices stored in their directories.
 Known example in the supplied tree:
   tools/ido5.3_recomp/rabbitizer/LICENSE
 
-13. PROVENANCE RULE FOR FUTURE CONTRIBUTIONS
+14. PROVENANCE RULE FOR FUTURE CONTRIBUTIONS
 --------------------------------------------
 For any future external code, algorithm, asset format research, documentation,
 script, library or tool incorporated into GoldenEye 007 Plus, record:

@@ -693,6 +693,71 @@ s32 chraiitemsize(u8 *AIList, s32 offset)
     }
 }
 
+#ifdef GE_MODDED_CHEATS
+/*
+ * V86: Level Never Ends suppresses the retail background-AI exit preamble
+ * before it can lock controls, make Bond invulnerable, fade the screen or
+ * enter the scripted end camera.  Stage exit blocks differ between missions,
+ * so identify them structurally: from the current command, look ahead for an
+ * EndLevel opcode, the retail fade/exit latch, or a self-jump into the global
+ * GAILIST_END_LEVEL list.  Parsing command boundaries avoids mistaking opcode
+ * values that merely occur inside command parameters.
+ */
+static s32 chraiLevelNeverEndsExitAhead(AIRecord *ailist, s32 offset)
+{
+    s32 commands = 0;
+
+    if (ailist == NULL)
+        return FALSE;
+
+    while (commands++ < 96)
+    {
+        AI_CMD cmd = (AI_CMD)(ailist + offset)->cmd;
+
+        if (cmd == AI_EndList)
+            return FALSE;
+
+        if (cmd == AI_EndLevel || cmd == AI_TriggerFadeAndExitLevelOnButtonPress)
+            return TRUE;
+
+        if (cmd == AI_SetChrAiList)
+        {
+            AiSetChrAiListRecord *ai = ailist + offset;
+            if (ai->CHR_NUM == (u8)CHR_SELF)
+            {
+                if (ntohs(ai->AI_LIST_ID) == GAILIST_END_LEVEL)
+                    return TRUE;
+
+                /* A self-jump transfers control to another list, so bytes
+                 * after it are not part of this execution path. */
+                return FALSE;
+            }
+        }
+
+        offset += chraiitemsize((u8 *)ailist, offset);
+    }
+
+    return FALSE;
+}
+
+static s32 chraiLevelNeverEndsBlockBackgroundExit(ChrRecord *chr, AIRecord *ailist, s32 offset)
+{
+    if (!cheatIsActive(CHEAT_LEVEL_NEVER_ENDS) || chr == NULL || chr->chrnum != 0xfe)
+        return FALSE;
+
+    if (!chraiLevelNeverEndsExitAhead(ailist, offset))
+        return FALSE;
+
+    /* Re-arm the background list from its polling state.  While Bond remains
+     * inside the exit marker it will simply be tested again next tick; leaving
+     * the marker lets ordinary mission AI continue.  Turning the cheat off
+     * therefore restores the stock exit immediately and non-destructively. */
+    chr->ailist = ailist;
+    chr->aioffset = 0;
+    return TRUE;
+}
+#endif
+
 /**
  * Get ID of AIList
  * @param AIList: Ailist to get ID of
@@ -3947,6 +4012,13 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_EndLevel: // canonical name
                 {
                     /*"aiEndLevel" */
+#ifdef GE_MODDED_CHEATS
+                    if (cheatIsActive(CHEAT_LEVEL_NEVER_ENDS))
+                    {
+                        Offset += sizeof(AiEndLevelRecord);
+                        break;
+                    }
+#endif
                     if (cameraBufferToggle)
                     {
                         if (cameraFrameCounter2 == FALSE)
@@ -4059,6 +4131,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_BondDisableControl:
                 {
                     AiBondDisableControlRecord *ai = AiListp + Offset;
+#ifdef GE_MODDED_CHEATS
+                    if (chraiLevelNeverEndsBlockBackgroundExit(ChrEntityp, AiListp, Offset))
+                        return;
+#endif
                     gunSetSightVisible(GUNSIGHTREASON_NOCONTROL, FALSE);
                     gunSetGunAmmoVisible(GUNAMMOREASON_NOCONTROL, FALSE);
                     if (!(PLAYERFLAG_NOCONTROL & ai->val))
@@ -4383,6 +4459,13 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 }
                 case AI_TriggerFadeAndExitLevelOnButtonPress:
                 {
+#ifdef GE_MODDED_CHEATS
+                    if (cheatIsActive(CHEAT_LEVEL_NEVER_ENDS))
+                    {
+                        Offset += sizeof(AiTriggerFadeAndExitLevelOnButtonPressRecord);
+                        break;
+                    }
+#endif
                     if (stop_time_flag == FALSE)
                     {
                         stop_time_flag = TRUE;
@@ -4405,6 +4488,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 }
                 case AI_BondDisableDamageAndPickups:
                 {
+#ifdef GE_MODDED_CHEATS
+                    if (chraiLevelNeverEndsBlockBackgroundExit(ChrEntityp, AiListp, Offset))
+                        return;
+#endif
                     g_PlayerInvincible = TRUE;
                     Offset += sizeof(AiBondDisableDamageAndPickupsRecord);
                     break;

@@ -2906,6 +2906,121 @@ struct dummy_struct {
     s32 unk04;
 };
 
+#ifdef GE_MODDED_CHEATS
+/*
+ * Perfect Dark-style room candidate construction for STAN floor recovery.
+ *
+ * PD resolves movement into a small set of plausible rooms before asking its
+ * collision engine for ground.  GoldenEye only registers one authoritative
+ * STAN room for Bond, so build the equivalent candidate set from the current
+ * room, portals crossed by this frame's movement, and portals touched by the
+ * player's collision cylinder.  This is generic engine behaviour; there are
+ * no stage-specific exceptions here.
+ */
+static void bondviewAddGroundRoomCandidate(s32 room, s32 *rooms, s32 *count, s32 maxcount)
+{
+    s32 i;
+
+    if (room < 0 || room >= 0xff)
+    {
+        return;
+    }
+
+    for (i = 0; i < *count; i++)
+    {
+        if (rooms[i] == room)
+        {
+            return;
+        }
+    }
+
+    if (*count < maxcount)
+    {
+        rooms[*count] = room;
+        *count = *count + 1;
+    }
+}
+
+static void bondviewBuildGroundRoomFilter(coord3d *pos, f32 radius, u8 *outrooms)
+{
+    u8 startrooms[8];
+    u8 finalrooms[8];
+    s32 traversedrooms[16];
+    s32 roomlist[7];
+    s32 traversedcount;
+    s32 roomcount;
+    s32 currentroom;
+    s32 i;
+    coord3d bbmin;
+    coord3d bbmax;
+    f32 roomradius;
+
+    for (i = 0; i < 8; i++)
+    {
+        startrooms[i] = 0xff;
+        finalrooms[i] = 0xff;
+        outrooms[i] = 0xff;
+    }
+
+    traversedcount = 0;
+    roomcount = 0;
+
+    if (g_CurrentPlayer->field_488.current_tile_ptr == NULL)
+    {
+        return;
+    }
+
+    currentroom = g_CurrentPlayer->field_488.current_tile_ptr->room;
+    startrooms[0] = (u8)currentroom;
+    bondviewAddGroundRoomCandidate(currentroom, roomlist, &roomcount, 7);
+
+    bgFindRoomsAlongSegment(
+            &g_CurrentPlayer->bondprevpos,
+            pos,
+            startrooms,
+            finalrooms,
+            traversedrooms,
+            &traversedcount,
+            16);
+
+    for (i = 0; i < 8 && finalrooms[i] != 0xff; i++)
+    {
+        bondviewAddGroundRoomCandidate(finalrooms[i], roomlist, &roomcount, 7);
+    }
+
+    for (i = 0; i < traversedcount && i < 16; i++)
+    {
+        bondviewAddGroundRoomCandidate(traversedrooms[i], roomlist, &roomcount, 7);
+    }
+
+    /* PD expands the destination room set with portals intersected by the
+     * player's bounding volume.  GoldenEye already has the equivalent portal
+     * bbox traversal; use the player's horizontal collision radius and live
+     * feet-to-eye span rather than inventing Citadel-specific room rules. */
+    roomradius = radius;
+    if (roomradius < 50.0f)
+    {
+        roomradius = 50.0f;
+    }
+
+    bbmin.f[0] = pos->f[0] - roomradius;
+    bbmin.f[1] = g_CurrentPlayer->field_70 - 10.0f;
+    bbmin.f[2] = pos->f[2] - roomradius;
+    bbmax.f[0] = pos->f[0] + roomradius;
+    bbmax.f[1] = pos->f[1] + 10.0f;
+    bbmax.f[2] = pos->f[2] + roomradius;
+
+    sub_GAME_7F0BA2D4(&bbmin, &bbmax, roomlist, &roomcount, 7);
+
+    for (i = 0; i < roomcount && i < 7; i++)
+    {
+        outrooms[i] = (u8)roomlist[i];
+    }
+
+    outrooms[i] = 0xff;
+}
+#endif
+
 /**
  * Sets Bond bondprevpos, attempts to move by `offset`.
  *
@@ -3134,21 +3249,80 @@ void bondviewCalcUpdatePlayerCollision(struct coord3d *offset, s32 allow_scoot)
     }
 
     /**
-     * Recover the player's floor tile if movement leaves the current tile.
-     * The mod build uses the deterministic global STAN lookup.  This is both
-     * safer for No-Clipping and smaller than retail's random five-link walk.
+     * Recover the player's floor tile if movement leaves the quick current-tile
+     * bounds test.
+     *
+     * Perfect Dark no longer performs GoldenEye's random five-link recovery,
+     * nor does it immediately search every floor in the level.  It preserves
+     * local topology/rooms and resolves support using the player's cylinder.
+     * Do the same here while keeping GoldenEye's native STAN representation.
      */
 #ifdef GE_MODDED_CHEATS
-    if (stanTestPointWithinTileBoundsMaybe(
+    if (g_CurrentPlayer->field_488.current_tile_ptr != NULL
+        && stanTestPointWithinTileBoundsMaybe(
             g_CurrentPlayer->field_488.current_tile_ptr,
             g_CurrentPlayer->field_488.collision_position.f[0],
             g_CurrentPlayer->field_488.collision_position.f[2]) == 0)
     {
-        next_pos.f[0] = g_CurrentPlayer->field_488.collision_position.f[0];
-        next_pos.f[1] = g_CurrentPlayer->field_488.collision_position.f[1] + 200.0f;
-        next_pos.f[2] = g_CurrentPlayer->field_488.collision_position.f[2];
-        stan = stanFindTileBelowPos(&next_pos, NULL, NULL);
-        if (stan != NULL) g_CurrentPlayer->field_488.current_tile_ptr = stan;
+        StandTile *walkstan;
+        u8 groundrooms[8];
+        f32 collision_radius;
+        f32 height;
+        f32 always_30;
+        f32 ground_y;
+        coord3d groundprobe;
+
+        /* First trust the authored STAN links and the actual movement segment.
+         * This is deterministic, unlike retail's random five-neighbour walk. */
+        walkstan = g_CurrentPlayer->field_488.current_tile_ptr;
+
+        if (walkTilesBetweenPoints_NoCallback(
+                &walkstan,
+                g_CurrentPlayer->bondprevpos.f[0],
+                g_CurrentPlayer->bondprevpos.f[2],
+                g_CurrentPlayer->field_488.collision_position.f[0],
+                g_CurrentPlayer->field_488.collision_position.f[2])
+            && walkstan != NULL)
+        {
+            g_CurrentPlayer->field_488.current_tile_ptr = walkstan;
+        }
+        else
+        {
+            bondviewGetCollisionRadius(
+                    g_CurrentPlayer->prop,
+                    &collision_radius,
+                    &height,
+                    &always_30);
+
+            groundprobe = g_CurrentPlayer->field_488.collision_position;
+            bondviewBuildGroundRoomFilter(&groundprobe, collision_radius, groundrooms);
+
+            /* PD-style selection: search plausible rooms first, choose a floor
+             * containing the player's centre if possible, and only then use
+             * cylinder edge/vertex support. */
+            stan = stanFindGroundAtCyl(
+                    &groundprobe,
+                    collision_radius,
+                    groundrooms,
+                    &ground_y);
+
+            /* Preserve GoldenEye Plus' custom-map/out-of-bounds resilience,
+             * but use the same cylinder-aware resolver for the exhaustive
+             * fallback rather than the old centre-only whole-level lookup. */
+            if (stan == NULL)
+            {
+                stan = stanFindGroundAtCyl(
+                        &groundprobe,
+                        collision_radius,
+                        NULL,
+                        &ground_y);
+            }
+
+            if (stan != NULL)
+            {
+                g_CurrentPlayer->field_488.current_tile_ptr = stan;
+            }
+        }
     }
 #else
     /**
@@ -4923,7 +5097,8 @@ void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)
          * floor-height clamp.  This allows descending below the altitude at
          * which Fly Mode was enabled and below authored floor geometry. */
         g_CurrentPlayer->field_70 += g_CurrentPlayer->field_488.applied_view.f[1]
-            * g_CurrentPlayer->speedforwards * g_GlobalTimerDelta * 10.0f;
+            * g_CurrentPlayer->speedforwards * g_GlobalTimerDelta
+            * (get_debug_fast_bond_flag() ? 20.0f : 10.0f);
         g_CurrentPlayer->field_7C = 0.0f;
         return;
     }
@@ -8138,17 +8313,42 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 
         if (get_debug_fast_bond_flag())
         {
-            move_offset.f[0] +=
-                (
-                    (g_CurrentPlayer->field_488.theta_transform.f[0] * g_CurrentPlayer->speedforwards) -
-                    (g_CurrentPlayer->field_488.theta_transform.f[2] * g_CurrentPlayer->speedsideways)
-                ) * g_GlobalTimerDelta * 10.0f;
+#ifdef GE_MODDED_CHEATS
+            if (g_CheatActivated[CHEAT_FLY_MODE] && g_PlayerIsInTank == 0)
+            {
+                /* Turbo Mode is implemented by the retail fast-Bond path as an
+                 * extra movement impulse.  In Fly Mode that extra impulse must
+                 * use the same 3D look-vector basis as the primary flight move;
+                 * otherwise the yaw-only retail term keeps pushing X/Z while
+                 * aiming straight up/down.  Strafing deliberately remains on
+                 * the horizontal yaw plane. */
+                move_offset.f[0] +=
+                    (
+                        (g_CurrentPlayer->field_488.applied_view.f[0] * g_CurrentPlayer->speedforwards) -
+                        (g_CurrentPlayer->field_488.theta_transform.f[2] * g_CurrentPlayer->speedsideways)
+                    ) * g_GlobalTimerDelta * 10.0f;
 
-            move_offset.f[2] +=
-                (
-                    (g_CurrentPlayer->field_488.theta_transform.f[2] * g_CurrentPlayer->speedforwards) +
-                    (g_CurrentPlayer->field_488.theta_transform.f[0] * g_CurrentPlayer->speedsideways)
-                ) * g_GlobalTimerDelta * 10.0f;
+                move_offset.f[2] +=
+                    (
+                        (g_CurrentPlayer->field_488.applied_view.f[2] * g_CurrentPlayer->speedforwards) +
+                        (g_CurrentPlayer->field_488.theta_transform.f[0] * g_CurrentPlayer->speedsideways)
+                    ) * g_GlobalTimerDelta * 10.0f;
+            }
+            else
+#endif
+            {
+                move_offset.f[0] +=
+                    (
+                        (g_CurrentPlayer->field_488.theta_transform.f[0] * g_CurrentPlayer->speedforwards) -
+                        (g_CurrentPlayer->field_488.theta_transform.f[2] * g_CurrentPlayer->speedsideways)
+                    ) * g_GlobalTimerDelta * 10.0f;
+
+                move_offset.f[2] +=
+                    (
+                        (g_CurrentPlayer->field_488.theta_transform.f[2] * g_CurrentPlayer->speedforwards) +
+                        (g_CurrentPlayer->field_488.theta_transform.f[0] * g_CurrentPlayer->speedsideways)
+                    ) * g_GlobalTimerDelta * 10.0f;
+            }
         }
 
         bondviewCalcUpdatePlayerCollision(&move_offset, (g_CurrentPlayer->swaytarget == 0.0f));
@@ -12896,6 +13096,15 @@ join_768:
         chr->ground = ppointers[index]->stanHeight;
         chr->manground = ppointers[index]->field_70;
         chr->sumground = chr->manground / 0.100000024f;
+
+        if (g_CheatActivated[CHEAT_FLY_MODE]
+            && bondviewThirdPersonPresentationActive(index))
+        {
+            /* Fly Mode owns the visible body's Y through the same PD-style
+             * player ground/manground pair above.  Do not carry a second
+             * chr-local gravity velocity while the body is suspended. */
+            chr->fallspeed.y = 0.0f;
+        }
     }
     else
 #endif
@@ -12920,6 +13129,14 @@ join_768:
         chr->ground = ppointers[index]->stanHeight;
         chr->manground = ppointers[index]->field_70;
         chr->sumground = chr->manground / 0.100000024f;
+
+        if (g_CheatActivated[CHEAT_FLY_MODE]
+            && bondviewThirdPersonPresentationActive(index))
+        {
+            /* chrTick must not leave a latent vertical fall velocity behind
+             * while Fly Mode is the authoritative Y solver. */
+            chr->fallspeed.y = 0.0f;
+        }
     }
 #endif
  

@@ -5,6 +5,9 @@
 #include "math_atan2f.h"
 #include "bondview_r.h"
 #include "bondview.h"
+#ifdef GE_MODDED_CHEATS
+#include "levelmodifiers.h"
+#endif
 #include "random.h"
 #include "game/bondinv.h"
 #include "game/chrai.h"
@@ -184,7 +187,11 @@ void bondviewLoadSetupIntroSection(void)
                     if (g_CurrentSetup.pads != NULL
                         && (check_ramrom_flags() == ((struct SetupIntroSpawn*)intro_record)->is_demo_playback))
                     {
-                        g_Startpad[startpadcount] = &g_CurrentSetup.pads[((struct SetupIntroSpawn*)intro_record)->index];
+                        s32 startPadIndex = ((struct SetupIntroSpawn*)intro_record)->index;
+#ifdef GE_MODDED_CHEATS
+                        startPadIndex = levelModifiersAdjustStartPadIndex(startPadIndex, startpadcount);
+#endif
+                        g_Startpad[startpadcount] = &g_CurrentSetup.pads[startPadIndex];
                         startpadcount++;
                     }
 
