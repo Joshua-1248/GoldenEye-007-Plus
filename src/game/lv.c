@@ -583,6 +583,14 @@ void lvlStageLoad(s32 stage)
 #endif
 
         set_cur_player(0);
+#ifdef GE_MODDED_CHEATS
+        /*
+         * initCheatTextBuffer above clears stage-local cheat runtime state.
+         * Rebuild it now from the frontend selections after every player has
+         * valid gameplay data and before the first gameplay frame.
+         */
+        cheatApplyFrontendSelectionsForStage();
+#endif
 #ifdef GE_PHYSICAL_FASTPATHS
         /* Hide first-person texture DMA/decompression inside stage loading so
          * weapon switches do not pay that cost during active gameplay. */

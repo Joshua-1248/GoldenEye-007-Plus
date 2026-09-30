@@ -72,7 +72,7 @@ import pathlib
 import sys
 import zopfli.gzip
 src = pathlib.Path(sys.argv[1]).read_bytes()
-gz = zopfli.gzip.compress(src, numiterations=15)
+gz = zopfli.gzip.compress(src, numiterations=15, blocksplittingmax=20)
 pathlib.Path(sys.argv[2]).write_bytes(b"\x11\x72" + gz[10:-8])
 PYZ
 else

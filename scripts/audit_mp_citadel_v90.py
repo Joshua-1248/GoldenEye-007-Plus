@@ -41,7 +41,7 @@ readme = text('readme.md')
 # Exact reconstructed assets.
 check('Zoinkity Citadel MP setup payload is exact reconstructed binary',
       sha('assets/obseg/setup/Ump_setupcatZ.bin') == '2d2dbaed1337a55cdeefe78f550a4634d1b8da1888de888c2e761efa68bb1016')
-check('Citadel runtime portrait is the V90 R5 vertically-corrected 68x44 I8 Zoinkity portrait',
+check('Citadel runtime portrait is the upright V90 R5 68x44 I8 conversion of Zoinkity artwork',
       sha('assets/images/split/MP_CITADEL.bin') == 'c14f6860e1f5197b0f9e408091310ef864fd57f22d9cca21e5feca4923c9ba65')
 check('retail final image 2697 is preserved byte-for-byte',
       sha('assets/images/split/2697.bin') == '06f82f9b6c78217705d40272a143836a9bf4b22c4944a53f663896152d77ce43')
@@ -61,6 +61,15 @@ check('Citadel uses Zoinkity hand-reclipped normal STAN source',
       'Original hand-reclipped collision data by Zoinkity.' in stan and real_tiles == 377)
 check('Citadel reclip includes and preserves 12/13-point polygons',
       point_counts and max(point_counts) == 13 and 12 in point_counts)
+# Ignore comments/formatting and lock the actual reconstructed STAN declarations to
+# the exact 2005 Zoinkity collision payload representation verified during R5.
+stan_body = stan[stan.index('StandTile tile_0 ='):]
+stan_body = re.sub(r'/\*.*?\*/', '', stan_body, flags=re.S)
+stan_body = re.sub(r'//.*', '', stan_body)
+stan_body = ''.join(stan_body.split())
+check('Citadel STAN declarations match the byte-verified Zoinkity R5 reclip dataset',
+      hashlib.sha256(stan_body.encode()).hexdigest() ==
+      'ec7e94671954ee016089999bfadd96d89e5100cc3f2343b71629728524513f01')
 check('generic STAN size table supports all 0-15 point-count encodings',
       '0x48,0x50,0x58,0x60' in stan_engine and '0x68,0x70,0x78,0x80' in stan_engine)
 
@@ -145,11 +154,21 @@ check('incremental image-list generation tracks the sync script itself',
       '$(BUILD_DIR)/imagelist.csv: imagelist.u.csv assets/images.def scripts/make/sync_imagelist_with_def.py' in makefile)
 check('incremental builds rebuild g_Textures when images.def changes',
       '$(BUILD_DIR)/src/game/image.o: assets/images.def' in makefile)
+check('incremental builds rebuild combined image bytes when a split image changes',
+      'IMAGE_SPLIT_BINS := $(wildcard assets/images/split/*.bin)' in makefile and
+      'assets/images/combined/combined.bin: $(BUILD_DIR)/imagelist.csv $(IMAGE_SPLIT_BINS)' in makefile)
+check('incremental builds rebuild MP portrait metadata when image IDs change',
+      '$(BUILD_DIR)/assets/oddtextures.o: assets/images.def src/bondconstants.h assets/oddtextures.h' in makefile)
+check('incremental builds rebuild runtime resource lookup when appended resources change',
+      '$(BUILD_DIR)/src/game/ob.o: assets/obseg/file_resource_table.inc.c assets/obseg/file_resource_id_enums.h assets/obseg/obseg.h' in makefile)
+check('Citadel setup and exact reclip payloads invalidate the ob_seg incbin object',
+      '$(BUILD_DIR)/assets/obseg/ob_seg.o: $(BUILD_DIR)/assets/obseg/setup/Ump_setupcatZ.rz' in makefile and
+      '$(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz' in makefile)
 
 check('Citadel restoration provenance document exists',
       'Original Citadel reclip/restoration: **Zoinkity**.' in doc)
-check('project README visibly credits Krijy and Zoinkity for Citadel',
-      '**Krijy**' in readme and '**Zoinkity**' in readme and
+check('top-level GitHub README visibly credits Zoinkity for Citadel',
+      '**Zoinkity**' in readme and 'Citadel multiplayer restoration' in readme and
       'docs/CITADEL_ZOINKITY.md' in readme)
 check('V89 and V90 audits are mandatory prerequisites',
       'level-modifiers-v89-audit' in makefile and 'mp-citadel-v90-audit' in makefile and

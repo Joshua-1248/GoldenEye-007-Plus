@@ -12481,6 +12481,7 @@ s32 playerTick(PropRecord *prop)
 #ifdef GE_MODDED_CHEATS
     s32 tp_use_player_y;
     s32 tp_use_supported_y;
+    f32 tp_prev_root_yaw;
 #endif
  
     index = getPlayerPointerIndex(prop);
@@ -12638,6 +12639,12 @@ s32 playerTick(PropRecord *prop)
  
     ppointers = g_playerPointers;
 #ifdef GE_MODDED_CHEATS
+    /* Remember the root yaw before this tick's locomotion chooser updates it.
+     * This lets the torso cancel only the movement-induced yaw delta
+     * immediately, while ordinary left/right manual aiming keeps GE's stock
+     * aim interpolation. */
+    tp_prev_root_yaw = ppointers[index]->field_1280;
+
     /* Perfect Dark-style player-body vertical ownership.  The later Rare
      * engine does not let a visible multiplayer body independently resample
      * its own floor: player movement owns both detected support and smoothed
@@ -12807,17 +12814,107 @@ set_crouch_lean:
             angle = 1.0f;
             sub = 5;
         }
-        else if ((ppointers[index]->speedsideways < 0.0f) && (group == 3) && (firing_animation_groups[group][3].pointer != NULL))
+        else if (group == 3)
         {
-            /* R3: dual-wield left strafe previously selected the alternate
-             * pose that can rotate the remote player backwards. Mirror the
-             * known-good right-strafe pose while preserving leftward motion. */
-            sub = 3;
-            angle = -ppointers[index]->speedsideways;
+            fwd = ppointers[index]->speedforwards;
+            frame = ppointers[index]->speedsideways;
 
-            if (ppointers[index]->field_1280 > -90.0f)
+            /* GE can present full-strength forward and sideways components at
+             * the same time. Feeding their Euclidean magnitude straight into
+             * PD's chooser makes a diagonal gait run up to sqrt(2) faster than
+             * a cardinal gait. PD's movement path has already resolved that
+             * input before the chooser sees it. Preserve the dominant GE
+             * component here so diagonal travel does not artificially speed up
+             * the authored locomotion cycle. */
+            angle = frame < 0.0f ? -frame : frame;
+            local90 = fwd < 0.0f ? -fwd : fwd;
+            if (angle < local90) angle = local90;
+
+            /* Match PD's chooser: turning speed participates in locomotion
+             * cadence even when translation is small. */
+            local90 = ppointers[index]->speedtheta;
+            if (local90 < 0.0f) local90 = -local90;
+            if (angle < local90) angle = local90;
+
+            /* PD has a separate STAND_NOTURN row.  Do not feed a stationary
+             * dual-wield player into the moving attack animation: GE's sub 0
+             * is the authored standing pose. */
+            if (angle < 0.05f)
             {
-                ppointers[index]->field_1280 = ppointers[index]->field_1280 - 15.0f;
+                angle = 1.0f;
+                sub = 0;
+                frame = 0.0f;
+            }
+            else
+            {
+                frame = atan2f(-frame, fwd) * (180.0f / M_PI_F);
+
+            /* GE atan2f returns [0, 360) for negative quadrants.  Normalize
+             * before PD's rear-hemisphere fold or right strafe (270 deg) is
+             * misclassified as backwards and its locomotion runs in reverse. */
+            if (frame > 180.0f)
+            {
+                frame -= 360.0f;
+            }
+
+            if (frame > 93.6f)
+            {
+                frame -= 180.0f;
+                angle = -angle;
+            }
+            else if (frame < -93.6f)
+            {
+                frame += 180.0f;
+                angle = -angle;
+            }
+
+            if (frame > 60.0f)
+            {
+                frame = 60.0f;
+            }
+            else if (frame < -60.0f)
+            {
+                frame = -60.0f;
+            }
+
+            local90 = angle < 0.0f ? -angle : angle;
+            sub = (ppointers[index]->headanim == 0 || local90 < 0.40000001f) ? 1 : 2;
+
+            if (sub == 1)
+            {
+                angle += angle;
+
+                if (angle > 1.0f) angle = 1.0f;
+                if (angle < -1.0f) angle = -1.0f;
+            }
+
+                /* Keep the lower-body/root turn inertia.  The torso is
+                 * counter-yawed independently below from the instantaneous
+                 * movement vector, so this delay affects only the hips/legs. */
+                if (ppointers[index]->field_1280 < frame)
+                {
+                    ppointers[index]->field_1280 += 6.0f;
+                    if (ppointers[index]->field_1280 > frame) ppointers[index]->field_1280 = frame;
+                }
+                else if (ppointers[index]->field_1280 > frame)
+                {
+                    ppointers[index]->field_1280 -= 6.0f;
+                    if (ppointers[index]->field_1280 < frame) ppointers[index]->field_1280 = frame;
+                }
+            }
+
+            if (sub == 0)
+            {
+                if (ppointers[index]->field_1280 > 0.0f)
+                {
+                    ppointers[index]->field_1280 -= 6.0f;
+                    if (ppointers[index]->field_1280 < 0.0f) ppointers[index]->field_1280 = 0.0f;
+                }
+                else if (ppointers[index]->field_1280 < 0.0f)
+                {
+                    ppointers[index]->field_1280 += 6.0f;
+                    if (ppointers[index]->field_1280 > 0.0f) ppointers[index]->field_1280 = 0.0f;
+                }
             }
         }
         else if ((ppointers[index]->speedsideways < 0.0f) && (firing_animation_groups[group][4].pointer != NULL))
@@ -12834,7 +12931,7 @@ set_crouch_lean:
         {
             sub = 3;
             angle = ppointers[index]->speedsideways;
- 
+
             if (ppointers[index]->field_1280 > (-90.0f))
             {
                 ppointers[index]->field_1280 = ppointers[index]->field_1280 - 15.0f;
@@ -12995,6 +13092,16 @@ join_768:
             if (ppointers[index]->bodyModel->anim2 == NULL)
             {
                 startframe = (0.0f <= frame) ? (frame) : (0.0f);
+#ifdef GE_MODDED_CHEATS
+                /* A reverse dual-wield gait starting at frame 0 immediately
+                 * trips GE's reverse loop boundary on the next tick.  Start at
+                 * the authored cycle's last frame instead so reverse playback
+                 * enters the loop continuously. */
+                if (group == 3 && angle < 0.0f)
+                {
+                    startframe = ((ModelAnimation *)anim)->unk04 - 1.0f;
+                }
+#endif
                 modelSetAnimation(ppointers[index]->bodyModel, (ModelAnimation *) anim,
 #ifdef GE_MODDED_CHEATS
                     tpdeathflip,
@@ -13007,7 +13114,17 @@ join_768:
  
                 if (0.0f <= frame)
                 {
+#ifdef GE_MODDED_CHEATS
+                    /* GE restarts a looping animation through modelSetAnimation
+                     * at every wrap.  A 16-tick loop merge is harmless forward,
+                     * but reverse dual locomotion visibly re-blends the legs at
+                     * every frame-0 crossing.  The gait is cyclic, so wrap it
+                     * directly in reverse instead of starting a fresh merge. */
+                    modelSetAnimLooping(ppointers[index]->bodyModel, frame,
+                        (group == 3 && angle < 0.0f) ? 0.0f : 16.0f);
+#else
                     modelSetAnimLooping(ppointers[index]->bodyModel, frame, 16.0f);
+#endif
                 }
  
                 if (0.0f <= local90)
@@ -13022,6 +13139,13 @@ join_768:
         {
             if (angle != ppointers[index]->field_1288)
             {
+                /* Perfect Dark does not snap locomotion playback speed when
+                 * movement crosses between the front and rear hemispheres.
+                 * It changes the speed over one tick.  That short ramp is
+                 * important when the sign changes: an instantaneous +speed to
+                 * -speed reversal makes the legs reverse velocity in one pose,
+                 * which is the remaining visible twitch when rapidly switching
+                 * between forward and backward strafing. */
                 modelSetAnimSpeed(ppointers[index]->bodyModel, angle, 1.0f);
                 ppointers[index]->field_1288 = angle;
             }
@@ -13056,6 +13180,30 @@ join_768:
             }
         }
  
+#ifdef GE_MODDED_CHEATS
+        /* field_1280 is locomotion/root yaw.  Counter exactly that yaw at the
+         * torso so hips/legs can face the travel direction while the upper
+         * body remains aligned with Bond's look/crosshair.  This uses GE's
+         * existing torso-yaw channel rather than modifying animation joints. */
+        if (group == 3)
+        {
+            f32 rootdelta = (ppointers[index]->field_1280 - tp_prev_root_yaw)
+                * (M_TAU_F / 360.0f);
+
+            /* Split the two horizontal torso motions instead of forcing the
+             * whole aim channel to its target.  Lower-body/root yaw must be
+             * cancelled immediately so strafing inertia never drags the torso
+             * sideways, but the player's own manual left/right aim should keep
+             * GoldenEye's normal aimendcount interpolation.
+             *
+             * Shift the CURRENT torso yaw only by this tick's root-yaw delta,
+             * then place the compensated manual aim in the END target.  The
+             * stock aim updater can therefore ease manual aiming normally while
+             * locomotion counter-yaw remains exact on every tick. */
+            chr->aimsideback -= rootdelta;
+            local88 -= ppointers[index]->field_1280 * (M_TAU_F / 360.0f);
+        }
+#endif
         chr->aimendsideback = local88;
         chr->aimendcount = 10;
     }

@@ -101,6 +101,9 @@ extern u8 g_CheatPlayerTextRelated[];
 bool cheatIsEnemyRockets(CHEAT_ID cheatindex);
 void cheatButtonTurnOnCheatForPlayers(CHEAT_ID cheatindex);
 #ifdef GE_MODDED_CHEATS
+void cheatApplyFrontendSelectionsForStage(void);
+#endif
+#ifdef GE_MODDED_CHEATS
 /* RC5 watch Cheats submenu reuses the real runtime activation handlers. */
 void cheatButtonHandleCheatsTurnedOn(CHEAT_ID cheatindex);
 void cheatModRunInGameAction(s32 action);

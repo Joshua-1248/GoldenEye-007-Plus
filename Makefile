@@ -533,8 +533,10 @@ $(BUILD_DIR)/imagelist.csv: imagelist.u.csv assets/images.def scripts/make/sync_
 	@mkdir -p $(BUILD_DIR)
 	python3 scripts/make/sync_imagelist_with_def.py $@
 
+# combined.bin is derived from every split image.  Track those inputs so an
+# incremental build cannot keep stale texture bytes when a Plus-owned image is
+# corrected without changing the image namespace.
 IMAGE_SPLIT_BINS := $(wildcard assets/images/split/*.bin)
-
 assets/images/combined/combined.bin: $(BUILD_DIR)/imagelist.csv $(IMAGE_SPLIT_BINS)
 	scripts/make/combine_images_named.sh $(BUILD_DIR)/imagelist.csv assets/images/combined
 
@@ -543,11 +545,20 @@ assets/images/combined/combined.bin: $(BUILD_DIR)/imagelist.csv $(IMAGE_SPLIT_BI
 # new texture ID is appended, leaving the old sentinel at the new ID and making
 # texLoad read the following data as the next texture offset.
 $(BUILD_DIR)/src/game/image.o: assets/images.def
-$(BUILD_DIR)/assets/oddtextures.o: assets/images.def
 
-# ob.c directly includes the generated resource ID/table data.
-$(BUILD_DIR)/src/game/ob.o: assets/obseg/file_resource_id_enums.h assets/obseg/file_resource_table.inc.c
+# The global MP portrait metadata embeds IMAGE_* enum values generated from
+# images.def through bondconstants.h.  Rebuild it whenever that namespace grows.
+$(BUILD_DIR)/assets/oddtextures.o: assets/images.def src/bondconstants.h assets/oddtextures.h
 
+# ob.c compiles the generated resource ID/name table directly.  Appended Plus
+# resources must therefore invalidate ob.o or fileGetIndex() will keep the old
+# runtime table even though the resource bytes exist in ob_seg.
+$(BUILD_DIR)/src/game/ob.o: assets/obseg/file_resource_table.inc.c assets/obseg/file_resource_id_enums.h assets/obseg/obseg.h
+
+# ob_seg.s incbins Citadel's compressed setup and exact Zoinkity reclip.
+# Make cannot infer assembler .incbin dependencies, so keep both explicit.
+$(BUILD_DIR)/assets/obseg/ob_seg.o: $(BUILD_DIR)/assets/obseg/setup/Ump_setupcatZ.rz \
+	$(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz
 
 $(BUILD_DIR)/assets/images/combined/%.o: assets/images/combined/combined.bin
 	$(LD) -r -b binary $< -o $@
@@ -652,9 +663,6 @@ $(BUILD_DIR)/assets/%.o: assets/%.s
 
 #Build Obseg
 $(BUILD_DIR)/assets/obseg/%.o: assets/obseg/%.s $(OBSEG_RZ)
-
-# Citadel resources are pulled into ob_seg.s via .incbin; make cannot infer these.
-$(BUILD_DIR)/assets/obseg/ob_seg.o: $(BUILD_DIR)/assets/obseg/setup/Ump_setupcatZ.rz $(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz
 	$(AS) $(ASFLAGS) -o $@ $<
 
 #Build C files in assets/

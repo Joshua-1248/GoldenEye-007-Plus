@@ -33,7 +33,7 @@ ck('only Silo is implemented initially',
 ck('unimplemented frontend levels are dimmed', '0x606060C0' in F and 'levelModifiersLevelImplemented' in F)
 ck('frontend entry is directly below Map Maker', '"Map Maker"' in F and '"Level Modifiers"' in F and 'y = 103;' in F)
 ck('frontend category browser and level browser menu IDs are appended',
-   all(x in BC for x in ['MENU_LEVEL_MODIFIERS,','MENU_LEVEL_MODIFIERS_LEVELS,','MENU_LEVEL_MODIFIERS_SILO,']))
+   all(x in BC for x in ['MENU_LEVEL_MODIFIERS,','MENU_LEVEL_MODIFIERS_LEVELS,','MENU_LEVEL_MODIFIERS_DETAIL,']))
 ck('SP Watch places Level Modifiers before In-Game Cheats',
    'else if (row == 22) { label = "Level Modifiers"; value = ">"; }' in O and
    'else { label = "In-Game Cheats"; value = ">"; }' in O)

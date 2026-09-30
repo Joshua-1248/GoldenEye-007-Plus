@@ -1892,7 +1892,7 @@ typedef enum MENU
     /* R24 V89 Level Modifiers browser. Appended; previous menu IDs remain stable. */
     MENU_LEVEL_MODIFIERS,
     MENU_LEVEL_MODIFIERS_LEVELS,
-    MENU_LEVEL_MODIFIERS_SILO,
+    MENU_LEVEL_MODIFIERS_DETAIL,
 #endif
     MENU_MAX
 } MENU;

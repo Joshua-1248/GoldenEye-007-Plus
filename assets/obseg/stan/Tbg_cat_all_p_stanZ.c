@@ -1,7 +1,8 @@
 #include <ultra64.h>
 #include <game/stan.h>
 
-/* V90: Citadel reclipping reconstructed from Zoinkity's Citadel.bin. */
+/* V90 R5: exact final-engine STAN representation of Zoinkity's Citadel.bin reclip. */
+/* The 377 tile records below were verified byte-for-byte against the 2005 uploader payload. */
 /* Original hand-reclipped collision data by Zoinkity. */
 
 // forward declarations

@@ -1,12 +1,5 @@
 # Citadel multiplayer restoration (V90)
 
-
-## Earlier Citadel discovery and playable release
-
-**Krijy** is credited with first discovering Citadel and making it playable for the wider GoldenEye community. The early playable implementation reused Cradle's setup because Cradle keeps all of its rooms loaded at once, which made it a practical host setup for exposing the unfinished Citadel geometry.
-
-Zoinkity's later restoration/reclip work built on that community discovery and addressed Citadel's obsolete collision/STAN data for the final GoldenEye engine.
-
 GoldenEye Plus V90 restores the unused Citadel stage as a multiplayer map.
 
 The playable collision, multiplayer setup data and level-select portrait are
@@ -18,7 +11,7 @@ original RAM uploader or applying an IPS at runtime.
 
 ## What is retained from Zoinkity's work
 
-- the hand-reclipped Citadel STAN/collision data;
+- the hand-reclipped Citadel STAN/collision data (377 tile records, verified byte-for-byte against the clipping payload in `Citadel.bin`);
 - the Citadel multiplayer setup payload;
 - the runtime multiplayer intro/start-pad data embedded in `Citadel.bin`;
 - the Citadel multiplayer level-select portrait;
@@ -34,12 +27,22 @@ original RAM uploader or applying an IPS at runtime.
 - The original uploader's absolute pointer redirects are replaced by a
   source-level Citadel MP handoff which resolves STAN links by their tile names.
 - STAN traversal now supports the 11-15 point record sizes needed by the
-  reclip; Zoinkity's data uses polygons up to 13 points.
+  reclip; Zoinkity's data uses polygons up to 13 points. The ordinary final-game
+  STAN loader is used; no retail clipping resource or stage is substituted.
+- V90 R5 explicitly ties the Citadel STAN and all split image bytes into the
+  incremental build graph, so the exact reclip and portrait cannot remain stale
+  inside `ob_seg.o` / `combined.bin` after source or asset changes.
+- The generated STAN has the normal 12-byte file prefix followed by the exact
+  14,164-byte Zoinkity collision block (`SHA-256`
+  `1ae6a1a58f505fbdf43864ca546bb79168f02c5e8b62d61f36b99e720412dcc2`).
 - The portrait artwork is reconstructed from the original IPS image payload.
   V90 R2 converted that artwork to the same 68x44 I8 runtime format used by the
   retail multiplayer portraits. V90 R3 gives it a dedicated appended image ID,
   preserving every retail image slot unchanged while using the decomp's
-  mod-friendly image-extension path.
+  mod-friendly image-extension path. V90 R5 vertically orients only this
+  dedicated 68x44 asset for the final engine's level-select renderer; its size,
+  format and additive image ID are unchanged. The historical patch's emulator/
+  console image-slot tricks are deliberately not reproduced.
 - Appended GoldenEye Plus obseg resources are emitted at the physical end of
   ob_seg in the same order as their appended resource-table IDs. This preserves
   all retail IDs while keeping GoldenEye's next-address resource-size calculation

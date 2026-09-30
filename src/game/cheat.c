@@ -1016,6 +1016,31 @@ bool cheatCheckIfMPCheat(CHEAT_ID cheat_id)
 
 
 
+#ifdef GE_MODDED_CHEATS
+/*
+ * Rebuild the live per-player cheat state from the frontend selection after
+ * lvlStageLoad has reset players and initCheatTextBuffer has cleared the
+ * stage-local runtime bitset.
+ *
+ * Enemy Rockets remains on its retail early-load path because it affects
+ * stage setup before ordinary player initialisation.
+ */
+void cheatApplyFrontendSelectionsForStage(void)
+{
+    s32 i;
+    s32 applicableMask = CHEAT_MASK_MPGAME >> (getPlayerCount() == 1);
+
+    for (i = 1; i < CHEAT_INVALID; i++)
+    {
+        if (i != CHEAT_ENEMY_ROCKETS && g_CheatActivated[i]
+            && (g_CheatInfo[i - 1].maskfield & applicableMask))
+        {
+            cheatButtonTurnOnCheatForPlayers((CHEAT_ID)i);
+        }
+    }
+}
+#endif
+
 /**
  * Address 0x7F091AAC.
  */

@@ -21,6 +21,10 @@ typedef enum LevelModifierPolicy
 void levelModifiersOnStanLoaded(s32 levelid, u8 *stan);
 s32 levelModifiersAdjustStartPadIndex(s32 originalIndex, s32 startPadSlot);
 
+s32 levelModifiersGetCurrentStage(void);
+const char *levelModifiersGetCurrentStageName(void);
+s32 levelModifiersGetCurrentStageModifierCount(void);
+
 s32 levelModifiersGetLevelCount(s32 category);
 const char *levelModifiersGetLevelName(s32 category, s32 index);
 s32 levelModifiersLevelImplemented(s32 category, s32 index);
@@ -31,5 +35,12 @@ void levelModifiersSetSiloBetaVentPreload(s32 enabled);
 s32 levelModifiersSiloBetaVentActive(void);
 s32 levelModifiersActivateSiloBetaVent(void);
 LevelModifierPolicy levelModifiersGetSiloBetaVentPolicy(void);
+
+s32 levelModifiersCitadelWaterActive(void);
+s32 levelModifiersGetCitadelWaterPreload(void);
+void levelModifiersSetCitadelWaterPreload(s32 enabled);
+s32 levelModifiersSetCitadelWater(s32 enabled);
+void levelModifiersOnEnvironmentLoaded(s32 levelid);
+LevelModifierPolicy levelModifiersGetCitadelWaterPolicy(void);
 
 #endif

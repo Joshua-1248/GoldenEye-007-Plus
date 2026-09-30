@@ -51,3 +51,8 @@ print(f"FREEZE TIMER V87 AUDIT: {'PASS' if not bad else 'FAIL'} ({len(checks)-le
 if bad:
     for n in bad: print(' - '+n)
     sys.exit(1)
+
+ck('frontend-selected toggle cheats are rebuilt after stage reset',
+   'cheatApplyFrontendSelectionsForStage();' in (R/'src/game/lv.c').read_text(errors='replace') and
+   'void cheatApplyFrontendSelectionsForStage(void)' in (R/'src/game/cheat.c').read_text(errors='replace') and
+   'for (i = 0; i <= CHEAT_INVALID; i++)' in (R/'src/game/initcheattext.c').read_text(errors='replace'))

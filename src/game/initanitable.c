@@ -208,6 +208,8 @@ s32 animation_table_ptrs1[] = {
     PTR_ANIM_cradle_fall,
     PTR_ANIM_credits_bond_kissing,
     PTR_ANIM_credits_natalya_kissing,
+    PTR_ANIM_plus_dual_strafe_left,
+    PTR_ANIM_plus_dual_strafe_right,
     0
 };
 

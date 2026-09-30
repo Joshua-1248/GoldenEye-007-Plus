@@ -72,3 +72,8 @@ print(f"\nLEVEL NEVER ENDS V86 AUDIT: {'PASS' if not failed else 'FAIL'} ({len(c
 if failed:
     for n in failed: print(' - '+n)
     sys.exit(1)
+
+ck('frontend-selected toggle cheats are rebuilt after stage reset',
+   'cheatApplyFrontendSelectionsForStage();' in (R/'src/game/lv.c').read_text(errors='replace') and
+   'void cheatApplyFrontendSelectionsForStage(void)' in (R/'src/game/cheat.c').read_text(errors='replace') and
+   'for (i = 0; i <= CHEAT_INVALID; i++)' in (R/'src/game/initcheattext.c').read_text(errors='replace'))

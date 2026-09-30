@@ -172,6 +172,9 @@
 #define PTR_ANIM_ENTRY_plane_runway 0x16995c
 #define PTR_ANIM_ENTRY_helicopter_takeoff 0x169bd0
 
+#define PTR_ANIM_ENTRY_plus_dual_strafe_left 0x168440
+#define PTR_ANIM_ENTRY_plus_dual_strafe_right 0x168AA0
+
 extern u32 ANIM_ENTRY_idle;
 extern u32 ANIM_ENTRY_fire_standing;
 extern u32 ANIM_ENTRY_fire_standing_fast;
@@ -345,3 +348,6 @@ extern u32 ANIM_ENTRY_credits_natalya_kissing;
 extern u32 ANIM_ENTRY_helicopter_cradle;
 extern u32 ANIM_ENTRY_plane_runway;
 extern u32 ANIM_ENTRY_helicopter_takeoff;
+
+extern u32 ANIM_ENTRY_plus_dual_strafe_left;
+extern u32 ANIM_ENTRY_plus_dual_strafe_right;

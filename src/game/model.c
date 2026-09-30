@@ -2855,9 +2855,13 @@ void modelSetAnimFrame(Model* model, f32 frame)
     s32 frameb;
     bool forwards;
 
-    framea = floorFloatToInt(frame);
-
     forwards = (model->speed >= 0);
+    /* A fractional frame always lies between floor(frame) and ceil(frame).
+     * The retail reverse path used floor(frame) and floor(frame)-1, which
+     * extrapolates outside that interval (negative blend fractions).  That
+     * is mostly hidden by one-shot animations, but becomes visible when a
+     * locomotion cycle is continuously played backwards. */
+    framea = forwards ? floorFloatToInt(frame) : ceilFloatToInt(frame);
     frameb = (forwards ? framea + 1 : framea - 1);
 
     model->framea = modelConstrainOrWrapAnimFrame(framea, model->anim, model->endframe);
@@ -2876,9 +2880,9 @@ void modelSetAnimFrame(Model* model, f32 frame)
     }
     else
     {
-        f32 tmp = 1.0f - (frame - (f32) frameb);
+        f32 tmp = (f32)framea - frame;
         model->unk2c = tmp;
-        model->animframe1 = model->frameb + (1.0f - tmp);
+        model->animframe1 = model->framea + (model->frameb - model->framea) * tmp;
     }
 }
 
@@ -2893,9 +2897,8 @@ void modelSetAnimFrame2(Model* model, f32 frame1, f32 frame2)
 
     if (model->anim2 != NULL)
     {
-        framea = floorFloatToInt(frame2);
-
         forwards = (model->speed2 >= 0.0f);
+        framea = forwards ? floorFloatToInt(frame2) : ceilFloatToInt(frame2);
         frameb = forwards ? (framea + 1) : (framea - 1);
 
         model->frame2a = modelConstrainOrWrapAnimFrame(framea, model->anim2, model->unk6c);
@@ -2914,9 +2917,9 @@ void modelSetAnimFrame2(Model* model, f32 frame1, f32 frame2)
         }
         else
         {
-            f32 tmp = 1.0f - (frame2 - (f32) frameb);
+            f32 tmp = (f32)framea - frame2;
             model->unk5c = tmp;
-            model->animframe2 = model->frame2b + (1.0f - tmp);
+            model->animframe2 = model->frame2a + (model->frame2b - model->frame2a) * tmp;
         }
     }
 }

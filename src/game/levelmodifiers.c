@@ -2,6 +2,7 @@
 #include <bondconstants.h>
 #include "levelmodifiers.h"
 #include "stan.h"
+#include "bgfog.h"
 
 extern s32 gptr_stan;
 
@@ -145,6 +146,8 @@ static const char *g_LevelModifierMiscNames[] = {
 static s32 g_LevelModifierCurrentStage = LEVELID_NONE;
 static s32 g_LevelModifierSiloBetaVentPreload = FALSE;
 static s32 g_LevelModifierSiloBetaVentActive = FALSE;
+static s32 g_LevelModifierCitadelWaterPreload = FALSE;
+static s32 g_LevelModifierCitadelWaterActive = FALSE;
 
 static void levelModifiersApplySiloBetaVentStan(u8 *stan)
 {
@@ -167,12 +170,63 @@ void levelModifiersOnStanLoaded(s32 levelid, u8 *stan)
 {
     g_LevelModifierCurrentStage = levelid;
     g_LevelModifierSiloBetaVentActive = FALSE;
+    g_LevelModifierCitadelWaterActive = FALSE;
 
     if (levelid == LEVELID_SILO && g_LevelModifierSiloBetaVentPreload)
     {
         g_LevelModifierSiloBetaVentActive = TRUE;
         levelModifiersApplySiloBetaVentStan(stan);
     }
+}
+
+s32 levelModifiersGetCurrentStage(void)
+{
+    return g_LevelModifierCurrentStage;
+}
+
+const char *levelModifiersGetCurrentStageName(void)
+{
+    switch (g_LevelModifierCurrentStage)
+    {
+        case LEVELID_DAM: return "DAM";
+        case LEVELID_FACILITY: return "FACILITY";
+        case LEVELID_RUNWAY: return "RUNWAY";
+        case LEVELID_SURFACE: return "SURFACE 1";
+        case LEVELID_BUNKER1: return "BUNKER 1";
+        case LEVELID_SILO: return "SILO";
+        case LEVELID_FRIGATE: return "FRIGATE";
+        case LEVELID_SURFACE2: return "SURFACE 2";
+        case LEVELID_BUNKER2: return "BUNKER 2";
+        case LEVELID_STATUE: return "STATUE";
+        case LEVELID_ARCHIVES: return "ARCHIVES";
+        case LEVELID_STREETS: return "STREETS";
+        case LEVELID_DEPOT: return "DEPOT";
+        case LEVELID_TRAIN: return "TRAIN";
+        case LEVELID_JUNGLE: return "JUNGLE";
+        case LEVELID_CONTROL: return "CONTROL";
+        case LEVELID_CAVERNS: return "CAVERNS";
+        case LEVELID_CRADLE: return "CRADLE";
+        case LEVELID_AZTEC: return "AZTEC";
+        case LEVELID_EGYPT: return "EGYPTIAN";
+        case LEVELID_TEMPLE: return "TEMPLE";
+        case LEVELID_COMPLEX: return "COMPLEX";
+        case LEVELID_CAVES: return "CAVES";
+        case LEVELID_LIBRARY: return "LIBRARY";
+        case LEVELID_BASEMENT: return "BASEMENT";
+        case LEVELID_STACK: return "STACK";
+        case LEVELID_CUBA: return "CUBA";
+        case LEVELID_CITADEL: return "CITADEL";
+        default: return "LEVEL";
+    }
+}
+
+s32 levelModifiersGetCurrentStageModifierCount(void)
+{
+    if (g_LevelModifierCurrentStage == LEVELID_SILO)
+        return 1;
+    if (g_LevelModifierCurrentStage == LEVELID_CITADEL)
+        return 1;
+    return 0;
 }
 
 s32 levelModifiersAdjustStartPadIndex(s32 originalIndex, s32 startPadSlot)
@@ -216,13 +270,20 @@ const char *levelModifiersGetLevelName(s32 category, s32 index)
 
 s32 levelModifiersLevelImplemented(s32 category, s32 index)
 {
-    return category == LEVELMOD_CATEGORY_SINGLE_PLAYER && index == 5; /* Silo */
+    if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER && index == 5) /* Silo */
+        return TRUE;
+    if (category == LEVELMOD_CATEGORY_MISCELLANEOUS && index == 1) /* Citadel */
+        return TRUE;
+    return FALSE;
 }
 
 s32 levelModifiersLevelAvailableInCurrentStage(s32 category, s32 index)
 {
-    return levelModifiersLevelImplemented(category, index)
-        && g_LevelModifierCurrentStage == LEVELID_SILO;
+    if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER && index == 5)
+        return g_LevelModifierCurrentStage == LEVELID_SILO;
+    if (category == LEVELMOD_CATEGORY_MISCELLANEOUS && index == 1)
+        return g_LevelModifierCurrentStage == LEVELID_CITADEL;
+    return FALSE;
 }
 
 s32 levelModifiersGetSiloBetaVentPreload(void)
@@ -257,4 +318,71 @@ s32 levelModifiersActivateSiloBetaVent(void)
 LevelModifierPolicy levelModifiersGetSiloBetaVentPolicy(void)
 {
     return LEVELMOD_POLICY_LATCHED;
+}
+
+s32 levelModifiersCitadelWaterActive(void)
+{
+    return g_LevelModifierCitadelWaterActive;
+}
+
+s32 levelModifiersGetCitadelWaterPreload(void)
+{
+    return g_LevelModifierCitadelWaterPreload;
+}
+
+void levelModifiersSetCitadelWaterPreload(s32 enabled)
+{
+    g_LevelModifierCitadelWaterPreload = enabled ? TRUE : FALSE;
+}
+
+s32 levelModifiersSetCitadelWater(s32 enabled)
+{
+    CurrentEnvironmentRecord *environment;
+
+    if (g_LevelModifierCurrentStage != LEVELID_CITADEL)
+        return FALSE;
+
+    environment = fogGetCurrentEnvironmentp();
+    if (environment == NULL)
+        return FALSE;
+
+    /*
+     * Historical Citadel "Water" GameShark code patched the live
+     * CurrentEnvironmentRecord at 0x80044DCC. The WATER_OFF/WATER_ON RAM
+     * comparison shows that Plus already carries the intended Citadel water
+     * plane parameters (sea height, image and colour); the meaningful live
+     * environment change is IsWater 0 -> 1.
+     *
+     * The cheat's final writes at 0x80044E08/0C/10 were constructing a
+     * Citadel fog-table header (ID 0xF0, blend 10.0, far fog 20000.0) for a
+     * build which did not have a proper Citadel environment entry. Plus V90
+     * already has dedicated 1P-4P Citadel environment records, so reproducing
+     * those raw adjacent writes would corrupt unrelated table data.
+     */
+    environment->IsWater = enabled ? 1 : 0;
+    g_LevelModifierCitadelWaterPreload = enabled ? TRUE : FALSE;
+    g_LevelModifierCitadelWaterActive = enabled ? TRUE : FALSE;
+    return TRUE;
+}
+
+void levelModifiersOnEnvironmentLoaded(s32 levelid)
+{
+    CurrentEnvironmentRecord *environment;
+
+    g_LevelModifierCitadelWaterActive = FALSE;
+
+    if (levelid != LEVELID_CITADEL || !g_LevelModifierCitadelWaterPreload)
+        return;
+
+    environment = fogGetCurrentEnvironmentp();
+    if (environment == NULL)
+        return;
+
+    environment->IsWater = 1;
+    g_LevelModifierCitadelWaterActive = TRUE;
+}
+
+LevelModifierPolicy levelModifiersGetCitadelWaterPolicy(void)
+{
+    return LEVELMOD_POLICY_REVERSIBLE;
 }

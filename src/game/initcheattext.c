@@ -6,7 +6,7 @@
 void initCheatTextBuffer(void) {
     int i;
     
-    for(i=0;i<75;i++)
+    for (i = 0; i <= CHEAT_INVALID; i++)
     {
         g_CheatPlayerTextRelated[i] = 0;
     }

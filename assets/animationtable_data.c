@@ -873,3 +873,16 @@ u32 ANIM_DATA_helicopter_takeoff[] =
     PTR_ANIM_ENTRY_helicopter_takeoff,0x00960c00,0x0000e608,0x00160028,0x0000e620,0x00000000,0x00000000,0x00000000
 };
 
+
+/* GoldenEye Plus: ModelAnimation descriptors for dedicated dual-wield strafes.
+ * Root-motion descriptors/bitstreams are shared with the authored lateral clips. */
+
+u32 ANIM_DATA_plus_dual_strafe_left[] =
+{
+    PTR_ANIM_ENTRY_plus_dual_strafe_left,0x00180c01,0x00007600,0x00120220,0x00007618,0x00000500,0xfffe0005,0x080003ff,0x000d0600,0x006d0013,0x00000000,0x47f8e81a,0x1cc6a194,0xf4209d87,0xc3112e20,0x067976f6
+};
+
+u32 ANIM_DATA_plus_dual_strafe_right[] =
+{
+    PTR_ANIM_ENTRY_plus_dual_strafe_right,0x00180c01,0x00007664,0x00130220,0x0000767c,0x00000500,0x00010005,0x07000412,0x000c0600,0x00a00012,0x00000000,0x2f921078,0x8330246a,0x83f91039,0xbfdd5ae2,0xf4faddb1
+};

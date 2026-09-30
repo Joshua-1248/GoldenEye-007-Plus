@@ -197,6 +197,9 @@
 // These are compile time extern constants (so not "really" const), but used the same
 // as the defines above, which is to index into ptr_animation_table.
 
+#define PTR_ANIM_plus_dual_strafe_left 0xE7E0
+#define PTR_ANIM_plus_dual_strafe_right 0xE820
+
 extern s32 ANIM_DATA_idle;
 extern s32 ANIM_DATA_fire_standing;
 extern s32 ANIM_DATA_fire_standing_fast;
@@ -386,5 +389,8 @@ extern s32 ANIM_DATA_plane_runway;
 extern s32 ANIM_DATA_helicopter_takeoff;
 
 
+
+extern s32 ANIM_DATA_plus_dual_strafe_left;
+extern s32 ANIM_DATA_plus_dual_strafe_right;
 
 #endif

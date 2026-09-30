@@ -10098,7 +10098,7 @@ void interface_menu_level_modifiers_levels(void)
     {
         if (levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice))
         {
-            frontChangeMenu(MENU_LEVEL_MODIFIERS_SILO, FALSE);
+            frontChangeMenu(MENU_LEVEL_MODIFIERS_DETAIL, FALSE);
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else
@@ -10140,14 +10140,14 @@ Gfx *constructor_menu_level_modifiers_levels(Gfx *DL)
     return frontDrawCursor(DL);
 }
 
-void init_menu_level_modifiers_silo(void)
+void init_menu_level_modifiers_detail(void)
 {
     load_walletbond();
 }
 
-void update_menu_level_modifiers_silo(void) { }
+void update_menu_level_modifiers_detail(void) { }
 
-void interface_menu_level_modifiers_silo(void)
+void interface_menu_level_modifiers_detail(void)
 {
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
     viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f,10000.0f); viSetUseZBuf(FALSE);
@@ -10159,23 +10159,48 @@ void interface_menu_level_modifiers_silo(void)
     }
     if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | L_JPAD | R_JPAD | L_CBUTTONS | R_CBUTTONS))
     {
-        levelModifiersSetSiloBetaVentPreload(!levelModifiersGetSiloBetaVentPreload());
+        if (g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_MISCELLANEOUS
+            && g_LevelModifiersLevelChoice == 1)
+        {
+            levelModifiersSetCitadelWaterPreload(!levelModifiersGetCitadelWaterPreload());
+        }
+        else
+        {
+            levelModifiersSetSiloBetaVentPreload(!levelModifiersGetSiloBetaVentPreload());
+        }
         sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);
     }
     frontUpdateControlStickPosition();
 }
 
-Gfx *constructor_menu_level_modifiers_silo(Gfx *DL)
+Gfx *constructor_menu_level_modifiers_detail(Gfx *DL)
 {
-    const char *value = levelModifiersGetSiloBetaVentPreload() ? "On" : "Off";
+    s32 citadel = g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_MISCELLANEOUS
+        && g_LevelModifiersLevelChoice == 1;
+    const char *value = citadel
+        ? (levelModifiersGetCitadelWaterPreload() ? "On" : "Off")
+        : (levelModifiersGetSiloBetaVentPreload() ? "On" : "Off");
+
     DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
     DL = microcode_constructor_related_to_menus(DL,42,26,422,210,0x000000B8);
-    DL = frontLevelModifiersText(DL,55,42,"Level Modifiers - Silo",0xFFE070FF);
     DL = microcode_constructor_related_to_menus(DL,70,91,370,111,0x76561CB0);
-    DL = frontLevelModifiersText(DL,74,94,"Beta Vent Start",0xFFE070FF);
-    DL = frontLevelModifiersText(DL,300,94,value,0xFFFFFFFF);
-    DL = frontLevelModifiersText(DL,74,142,"Starts Bond at preserved beta vent pad 230 and",0xD0D0D0FF);
-    DL = frontLevelModifiersText(DL,74,160,"restores the matching historical Silo collision layout.",0xD0D0D0FF);
+
+    if (citadel)
+    {
+        DL = frontLevelModifiersText(DL,55,42,"Level Modifiers - Citadel",0xFFE070FF);
+        DL = frontLevelModifiersText(DL,74,94,"Water",0xFFE070FF);
+        DL = frontLevelModifiersText(DL,300,94,value,0xFFFFFFFF);
+        DL = frontLevelModifiersText(DL,74,142,"Adds the restored Citadel water plane using the level's",0xD0D0D0FF);
+        DL = frontLevelModifiersText(DL,74,160,"native water height, texture and colour environment data.",0xD0D0D0FF);
+    }
+    else
+    {
+        DL = frontLevelModifiersText(DL,55,42,"Level Modifiers - Silo",0xFFE070FF);
+        DL = frontLevelModifiersText(DL,74,94,"Beta Vent Start",0xFFE070FF);
+        DL = frontLevelModifiersText(DL,300,94,value,0xFFFFFFFF);
+        DL = frontLevelModifiersText(DL,74,142,"Starts Bond at preserved beta vent pad 230 and",0xD0D0D0FF);
+        DL = frontLevelModifiersText(DL,74,160,"restores the matching historical Silo collision layout.",0xD0D0D0FF);
+    }
     DL = frontLevelModifiersText(DL,74,190,"A/Left/Right: Toggle     B: Back",0xB8B8B8FF);
     return frontDrawCursor(DL);
 }
@@ -11496,7 +11521,7 @@ void menu_init(void)
             case MENU_MOD_OPTIONS:            update_menu_mod_options();            break;
             case MENU_LEVEL_MODIFIERS:        update_menu_level_modifiers();        break;
             case MENU_LEVEL_MODIFIERS_LEVELS: update_menu_level_modifiers_levels(); break;
-            case MENU_LEVEL_MODIFIERS_SILO:   update_menu_level_modifiers_silo();   break;
+            case MENU_LEVEL_MODIFIERS_DETAIL:   update_menu_level_modifiers_detail();   break;
             case MENU_MP_SETTINGS:             update_menu_mp_settings();             break;
             case MENU_MP_PLAYER_OPTIONS:       update_menu_mp_player_options();        break;
 #ifdef GE_MAP_MAKER
@@ -11548,7 +11573,7 @@ void menu_init(void)
             case MENU_MOD_OPTIONS:            init_menu_mod_options();              break;
             case MENU_LEVEL_MODIFIERS:        init_menu_level_modifiers();          break;
             case MENU_LEVEL_MODIFIERS_LEVELS: init_menu_level_modifiers_levels();   break;
-            case MENU_LEVEL_MODIFIERS_SILO:   init_menu_level_modifiers_silo();     break;
+            case MENU_LEVEL_MODIFIERS_DETAIL:   init_menu_level_modifiers_detail();     break;
             case MENU_MP_SETTINGS:             init_menu_mp_settings();               break;
             case MENU_MP_PLAYER_OPTIONS:       init_menu_mp_player_options();          break;
 #ifdef GE_MAP_MAKER
@@ -11589,7 +11614,7 @@ void menu_init(void)
         case MENU_MOD_OPTIONS:            interface_menu_mod_options();             break;
         case MENU_LEVEL_MODIFIERS:        interface_menu_level_modifiers();         break;
         case MENU_LEVEL_MODIFIERS_LEVELS: interface_menu_level_modifiers_levels();  break;
-        case MENU_LEVEL_MODIFIERS_SILO:   interface_menu_level_modifiers_silo();    break;
+        case MENU_LEVEL_MODIFIERS_DETAIL:   interface_menu_level_modifiers_detail();    break;
         case MENU_MP_SETTINGS:             interface_menu_mp_settings();              break;
         case MENU_MP_PLAYER_OPTIONS:       interface_menu_mp_player_options();         break;
 #ifdef GE_MAP_MAKER
@@ -11738,8 +11763,8 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
         case MENU_LEVEL_MODIFIERS_LEVELS:
             DL = constructor_menu_level_modifiers_levels(DL);
             break;
-        case MENU_LEVEL_MODIFIERS_SILO:
-            DL = constructor_menu_level_modifiers_silo(DL);
+        case MENU_LEVEL_MODIFIERS_DETAIL:
+            DL = constructor_menu_level_modifiers_detail(DL);
             break;
         case MENU_MP_SETTINGS:
             DL = constructor_menu_mp_settings(DL);

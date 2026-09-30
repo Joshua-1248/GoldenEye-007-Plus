@@ -104,10 +104,11 @@ static s32 mpwatchConfigRows(s32 mode)
     if (mode == 1) return 8;
     if (mode == 2) return 17;
     if (mode == 3) return MPWATCH_TOGGLE_ROWS + 5;
-    if (mode == 4) return LEVELMOD_CATEGORY_COUNT;
-    if (mode == 5) return levelModifiersGetLevelCount(LEVELMOD_CATEGORY_SINGLE_PLAYER);
-    if (mode == 6) return levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MULTIPLAYER);
-    if (mode == 7) return levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MISCELLANEOUS);
+    if (mode == 4)
+    {
+        s32 count = levelModifiersGetCurrentStageModifierCount();
+        return count ? count : 1;
+    }
     return 1;
 }
 
@@ -236,7 +237,6 @@ static s32 mpwatchConfigHandleInput(s32 player)
     u32 pressed = joyGetButtonsPressedThisFrame(player, 0xffff);
     s32 sy = joyGetStickYInRange(player, -2, 1);
     s32 mode = mpcfg_mode[player];
-    s32 category;
 
     if (sy == 0 || sy == -1) mpcfg_yready[player] = 1;
 
@@ -271,8 +271,6 @@ static s32 mpwatchConfigHandleInput(s32 player)
     if (pressed & B_BUTTON)
     {
         if (mode == 4) { mpcfg_mode[player]=0; mpcfg_row[player]=2; mpwatchPlayBeep(); return 1; }
-        if (mode >= 5 && mode <= 7) { mpcfg_row[player]=mode-5; mpcfg_mode[player]=4; mpwatchPlayBeep(); return 1; }
-        if (mode == 8) { mpcfg_mode[player]=5; mpcfg_row[player]=5; mpwatchPlayBeep(); return 1; }
         if (mode) { mpcfg_mode[player]=0; mpcfg_row[player]=0; mpwatchPlayBeep(); return 1; }
         return 0;
     }
@@ -312,28 +310,16 @@ static s32 mpwatchConfigHandleInput(s32 player)
         }
         else if (mode == 4)
         {
-            mpcfg_mode[player]=5+row;
-            mpcfg_row[player]=0;
-            mpwatchPlayBeep();
-        }
-        else if (mode >= 5 && mode <= 7)
-        {
-            category = mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER
-                : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER
-                : LEVELMOD_CATEGORY_MISCELLANEOUS;
-            if (levelModifiersLevelImplemented(category,row)
-                && levelModifiersLevelAvailableInCurrentStage(category,row))
+            if (levelModifiersGetCurrentStage() == LEVELID_SILO)
             {
-                mpcfg_mode[player]=8;
-                mpcfg_row[player]=0;
-                mpwatchPlayBeep();
+                if (!levelModifiersSiloBetaVentActive())
+                    levelModifiersActivateSiloBetaVent();
             }
-            else mpwatchPlayBeep();
-        }
-        else if (mode == 8)
-        {
-            if (!levelModifiersSiloBetaVentActive() && levelModifiersActivateSiloBetaVent()) mpwatchPlayBeep();
-            else mpwatchPlayBeep();
+            else if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
+            {
+                levelModifiersSetCitadelWater(!levelModifiersCitadelWaterActive());
+            }
+            mpwatchPlayBeep();
         }
         return 1;
     }
@@ -2019,6 +2005,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             s32 value = 0;
             char *label;
             char *vtext;
+            char titlebuf[32];
             CHEAT_ID cheat;
 
             if (mode == 0)
@@ -2076,33 +2063,47 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 }
                 else if (mode == 4)
                 {
-                    static char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player","Multiplayer","Miscellaneous"};
-                    label=categories[row]; vtext=">";
-                }
-                else if (mode >= 5 && mode <= 7)
-                {
-                    s32 category = mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER
-                        : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS;
-                    label=(char *)levelModifiersGetLevelName(category,row);
-                    if (levelModifiersLevelImplemented(category,row) && levelModifiersLevelAvailableInCurrentStage(category,row)) vtext=">";
-                    else vtext="---";
+                    if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
+                    {
+                        label="Water";
+                        vtext=levelModifiersCitadelWaterActive()?"ON":"OFF";
+                    }
+                    else if (levelModifiersGetCurrentStage() == LEVELID_SILO)
+                    {
+                        label="Beta Vent Start";
+                        vtext=levelModifiersSiloBetaVentActive()?"ACTIVE":"ACTIVATE";
+                    }
+                    else
+                    {
+                        label="No modifiers available";
+                        vtext="";
+                    }
                 }
                 else
                 {
-                    label="Beta Vent Start";
-                    vtext=levelModifiersSiloBetaVentActive()?"ACTIVE":"ACTIVATE";
+                    label="";
+                    vtext="";
+                }
+
+                if (mode == 4)
+                {
+                    sprintf(titlebuf, "%s MODIFIERS", levelModifiersGetCurrentStageName());
+                    text=titlebuf;
+                    textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0);
+                    x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+39+MPMENU_YOFF;
+                    gdl=textRender(gdl,&x,&y,text,ptrFontBankGothicChars,ptrFontBankGothic,0xa0ffa0f0,viGetX(),viGetY(),0,0);
                 }
 
                 textMeasure(&textheight,&textwidth,label,ptrFontBankGothicChars,ptrFontBankGothic,0);
                 x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+57+MPMENU_YOFF;
                 gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 9 && g_MpViewportLock)
-                    || (mode >= 5 && mode <= 7 && !(levelModifiersLevelImplemented(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row) && levelModifiersLevelAvailableInCurrentStage(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row)))
-                    || (mode == 8 && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
+                    || (mode == 4 && levelModifiersGetCurrentStageModifierCount() == 0)
+                    || (mode == 4 && levelModifiersGetCurrentStage() == LEVELID_SILO && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
                 textMeasure(&textheight,&textwidth,vtext,ptrFontBankGothicChars,ptrFontBankGothic,0);
                 x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+75+MPMENU_YOFF;
                 gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 9 && g_MpViewportLock)
-                    || (mode >= 5 && mode <= 7 && !(levelModifiersLevelImplemented(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row) && levelModifiersLevelAvailableInCurrentStage(mode == 5 ? LEVELMOD_CATEGORY_SINGLE_PLAYER : mode == 6 ? LEVELMOD_CATEGORY_MULTIPLAYER : LEVELMOD_CATEGORY_MISCELLANEOUS,row)))
-                    || (mode == 8 && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
+                    || (mode == 4 && levelModifiersGetCurrentStageModifierCount() == 0)
+                    || (mode == 4 && levelModifiersGetCurrentStage() == LEVELID_SILO && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
 
                 if (mode == 1 && mpcfg_modal[curplayernum])
                 {

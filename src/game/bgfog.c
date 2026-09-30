@@ -8,6 +8,9 @@
 #include "front.h"
 #include "bgfog.h"
 #include "file2.h"
+#ifdef GE_MODDED_CHEATS
+#include "levelmodifiers.h"
+#endif
 #ifdef GE_PHYSICAL_FASTPATHS
 #include "player.h"
 #endif
@@ -459,6 +462,9 @@ void fogLoadLevelEnvironment(s32 level_id, s32 arg1)
 
                 fogLoadCurrentEnvironment(g_EnvironmentFoundp);
 
+#ifdef GE_MODDED_CHEATS
+                levelModifiersOnEnvironmentLoaded(level_id);
+#endif
                 return;
             }
         }
@@ -474,6 +480,9 @@ void fogLoadLevelEnvironment(s32 level_id, s32 arg1)
 
             fogLoadCurrentEnvironment(g_EnvironmentFoundp);
 
+#ifdef GE_MODDED_CHEATS
+            levelModifiersOnEnvironmentLoaded(level_id);
+#endif
             return;
         }
     }
@@ -495,6 +504,9 @@ void fogLoadLevelEnvironment(s32 level_id, s32 arg1)
 
                 fogLoadCurrentEnvironment(g_EnvironmentFoundp);
 
+#ifdef GE_MODDED_CHEATS
+                levelModifiersOnEnvironmentLoaded(level_id);
+#endif
                 return;
             }
         }
@@ -524,6 +536,9 @@ void fogLoadLevelEnvironment(s32 level_id, s32 arg1)
 
     fogLoadFoglessCurrentEnvironment(sp1C);
     g_EnvironmentFoundp = NULL;
+#ifdef GE_MODDED_CHEATS
+    levelModifiersOnEnvironmentLoaded(level_id);
+#endif
 }
 
 /**

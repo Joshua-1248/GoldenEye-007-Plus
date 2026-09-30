@@ -531,8 +531,10 @@ struct firing_anim_struct firing_animation_groups[][6] = {
     {{doubles_firing_animation_group1, 0, 0.1, 32.0, 42.0},
      {&D_80030660[4], 0, 0.5, 0.0, -1.0},
      {&D_80030660[5], 0, 0.5, 0.0, -1.0},
-     {&D_80030660[8], 0, 0.5, 0.0, -1.0},
-     {&D_80030660[8], 0, 0.5, 0.0, -1.0},
+     /* GoldenEye Plus: dedicated lateral gait + dual-wield upper-body clips.
+     * Keep the stock dual-running firing table for shoulder/pitch limits. */
+     {&D_80030660[5], PTR_ANIM_plus_dual_strafe_right, 0.5, 0.0, -1.0},
+     {&D_80030660[5], PTR_ANIM_plus_dual_strafe_left, 0.5, 0.0, -1.0},
      {crouched_doubles_firing_animation_group1, 0, 0.1, 37.0, 47.0}}
  };
 

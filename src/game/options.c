@@ -80,11 +80,7 @@ u32 game_options_index = 0;
 #define MODWATCH_MODE_MASK 0x700
 #define MODWATCH_MODE_SPECIAL 0x000
 #define MODWATCH_MODE_CHEATS 0x100
-#define MODWATCH_MODE_LEVEL_CATEGORIES 0x200
-#define MODWATCH_MODE_LEVEL_SP 0x300
-#define MODWATCH_MODE_LEVEL_MP 0x400
-#define MODWATCH_MODE_LEVEL_MISC 0x500
-#define MODWATCH_MODE_LEVEL_SILO 0x600
+#define MODWATCH_MODE_LEVEL_DETAIL 0x200
 #define MODWATCH_CHEAT_MODE MODWATCH_MODE_CHEATS
 #define MODWATCH_OPTION_ROWS 24
 #define MODWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)
@@ -1364,21 +1360,15 @@ void watch_special_options_navigation(void)
     s32 row = MODWATCH_STATE & MODWATCH_ROW_MASK;
     s32 mode = MODWATCH_STATE & MODWATCH_MODE_MASK;
     s32 rows;
-    s32 category;
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
 
     if (mode == MODWATCH_MODE_CHEATS)
         rows = modWatchCheatCount();
-    else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
-        rows = LEVELMOD_CATEGORY_COUNT;
-    else if (mode == MODWATCH_MODE_LEVEL_SP)
-        rows = levelModifiersGetLevelCount(LEVELMOD_CATEGORY_SINGLE_PLAYER);
-    else if (mode == MODWATCH_MODE_LEVEL_MP)
-        rows = levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MULTIPLAYER);
-    else if (mode == MODWATCH_MODE_LEVEL_MISC)
-        rows = levelModifiersGetLevelCount(LEVELMOD_CATEGORY_MISCELLANEOUS);
-    else if (mode == MODWATCH_MODE_LEVEL_SILO)
-        rows = 1;
+    else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
+    {
+        rows = levelModifiersGetCurrentStageModifierCount();
+        if (rows == 0) rows = 1;
+    }
     else
         rows = MODWATCH_OPTION_ROWS;
 
@@ -1402,36 +1392,23 @@ void watch_special_options_navigation(void)
         {
             modWatchToggleCheat(row);
         }
-        else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
         {
-            MODWATCH_STATE = (MODWATCH_MODE_LEVEL_SP + row * 0x100);
-            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
-        }
-        else if (mode == MODWATCH_MODE_LEVEL_SP || mode == MODWATCH_MODE_LEVEL_MP || mode == MODWATCH_MODE_LEVEL_MISC)
-        {
-            category = mode == MODWATCH_MODE_LEVEL_SP ? LEVELMOD_CATEGORY_SINGLE_PLAYER
-                : mode == MODWATCH_MODE_LEVEL_MP ? LEVELMOD_CATEGORY_MULTIPLAYER
-                : LEVELMOD_CATEGORY_MISCELLANEOUS;
-            if (levelModifiersLevelImplemented(category, row)
-                && levelModifiersLevelAvailableInCurrentStage(category, row))
+            if (levelModifiersGetCurrentStage() == LEVELID_SILO)
             {
-                MODWATCH_STATE = MODWATCH_MODE_LEVEL_SILO;
-                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+                if (levelModifiersSiloBetaVentActive())
+                    sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
+                else if (levelModifiersActivateSiloBetaVent())
+                    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+                else
+                    sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
             }
-            else
+            else if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
             {
-                sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
-            }
-        }
-        else if (mode == MODWATCH_MODE_LEVEL_SILO)
-        {
-            if (levelModifiersSiloBetaVentActive())
-            {
-                sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
-            }
-            else if (levelModifiersActivateSiloBetaVent())
-            {
-                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+                if (levelModifiersSetCitadelWater(!levelModifiersCitadelWaterActive()))
+                    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+                else
+                    sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
             }
             else
             {
@@ -1448,7 +1425,7 @@ void watch_special_options_navigation(void)
         }
         else if (row == 22)
         {
-            MODWATCH_STATE = MODWATCH_MODE_LEVEL_CATEGORIES;
+            MODWATCH_STATE = MODWATCH_MODE_LEVEL_DETAIL;
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else
@@ -1466,22 +1443,9 @@ void watch_special_options_navigation(void)
             MODWATCH_STATE = 23;
             return;
         }
-        if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        if (mode == MODWATCH_MODE_LEVEL_DETAIL)
         {
             MODWATCH_STATE = 22;
-            return;
-        }
-        if (mode == MODWATCH_MODE_LEVEL_SP || mode == MODWATCH_MODE_LEVEL_MP || mode == MODWATCH_MODE_LEVEL_MISC)
-        {
-            category = mode == MODWATCH_MODE_LEVEL_SP ? LEVELMOD_CATEGORY_SINGLE_PLAYER
-                : mode == MODWATCH_MODE_LEVEL_MP ? LEVELMOD_CATEGORY_MULTIPLAYER
-                : LEVELMOD_CATEGORY_MISCELLANEOUS;
-            MODWATCH_STATE = MODWATCH_MODE_LEVEL_CATEGORIES | category;
-            return;
-        }
-        if (mode == MODWATCH_MODE_LEVEL_SILO)
-        {
-            MODWATCH_STATE = MODWATCH_MODE_LEVEL_SP | 5;
             return;
         }
     }
@@ -4626,10 +4590,10 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
     s32 mode = MODWATCH_STATE & MODWATCH_MODE_MASK;
     s32 rowcount;
     s32 top;
-    s32 category = -1;
     char *label;
     char *value;
     char valuebuf[16];
+    char titlebuf[32];
     u32 colour;
     const char *title;
 
@@ -4638,33 +4602,12 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         rowcount = modWatchCheatCount();
         title = "IN-GAME CHEATS";
     }
-    else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+    else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
     {
-        rowcount = LEVELMOD_CATEGORY_COUNT;
-        title = "LEVEL MODIFIERS";
-    }
-    else if (mode == MODWATCH_MODE_LEVEL_SP)
-    {
-        category = LEVELMOD_CATEGORY_SINGLE_PLAYER;
-        rowcount = levelModifiersGetLevelCount(category);
-        title = "SINGLE-PLAYER";
-    }
-    else if (mode == MODWATCH_MODE_LEVEL_MP)
-    {
-        category = LEVELMOD_CATEGORY_MULTIPLAYER;
-        rowcount = levelModifiersGetLevelCount(category);
-        title = "MULTIPLAYER";
-    }
-    else if (mode == MODWATCH_MODE_LEVEL_MISC)
-    {
-        category = LEVELMOD_CATEGORY_MISCELLANEOUS;
-        rowcount = levelModifiersGetLevelCount(category);
-        title = "MISCELLANEOUS";
-    }
-    else if (mode == MODWATCH_MODE_LEVEL_SILO)
-    {
-        rowcount = 1;
-        title = "SILO MODIFIERS";
+        rowcount = levelModifiersGetCurrentStageModifierCount();
+        if (rowcount == 0) rowcount = 1;
+        sprintf(titlebuf, "%s MODIFIERS", levelModifiersGetCurrentStageName());
+        title = titlebuf;
     }
     else
     {
@@ -4702,25 +4645,25 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
                 if (!unlocked) colour = 0x40704090;
             }
         }
-        else if (mode == MODWATCH_MODE_LEVEL_CATEGORIES)
+        else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
         {
-            static char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player", "Multiplayer", "Miscellaneous"};
-            label = categories[row];
-            value = ">";
-        }
-        else if (category >= 0)
-        {
-            label = (char *)levelModifiersGetLevelName(category,row);
-            if (levelModifiersLevelImplemented(category,row) && levelModifiersLevelAvailableInCurrentStage(category,row))
-                value = ">";
+            if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
+            {
+                label = "Water";
+                value = levelModifiersCitadelWaterActive() ? "ON" : "OFF";
+            }
+            else if (levelModifiersGetCurrentStage() == LEVELID_SILO)
+            {
+                label = "Beta Vent Start";
+                value = levelModifiersSiloBetaVentActive() ? "ACTIVE" : "ACTIVATE";
+                if (levelModifiersSiloBetaVentActive()) colour = row == selected ? 0x809080d0 : 0x40704090;
+            }
             else
+            {
+                label = "No modifiers available";
+                value = "";
                 colour = 0x40704090;
-        }
-        else if (mode == MODWATCH_MODE_LEVEL_SILO)
-        {
-            label = "Beta Vent Start";
-            value = levelModifiersSiloBetaVentActive() ? "ACTIVE" : "ACTIVATE";
-            if (levelModifiersSiloBetaVentActive()) colour = row == selected ? 0x809080d0 : 0x40704090;
+            }
         }
         else if (row < 10)
         {
