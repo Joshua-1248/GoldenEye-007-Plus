@@ -133,3 +133,6 @@ See `CURRENT_DEVELOPMENT_STATUS.md` for a concise summary of the current post-Gi
 GoldenEye 007, James Bond, Nintendo 64, Rare, Nintendo, MGM, EON Productions, and other names, marks, characters, artwork, audio, and game content belong to their respective owners. This fan/community project is not affiliated with, endorsed by, or sponsored by those rights holders.
 
 No original retail ROM is distributed by this project.
+
+### Additional mod provenance
+- **Cradle (MP) Kill Plane Level Modifier:** original multiplayer Cradle fall/death-plane modification by **Zoinkity**. GoldenEye Plus ports only the Y < -2550 behavior and preserves the retail multiplayer setup.

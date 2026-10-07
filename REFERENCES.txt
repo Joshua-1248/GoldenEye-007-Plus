@@ -142,3 +142,5 @@ script, library or tool incorporated into GoldenEye 007 Plus, record:
 - which GoldenEye 007 Plus files were affected.
 
 Do not erase existing provenance when refactoring.
+
+Level Modifier historical code references: Zoinkity (Temple/Complex fall-through and Frigate three-pipe-room clipping); RSB (Temple Better Respawning).

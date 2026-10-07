@@ -90,3 +90,7 @@ research possible.
 If you contribute code or research to GoldenEye 007 Plus, add yourself (or the
 name you wish to be credited under) in a future update rather than removing
 existing attribution.
+
+R27S R4 Level Modifier code provenance:
+- Zoinkity: Temple "Fall Down Into Hole", Complex "Fall Down Into Holes", and Frigate "Clipping Change In Room With 3 Pipes" historical GameShark codes.
+- RSB: Temple "Better Respawning" historical GameShark code.
