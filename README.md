@@ -14,7 +14,7 @@ Major work present in this tree includes:
 - expanded 1–4 player campaign Co-Op architecture;
 - expanded multiplayer maps, menus, character selection and dual-wield behavior;
 - save-backed gameplay/Special Options;
-- Third Person gameplay with adjustable camera and crosshair tuning;
+- Optional Third Person camera with adjustable camera and crosshair tuning;
 - Third Person cutscene handoff fixes, including the Surface II and Dam end cinematics;
 - TP Sight Translucency while manually aiming;
 - Third Person projectile/beam/tracer alignment work;
@@ -24,7 +24,7 @@ Major work present in this tree includes:
 - Mirrored Levels support and live-toggle safety work;
 - Basic/Advanced Map Maker development with a dedicated native Map Maker stage architecture;
 - Citadel restored as a dedicated multiplayer stage, using community restoration work by Krijy and Zoinkity;
-- a Perfect Dark-inspired, room-aware and cylinder-aware STAN ground-support backport used generically rather than as a Citadel-specific hack;
+- a Perfect Dark-inspired, room-aware and cylinder-aware STAN ground-support backport used generically;
 - selective, evidence-based Perfect Dark backports where the underlying behavior is genuinely equivalent or appropriate.
 
 The project deliberately keeps GoldenEye behavior as the baseline. Perfect Dark and related Rare-era material are references, not wholesale replacements.
