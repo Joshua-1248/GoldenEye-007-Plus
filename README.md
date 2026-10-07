@@ -14,7 +14,7 @@ Major work present in this tree includes:
 - expanded 1–4 player campaign Co-Op architecture;
 - expanded multiplayer maps, menus, character selection and dual-wield behavior;
 - save-backed gameplay/Special Options;
-- Optional Third Person camera with adjustable camera and crosshair tuning;
+- Optional Third Person mode with adjustable camera and crosshair tuning;
 - Third Person cutscene handoff fixes, including the Surface II and Dam end cinematics;
 - TP Sight Translucency while manually aiming;
 - Third Person projectile/beam/tracer alignment work;
