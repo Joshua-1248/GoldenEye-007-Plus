@@ -204,4 +204,132 @@ Development work includes:
 - Native map testing.
 - Experimental in-game editing and storage systems.
 
-The Map Maker is **experimental**, and
+The Map Maker is **experimental**, and some features remain incomplete or subject to stability testing.
+
+---
+
+## Optimization and Engine Improvements
+
+Performance optimization remains a central part of the project.
+
+Development has included investigations and optimizations involving:
+
+- Character and guard processing.
+- Explosion calculations.
+- Model animation and rendering.
+- Visibility and fog processing.
+- Rendering-related memory usage.
+- Multiplayer and Co-Op performance.
+- Physical-code execution paths.
+- Asset handling and loading behavior.
+
+Optimization changes are intended to maintain gameplay correctness while reducing unnecessary processing and resource usage.
+
+Regression testing remains important, especially under multiple-player configurations and on original N64 hardware.
+
+---
+
+## Emulator Compatibility
+
+Testing has included Project64 with GLideN64.
+
+Some graphics issues can originate from emulator or graphics-plugin settings rather than the GoldenEye source.
+
+For certain GLideN64 black-screen or black-world symptoms, a useful diagnostic setting has been:
+
+`Force depth buffer clear = ON`
+
+When reporting graphics problems, please include:
+
+- Project64 version.
+- GLideN64 version or revision.
+- Framebuffer-emulation settings.
+- Depth-buffer-clear configuration.
+- Whether the issue occurs under other emulator or hardware configurations.
+
+Source-code regressions and emulator/plugin behavior should be investigated separately.
+
+---
+
+## Building GoldenEye 007 Plus
+
+The current development configuration is:
+
+```sh
+make VERSION=US \
+    PHYSICAL_CODE=YES \
+    PHYSICAL_FASTPATHS=YES \
+    MODDED_CHEATS=YES \
+    MAP_MAKER=YES \
+    OPT_USE_LLVM=YES \
+    COMPARE=0 \
+    -j2
+```
+
+The build is intentionally limited to **two compilation jobs** in this example.
+
+The current Plus development configuration uses a 16 Kbit EEPROM save backend. `MODDED_CHEATS=YES` enables that configuration by default, and normal output naming includes `-eep16`.
+
+A build helper is also included:
+
+```sh
+./build_geplus.sh
+```
+
+The helper defaults to two build jobs, with optional adjustment through `JOBS`.
+
+A legally obtained, unmodified NTSC-U GoldenEye 007 ROM should be placed in the repository root as:
+
+```text
+baserom.u.z64
+```
+
+The build helper checks the expected original ROM SHA-1 before the extraction/build process.
+
+---
+
+## Repository Structure
+
+Important project directories and files include:
+
+| Location | Purpose |
+|---|---|
+| `src/game/` | Gameplay, AI, menus, player systems, and engine functionality |
+| `src/game/mpbots.c` | Simulant implementation |
+| `src/game/mpbots.h` | Simulant declarations and interfaces |
+| `src/libultra/` | Nintendo 64 runtime components |
+| `src/libultrare/` | Additional upstream runtime components |
+| `assets/` | Asset definitions and build-time resources |
+| `scripts/` | Audits, build utilities, and extraction helpers |
+| `tools/` | Development and conversion tools |
+| `CURRENT_DEVELOPMENT_STATUS.md` | Current development overview |
+| `CREDITS.txt` | Project credits and attribution |
+| `REFERENCES.txt` | Research and technical references |
+
+Retail ROM data and generated build outputs are not intended to be distributed with the source repository.
+
+---
+
+## Development Principles
+
+1. **Preserve GoldenEye's original behavior.** Avoid unnecessary changes to established gameplay and engine behavior.
+2. **Maintain backport fidelity.** Adapt existing Perfect Dark behavior faithfully, changing only what is required by engine differences.
+3. **Prioritize correctness and stability.** Performance improvements must not introduce gameplay regressions.
+4. **Support all relevant player configurations.** Test single-player, multiplayer, and Co-Op behavior under appropriate player counts.
+5. **Preserve attribution.** Retain credits and provenance for original developers, decompilation researchers, and community contributors.
+6. **Distinguish experimental development from completed functionality.** Document outstanding limitations and do not treat static audit results as proof of runtime correctness.
+
+---
+
+## Credits and Acknowledgments
+
+GoldenEye 007 Plus is possible because of the work of many original developers, reverse engineers, preservationists, community researchers, and modders.
+
+Important foundations and references include:
+
+- The original GoldenEye 007 development team at Rare.
+- The [GoldenEye 007 decompilation project](https://gitlab.com/kholdfuzion/goldeneye_src) and its contributors.
+- The Perfect Dark decompilation project and its contributors, including Ryan Dwyer.
+- Krijy and Zoinkity for Citadel restoration.
+- BMW for Courtyard.
+- Golden
