@@ -104,6 +104,10 @@ void sub_GAME_7F074534(ModelRenderData* data, Model* model, ModelNode* node);
 void subdraw(ModelRenderData *arg0, struct Model *);
 s32 loadAnimationFrame(ModelAnimation* anim, s32 frame, ModelSkeleton* unused);
 void modelResetAnimationsScratchBuffer(void);
+#ifdef GE_PHYSICAL_FASTPATHS
+void modelInitAnimationFrameCache(void);
+void modelInitTrigCache(void);
+#endif
 void modelPromoteNodeOffsetsToPointers(ModelNode *node, u32 vma, u32 fileramaddr);
 void sub_GAME_7F075A90(ModelFileHeader *header, s32 vma, u32 addr);
 s32 modelCalculateRwDataIndexes(ModelNode *basenode);

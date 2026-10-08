@@ -2784,7 +2784,7 @@ u8 bondviewGetCurrentPlayersRoom(void);
 coord3d *bondviewGetCurrentPlayersPosition(void);
 #ifdef GE_MODDED_CHEATS
 s32 bondviewGetThirdPersonVisibilityCamera(coord3d *outpos);
-s32 bondviewGetThirdPersonLocalBodyAlpha(void);
+s32 bondviewGetThirdPersonLocalBodyAlpha(s32 withalpha);
 s32 bondviewThirdPersonPresentationActive(s32 player);
 s32 bondviewThirdPersonReticleOcclusionPassActive(void);
 #endif
@@ -2837,5 +2837,10 @@ void bondviewRemovePlayerBodyForThirdPersonToggle(void);
 void currentPlayerAdjustFade(f32 maxfadetime, s32 r, s32 g, s32 b, f32 frac);
 void bondviewSelectCuff(Model *model, ModelFileHeader *header, s32 switchindex);
 void sub_GAME_7F08976C(f32 param_1);
+
+
+#ifdef GE_MODDED_CHEATS
+s32 bondviewLevelModifierSwapTempleRespawnPairs(void);
+#endif
 
 #endif

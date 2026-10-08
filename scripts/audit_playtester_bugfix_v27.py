@@ -32,9 +32,10 @@ check('Tank respawn reset is declared and called before life init',
       'playerCoopTankResetCurrentPlayerForRespawn' in player_h and
       bond.find('playerCoopTankResetCurrentPlayerForRespawn();') < bond.find('init_player_BONDdata();'))
 
-check('TP camera always performs 3D rendered-BG trace',
-      'bondviewThirdPersonFindBackgroundHitFraction(&anchor, &desired, &bgfrac)' in bond and
-      'ceiling, floor, overhang' in bond)
+check('TP camera always performs 3D BG and object-scenery traces',
+      'bondviewThirdPersonFindBackgroundHitFraction(&anchor, &desired, &frac)' in bond and
+      'chrpropThirdPersonBoundsSegmentHit(cameraprop' in bond and
+      'Streets and a few other stages use visually solid object scenery' in bond)
 check('TP body cache checks body resource size before load',
       'bodybytes <= 0 || bodybytes > size0' in bond)
 check('TP body cache checks head resource size and model/anim bounds',

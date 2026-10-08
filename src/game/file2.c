@@ -46,6 +46,22 @@ void modSetMicroOptimizationsEnabled(s32 enabled)
     g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
 }
 
+s32 modExperimentalJumpEnabled(void)
+{
+    return (g_ModGameplayOptions3 & MODOPT3_EXPERIMENTAL_JUMP) != 0;
+}
+
+void modSetExperimentalJumpEnabled(s32 enabled)
+{
+    if (enabled)
+        g_ModGameplayOptions3 |= MODOPT3_EXPERIMENTAL_JUMP;
+    else
+        g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;
+
+    g_ModGameplayOptions3 =
+        (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+}
+
 /*
  * V29: persist the four Third Person camera tuner values without enlarging
  * GoldenEye's legacy 512-byte save layout.  V35 mirrors this layout at the start of SRAM.  The 26-bit mixed-
@@ -385,7 +401,8 @@ static s32 fileSramProbe(void)
 #define GE_SRAM_EXT_MAGIC           0x47455053u /* "GEPS" */
 #define GE_SRAM_EXT_VERSION_LEGACY  1u
 #define GE_SRAM_EXT_VERSION_V2      2u
-#define GE_SRAM_EXT_VERSION         3u
+#define GE_SRAM_EXT_VERSION_V3      3u
+#define GE_SRAM_EXT_VERSION         4u
 #define GE_SRAM_EXT_RECORD_SIZE     8u
 
 #define GE_SRAM_EXT_FLAG_VALID          0x80
@@ -394,10 +411,31 @@ static s32 fileSramProbe(void)
 #define GE_SRAM_EXT_FLAG_TP_CROUCH_CAM  0x04
 #define GE_SRAM_EXT_FLAG_DIRECTIONAL    0x08
 #define GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY 0x10
+#define GE_SRAM_EXT_FLAG_ENEMY_BULLET_HOLES 0x20
+#define GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP 0x40
 #define GE_SRAM_EXT_RESERVED_AA_VALID    0x80
 #define GE_SRAM_EXT_RESERVED_AA_ENABLED  0x01
+#define GE_SRAM_EXT_RESERVED_TP_CORNER_FIX 0x02
+#define GE_SRAM_EXT_RESERVED_TP_WORLD_CROSSHAIR 0x04
+#define GE_SRAM_EXT_RESERVED_UNLIMITED_EXPLOSIONS 0x08
+#define GE_SRAM_EXT_RESERVED_MASTER_CONTROL_DEBUG 0x10
+#define GE_SRAM_EXT_RESERVED_MELEE_QUICK_SWAP 0x40
 #define GE_SRAM_EXT_RESERVED_V75_CAMERA_REPAIR 0x20
+/* R27D stores the SP character modifier in the existing 16-byte bank tail. */
+#define GE_SRAM_EXT_TAIL_SP_STRIDE 3u
+#define GE_SRAM_EXT_TAIL_SP_CHAR_HI 0u
+#define GE_SRAM_EXT_TAIL_SP_CHAR_LO 1u
+#define GE_SRAM_EXT_TAIL_SP_FLAGS   2u
+#define GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT 0x01
+/* R27V: R27D consumes bytes 0..11; bytes 12..15 remain one per folder. */
+#define GE_SRAM_EXT_TAIL_ENH_BASE (MAX_FOLDER_COUNT * GE_SRAM_EXT_TAIL_SP_STRIDE)
+#define GE_SRAM_EXT_TAIL_ENH_ADDITIONAL_PLAYER_DEATHS 0x01
+#define GE_SRAM_EXT_TAIL_ENH_ALWAYS_SHOW_CROSSHAIR    0x02
+#define GE_SRAM_EXT_TAIL_ENH_DISABLE_BODY_ARMOR        0x04
+#define GE_SRAM_EXT_TAIL_ENH_SILOX_LOOP_FIX            0x08
+#define GE_SRAM_EXT_TAIL_ENH_AR33_PROP_FIX_MP          0x10
 
+#define GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH 0x20
 /* Version-1-only crouch metadata.  These bits are consumed exactly once while
  * upgrading a v1 bank to v2, then stripped from the canonical v2 record. */
 #define GE_SRAM_EXT_V1_CROUCH36_MARKER      0x02
@@ -434,6 +472,8 @@ typedef struct GeSramExtBank
 
 typedef char ge_sram_ext_record_must_be_8[(sizeof(GeSramExtFolderRecord) == GE_SRAM_EXT_RECORD_SIZE) ? 1 : -1];
 typedef char ge_sram_ext_bank_must_be_64[(sizeof(GeSramExtBank) == GE_SRAM_EXT_BANK_SIZE) ? 1 : -1];
+typedef char ge_sram_ext_sp_tail_must_fit[((MAX_FOLDER_COUNT * GE_SRAM_EXT_TAIL_SP_STRIDE) <= 16) ? 1 : -1];
+typedef char ge_sram_ext_enh_tail_must_fit[((GE_SRAM_EXT_TAIL_ENH_BASE + MAX_FOLDER_COUNT) <= 16) ? 1 : -1];
 
 static GeSramExtBank g_GeSramExtBank;
 static s32 g_GeSramExtLoaded = FALSE;
@@ -498,6 +538,7 @@ static s32 fileSramExtBankValid(const GeSramExtBank *bank)
     if (bank->magic != GE_SRAM_EXT_MAGIC
         || (bank->version != GE_SRAM_EXT_VERSION_LEGACY
             && bank->version != GE_SRAM_EXT_VERSION_V2
+            && bank->version != GE_SRAM_EXT_VERSION_V3
             && bank->version != GE_SRAM_EXT_VERSION)
         || bank->bank_size != GE_SRAM_EXT_BANK_SIZE
         || bank->record_size != GE_SRAM_EXT_RECORD_SIZE
@@ -601,8 +642,10 @@ static s32 fileSramExtCommit(void)
  *
  * v1 -> v2 canonicalized crouch height and AA metadata.
  * v2 -> v3 changes the distance byte from a raw signed adjustment to a compact
- * 5-unit adjustment so the runtime camera can span 100..600 around the new
- * authored default of 300 without growing the eight-byte folder record.
+ * 5-unit adjustment around the historical authored default of 300.
+ * v3 -> v4 moves the authored TP distance default to 310. Untouched/default
+ * records follow the new default; customized distances preserve their prior
+ * displayed value as closely as the 5-unit encoding permits.
  *
  * V72 temporarily used mod_options3 bit 1 for TP Sight Translucency, but that
  * bit belongs to the legacy camera-pack signature.  v3 repairs any contaminated
@@ -661,16 +704,53 @@ static s32 fileSramExtEnsureCurrentVersion(void)
                 else
                 {
                     s32 actual = 240 + oldadjust;
-                    s32 delta = actual - TP_CAM_DISTANCE_DEFAULT;
+                    s32 delta = actual - 300;
                     newadjust = delta >= 0 ? (delta + 2) / 5 : (delta - 2) / 5;
-                    if (newadjust < (TP_CAM_DISTANCE_MIN - TP_CAM_DISTANCE_DEFAULT) / 5)
-                        newadjust = (TP_CAM_DISTANCE_MIN - TP_CAM_DISTANCE_DEFAULT) / 5;
-                    if (newadjust > (TP_CAM_DISTANCE_MAX - TP_CAM_DISTANCE_DEFAULT) / 5)
-                        newadjust = (TP_CAM_DISTANCE_MAX - TP_CAM_DISTANCE_DEFAULT) / 5;
+                    if (newadjust < (TP_CAM_DISTANCE_MIN - 300) / 5)
+                        newadjust = (TP_CAM_DISTANCE_MIN - 300) / 5;
+                    if (newadjust > (TP_CAM_DISTANCE_MAX - 300) / 5)
+                        newadjust = (TP_CAM_DISTANCE_MAX - 300) / 5;
                 }
 
                 record->camera_distance_adjust = newadjust;
                 record->flags &= ~GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY;
+            }
+        }
+
+        g_GeSramExtBank.version = GE_SRAM_EXT_VERSION_V3;
+    }
+
+    if (g_GeSramExtBank.version == GE_SRAM_EXT_VERSION_V3)
+    {
+        for (i = 0; i < MAX_FOLDER_COUNT; i++)
+        {
+            GeSramExtFolderRecord *record = &g_GeSramExtBank.folders[i];
+
+            if (record->flags & GE_SRAM_EXT_FLAG_VALID)
+            {
+                s32 oldencoded = record->camera_distance_adjust;
+
+                if (oldencoded == 0)
+                {
+                    /* Old authored default 300 follows the new authored 310. */
+                    record->camera_distance_adjust = 0;
+                }
+                else
+                {
+                    s32 actual = 300 + oldencoded * 5;
+                    s32 delta = actual - TP_CAM_DISTANCE_DEFAULT;
+                    s32 encoded = delta >= 0 ? (delta + 2) / 5 : (delta - 2) / 5;
+
+                    if (encoded < (TP_CAM_DISTANCE_MIN - TP_CAM_DISTANCE_DEFAULT) / 5)
+                        encoded = (TP_CAM_DISTANCE_MIN - TP_CAM_DISTANCE_DEFAULT) / 5;
+                    if (encoded > (TP_CAM_DISTANCE_MAX - TP_CAM_DISTANCE_DEFAULT) / 5)
+                        encoded = (TP_CAM_DISTANCE_MAX - TP_CAM_DISTANCE_DEFAULT) / 5;
+                    record->camera_distance_adjust = encoded;
+                }
+
+                /* New optional TP patches default Off for every pre-v4 folder. */
+                record->reserved &= ~(GE_SRAM_EXT_RESERVED_TP_CORNER_FIX
+                    | GE_SRAM_EXT_RESERVED_TP_WORLD_CROSSHAIR);
             }
         }
 
@@ -784,6 +864,13 @@ static void fileSramExtSyncLegacySave(save_data *save)
     if (g_GeSramExtBank.folders[folder].flags & GE_SRAM_EXT_FLAG_VALID)
     {
         GeSramExtFolderRecord *current = &g_GeSramExtBank.folders[folder];
+        /* R27U: the legacy 512-byte mod_options3 bits 1..3 are the TP
+         * camera-pack signature, so Jumping lives only in the authoritative
+         * extension journal. Preserve that flag across generic legacy writes. */
+        if (current->flags & GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP)
+            record.flags |= GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP;
+        else
+            record.flags &= ~GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP;
 
         /* V75: every TP camera tuner in the extension journal is authoritative.
          * The 512-byte compatibility mirror can be stale when an unrelated
@@ -797,8 +884,12 @@ static void fileSramExtSyncLegacySave(save_data *save)
         record.camera_downframe_adjust = current->camera_downframe_adjust;
         record.crouch_camera_height_adjust = current->crouch_camera_height_adjust;
         record.reserved = current->reserved;
-        record.flags = (record.flags & ~GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY)
-            | (current->flags & GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY);
+        record.flags = (record.flags
+                & ~(GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY
+                    | GE_SRAM_EXT_FLAG_ENEMY_BULLET_HOLES))
+            | (current->flags
+                & (GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY
+                    | GE_SRAM_EXT_FLAG_ENEMY_BULLET_HOLES));
     }
 
     fileSramExtUpdateFolder(folder, &record);
@@ -871,8 +962,52 @@ static s32 fileSramExtLoadFolder(u32 folder, save_data *save)
     if (record->flags & GE_SRAM_EXT_FLAG_MICROOPT) g_ModGameplayOptions3 |= MODOPT3_ENABLE_MICROOPT;
     if (record->flags & GE_SRAM_EXT_FLAG_TP_CROUCH_CAM) g_ModGameplayOptions3 |= MODOPT3_TP_CROUCH_CAM;
     if (record->flags & GE_SRAM_EXT_FLAG_DIRECTIONAL) g_ModGameplayOptions3 |= MODOPT3_DIRECTIONAL_SHOULDER;
+    if (record->flags & GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP) g_ModGameplayOptions3 |= MODOPT3_EXPERIMENTAL_JUMP;
     g_ModTpSightTranslucencyEnabled =
         (record->flags & GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY) == 0;
+    g_ModEnemyBulletHolesEnabled =
+        (record->flags & GE_SRAM_EXT_FLAG_ENEMY_BULLET_HOLES) != 0;
+    g_ModTpCornerShootingFixEnabled =
+        (record->reserved & GE_SRAM_EXT_RESERVED_TP_CORNER_FIX) != 0;
+    g_ModTpWorldSpaceCrosshairEnabled =
+        (record->reserved & GE_SRAM_EXT_RESERVED_TP_WORLD_CROSSHAIR) != 0;
+    g_ModUnlimitedExplosionsEnabled =
+        (record->reserved & GE_SRAM_EXT_RESERVED_UNLIMITED_EXPLOSIONS) != 0;
+    g_ModMasterControlDebugMenuEnabled =
+        (record->reserved & GE_SRAM_EXT_RESERVED_MASTER_CONTROL_DEBUG) != 0;
+    modMeleeQuickSwapSetEnabled(
+        (record->reserved & GE_SRAM_EXT_RESERVED_MELEE_QUICK_SWAP) != 0);
+    {
+        u32 tail = folder * GE_SRAM_EXT_TAIL_SP_STRIDE;
+        u16 selection = ((u16)g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_CHAR_HI] << 8)
+            | g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_CHAR_LO];
+
+        if (selection > (u16)frontGetMpCharacterCount())
+            selection = 0;
+        g_ModSinglePlayerCharacter = selection;
+        g_ModSinglePlayerMatchViewHeight =
+            (g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_FLAGS]
+                & GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT) != 0;
+    }
+
+    g_ModAdditionalPlayerDeathAnimationsEnabled =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_ENH_ADDITIONAL_PLAYER_DEATHS) != 0;
+    g_ModAlwaysShowCrosshairEnabled =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_ENH_ALWAYS_SHOW_CROSSHAIR) != 0;
+    g_ModDisableBodyArmorEnabled =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_ENH_DISABLE_BODY_ARMOR) != 0;
+    g_ModSiloXMusicLoopFixEnabled =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_ENH_SILOX_LOOP_FIX) != 0;
+    g_ModAr33PropFixMpEnabled =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_ENH_AR33_PROP_FIX_MP) != 0;
+    g_ModStaggeringBackwardsDeathEnabled =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH) != 0;
 
     g_ModStayInTpOnDeathDefault = (record->flags & GE_SRAM_EXT_FLAG_STAY_TP_DEATH) != 0;
     g_ModAntiAliasingEnabled = !(record->reserved & GE_SRAM_EXT_RESERVED_AA_VALID)
@@ -889,9 +1024,29 @@ static s32 fileSramExtLoadFolder(u32 folder, save_data *save)
     return TRUE;
 }
 
+
 s32 fileLoadExtendedSettings(save_data *save)
 {
     u32 folder;
+
+    /* R27U: absent/legacy extension records default Experimental Jumping Off. */
+    modSetExperimentalJumpEnabled(FALSE);
+
+    /* Old/no-extension folders use the authored defaults for extension-only toggles. */
+    g_ModEnemyBulletHolesEnabled = FALSE;
+    g_ModTpCornerShootingFixEnabled = FALSE;
+    g_ModTpWorldSpaceCrosshairEnabled = FALSE;
+    g_ModUnlimitedExplosionsEnabled = FALSE;
+    g_ModMasterControlDebugMenuEnabled = FALSE;
+    modMeleeQuickSwapSetEnabled(FALSE);
+    g_ModSinglePlayerCharacter = 0;
+    g_ModSinglePlayerMatchViewHeight = FALSE;
+    g_ModAdditionalPlayerDeathAnimationsEnabled = FALSE;
+    g_ModStaggeringBackwardsDeathEnabled = FALSE;
+    g_ModAlwaysShowCrosshairEnabled = FALSE;
+    g_ModDisableBodyArmorEnabled = FALSE;
+    g_ModSiloXMusicLoopFixEnabled = FALSE;
+    g_ModAr33PropFixMpEnabled = FALSE;
 
     if (save == NULL || (save->completion_bitflags & SAVEFLAG_DORESET))
         return FALSE;
@@ -934,27 +1089,94 @@ void fileStoreExtendedSettings(save_data *save)
     record.flags = GE_SRAM_EXT_FLAG_VALID;
     record.reserved = GE_SRAM_EXT_RESERVED_AA_VALID
         | GE_SRAM_EXT_RESERVED_V75_CAMERA_REPAIR
-        | (g_ModAntiAliasingEnabled ? GE_SRAM_EXT_RESERVED_AA_ENABLED : 0);
+        | (g_ModAntiAliasingEnabled ? GE_SRAM_EXT_RESERVED_AA_ENABLED : 0)
+        | (g_ModTpCornerShootingFixEnabled ? GE_SRAM_EXT_RESERVED_TP_CORNER_FIX : 0)
+        | (g_ModTpWorldSpaceCrosshairEnabled ? GE_SRAM_EXT_RESERVED_TP_WORLD_CROSSHAIR : 0)
+        | (g_ModUnlimitedExplosionsEnabled ? GE_SRAM_EXT_RESERVED_UNLIMITED_EXPLOSIONS : 0)
+        | (g_ModMasterControlDebugMenuEnabled ? GE_SRAM_EXT_RESERVED_MASTER_CONTROL_DEBUG : 0)
+        | (g_ModMeleeQuickSwapEnabled ? GE_SRAM_EXT_RESERVED_MELEE_QUICK_SWAP : 0);
 
     if (g_ModStayInTpOnDeathDefault) record.flags |= GE_SRAM_EXT_FLAG_STAY_TP_DEATH;
     if (g_ModGameplayOptions3 & MODOPT3_ENABLE_MICROOPT) record.flags |= GE_SRAM_EXT_FLAG_MICROOPT;
     if (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) record.flags |= GE_SRAM_EXT_FLAG_TP_CROUCH_CAM;
     if (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) record.flags |= GE_SRAM_EXT_FLAG_DIRECTIONAL;
+    if (g_ModGameplayOptions3 & MODOPT3_EXPERIMENTAL_JUMP) record.flags |= GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP;
     if (!g_ModTpSightTranslucencyEnabled)
         record.flags |= GE_SRAM_EXT_FLAG_DISABLE_TP_SIGHT_TRANSLUCENCY;
+    if (g_ModEnemyBulletHolesEnabled)
+        record.flags |= GE_SRAM_EXT_FLAG_ENEMY_BULLET_HOLES;
 
-    fileSramExtUpdateFolder(folder, &record);
+    if (folder < MAX_FOLDER_COUNT && fileSramExtEnsureCurrentVersion())
+    {
+        u32 tail = folder * GE_SRAM_EXT_TAIL_SP_STRIDE;
+        u16 selection = g_ModSinglePlayerCharacter;
+        u8 flags = g_ModSinglePlayerMatchViewHeight ? GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT : 0;
+        u32 enh = GE_SRAM_EXT_TAIL_ENH_BASE + folder;
+        u8 enhflags = (g_ModAdditionalPlayerDeathAnimationsEnabled
+            ? GE_SRAM_EXT_TAIL_ENH_ADDITIONAL_PLAYER_DEATHS : 0)
+            | (g_ModAlwaysShowCrosshairEnabled
+            ? GE_SRAM_EXT_TAIL_ENH_ALWAYS_SHOW_CROSSHAIR : 0)
+            | (g_ModDisableBodyArmorEnabled
+            ? GE_SRAM_EXT_TAIL_ENH_DISABLE_BODY_ARMOR : 0)
+            | (g_ModSiloXMusicLoopFixEnabled
+            ? GE_SRAM_EXT_TAIL_ENH_SILOX_LOOP_FIX : 0)
+            | (g_ModAr33PropFixMpEnabled
+            ? GE_SRAM_EXT_TAIL_ENH_AR33_PROP_FIX_MP : 0)
+            | (g_ModStaggeringBackwardsDeathEnabled
+            ? GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH : 0);
+        s32 changed = FALSE;
+
+        /* Keep the folder record and the R27D tail bytes in the same journal
+         * commit.  This avoids doing two EEPROM writes when a normal option
+         * and the SP character selection change together. */
+        if (memcmp(&g_GeSramExtBank.folders[folder], &record, sizeof(record)))
+        {
+            g_GeSramExtBank.folders[folder] = record;
+            changed = TRUE;
+        }
+
+        if (selection > (u16)frontGetMpCharacterCount())
+            selection = 0;
+        if (g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_CHAR_HI] != (u8)(selection >> 8))
+        {
+            g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_CHAR_HI] = (u8)(selection >> 8);
+            changed = TRUE;
+        }
+        if (g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_CHAR_LO] != (u8)selection)
+        {
+            g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_CHAR_LO] = (u8)selection;
+            changed = TRUE;
+        }
+        if (g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_FLAGS] != flags)
+        {
+            g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_FLAGS] = flags;
+            changed = TRUE;
+        }
+        if (g_GeSramExtBank.reserved_tail[enh] != enhflags)
+        {
+            g_GeSramExtBank.reserved_tail[enh] = enhflags;
+            changed = TRUE;
+        }
+        if (changed)
+            fileSramExtCommit();
+    }
 }
+
 
 static void fileSramExtInvalidateFolder(u32 folder)
 {
     GeSramExtFolderRecord record;
+    u32 tail;
 
     if (folder >= MAX_FOLDER_COUNT || !fileSramExtEnsureCurrentVersion())
         return;
 
     bzero(&record, sizeof(record));
-    fileSramExtUpdateFolder(folder, &record);
+    g_GeSramExtBank.folders[folder] = record;
+    tail = folder * GE_SRAM_EXT_TAIL_SP_STRIDE;
+    bzero(&g_GeSramExtBank.reserved_tail[tail], GE_SRAM_EXT_TAIL_SP_STRIDE);
+    g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder] = 0;
+    fileSramExtCommit();
 }
 #endif /* GE_SAVE_SRAM || GE_SAVE_EEPROM16K */
 
@@ -984,7 +1206,20 @@ static s32 fileGamePakLongWrite(u8 address, u8 *buffer, s32 nbytes)
 #endif
 
 #if !defined(GE_SAVE_SRAM) && !defined(GE_SAVE_EEPROM16K)
-s32 fileLoadExtendedSettings(save_data *save) { (void)save; return FALSE; }
+s32 fileLoadExtendedSettings(save_data *save)
+{
+    (void)save;
+    g_ModEnemyBulletHolesEnabled = FALSE;
+    g_ModSinglePlayerCharacter = 0;
+    g_ModSinglePlayerMatchViewHeight = FALSE;
+    g_ModAdditionalPlayerDeathAnimationsEnabled = FALSE;
+    g_ModStaggeringBackwardsDeathEnabled = FALSE;
+    g_ModAlwaysShowCrosshairEnabled = FALSE;
+    g_ModDisableBodyArmorEnabled = FALSE;
+    g_ModSiloXMusicLoopFixEnabled = FALSE;
+    g_ModAr33PropFixMpEnabled = FALSE;
+    return FALSE;
+}
 void fileStoreExtendedSettings(save_data *save) { (void)save; }
 #endif
 
@@ -2307,6 +2542,7 @@ void fileLoadSettingsForFolder(u32 folder)
         {
             g_ModGameplayOptions2 = save->mod_options2;
             g_ModGameplayOptions3 = save->mod_options3;
+        g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;
             g_ModTpSightTranslucencyEnabled = TRUE;
             g_ModThirdPersonCrouchCameraHeightAdjust = 0;
             fileLoadThirdPersonCameraSettings(save);
@@ -2315,6 +2551,7 @@ void fileLoadSettingsForFolder(u32 folder)
 #else
         g_ModGameplayOptions2 = save->mod_options2;
         g_ModGameplayOptions3 = save->mod_options3;
+        g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;
         g_ModTpSightTranslucencyEnabled = TRUE;
         fileLoadThirdPersonCameraSettings(save);
 #endif

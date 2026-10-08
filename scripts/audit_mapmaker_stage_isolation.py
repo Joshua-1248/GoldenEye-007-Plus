@@ -62,12 +62,30 @@ row = next((line for line in bg.splitlines() if "LEVELID_MAP_MAKER" in line), ""
 if row and ("bg_run_" in row or "bg_cat_" in row or "bg_len_" in row or "Tbg_run" in row or "Tbg_cat" in row):
     failures.append(f"bg.c: Map Maker row aliases a retail BG/STAN resource: {row.strip()}")
 
-# Existing retail level IDs must stay numerically stable: the new ID is inserted
-# only after PAM and before MAX, and only for GE_MAP_MAKER builds.
+# Existing retail level IDs must stay numerically stable. Map Maker remains
+# appended after PAM under GE_MAP_MAKER; later GoldenEye Plus stages may follow
+# it before LEVELID_MAX as long as they are independently gated.
 constants = (ROOT / "src/bondconstants.h").read_text(errors="replace")
-seq = "LEVELID_PAM,\n#ifdef GE_MAP_MAKER\n    /* Dedicated GoldenEye Plus authoring/test stage.  Never aliases a retail map. */\n    LEVELID_MAP_MAKER,\n#endif\n    LEVELID_MAX"
-if seq not in constants:
-    failures.append("bondconstants.h: dedicated stage is not isolated between PAM and MAX as expected")
+
+stage_tail = re.search(
+    r"LEVELID_PAM,\s*"
+    r"#ifdef GE_MAP_MAKER\s*"
+    r"/\* Dedicated GoldenEye Plus authoring/test stage\.\s+Never aliases a retail map\. \*/\s*"
+    r"LEVELID_MAP_MAKER,\s*"
+    r"#endif\s*"
+    r"(?:#ifdef GE_MODDED_CHEATS\s*"
+    r"(?:/\*.*?\*/\s*)?"
+    r"LEVELID_COURTYARD,\s*"
+    r"#endif\s*)?"
+    r"LEVELID_MAX",
+    constants,
+    re.S,
+)
+
+if stage_tail is None:
+    failures.append(
+        "bondconstants.h: Map Maker/additive-stage tail is not isolated after PAM and before MAX as expected"
+    )
 
 print("Map Maker dedicated-stage isolation audit")
 if failures:

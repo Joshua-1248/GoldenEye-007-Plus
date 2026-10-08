@@ -874,6 +874,11 @@ struct fileentry file_resource_table[] = {
     {SETUPMAPMAKER, "UsetupmapmakerZ", &UsetupmapmakerZ},
 #endif
     {MP_SETUPCAT, "Ump_setupcatZ", &Ump_setupcatZ},
+#ifdef GE_MODDED_CHEATS
+    {BG_COURTYARD_ALL_P, "cb", &bg_courtyard_all_p_seg},
+    {BG_COURTYARD_ALL_P_STAN, "cs", &Tbg_courtyard_all_p_stanZ},
+    {MP_SETUPCOURTYARD, "Ump_cZ", &Ump_setupcourtyardZ},
+#endif
     
     {OBENDSEG, "ob/ob_end.seg", &ob__ob_end_seg},
     {0},

@@ -124,6 +124,7 @@
       build/OUTCODE/src/game/mp_music.o (.rodata);
       build/OUTCODE/src/game/language.o (.rodata);
       build/OUTCODE/src/game/mpmenu.o (.rodata);
+      build/OUTCODE/src/game/mpbots.o (.rodata);
       build/OUTCODE/src/game/radar.o (.rodata);
       build/OUTCODE/src/game/mp_weapon.o (.rodata);
       build/OUTCODE/src/game/image.o (.rodata);

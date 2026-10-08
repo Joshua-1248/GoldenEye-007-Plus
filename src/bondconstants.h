@@ -1693,6 +1693,10 @@ typedef enum LEVELID
     /* Dedicated GoldenEye Plus authoring/test stage.  Never aliases a retail map. */
     LEVELID_MAP_MAKER,
 #endif
+#ifdef GE_MODDED_CHEATS
+    /* R27X: BMW Courtyard, appended so every existing Plus stage ID stays stable. */
+    LEVELID_COURTYARD,
+#endif
     LEVELID_MAX,
     LEVELID_TITLE = 90,
     LEVELID_BUNKER2_MP  = LEVELID_BUNKER2 + ENVIRONMENTDATA_PLAYERS_4,
@@ -1893,6 +1897,24 @@ typedef enum MENU
     MENU_LEVEL_MODIFIERS,
     MENU_LEVEL_MODIFIERS_LEVELS,
     MENU_LEVEL_MODIFIERS_DETAIL,
+    /* R27C Special Options submenus. Appended to preserve all prior menu IDs. */
+    MENU_PATCHES,
+    MENU_THIRD_PERSON_OPTIONS,
+    /* R27D main-menu-only campaign character override. */
+    MENU_SINGLE_PLAYER_CHARACTER,
+    /* R27P Special Options debug submenu. */
+    MENU_DEBUG_OPTIONS,
+    /* R27U Special Options experimental submenu. */
+    MENU_EXPERIMENTAL_OPTIONS,
+    /* R27V contextual presentation/gameplay enhancements. */
+    MENU_ENHANCEMENTS_OPTIONS,
+    MENU_ADDITIONAL_DEATH_ANIMATIONS,
+    /* R27Z+ Perfect Dark-derived multiplayer bot frontend. Appended so all
+     * previous GoldenEye Plus menu IDs remain stable. */
+    MENU_MP_BOT_SETTINGS,
+    MENU_MP_BOT_EDIT,
+    MENU_MP_BOT_TRAITS,
+    MENU_MP_BOT_RENAME,
 #endif
     MENU_MAX
 } MENU;
@@ -1982,6 +2004,7 @@ typedef enum MP_STAGE_SELECTED
     MP_STAGE_STATUE,
     MP_STAGE_CRADLE,
     MP_STAGE_CITADEL,
+    MP_STAGE_COURTYARD,
 #endif
     MP_STAGE_SELECTED_MAX
 } MP_STAGE_SELECTED;
@@ -1998,7 +2021,9 @@ typedef enum MPMENU
     MENU_FINISHED,
 #ifdef GE_MODDED_CHEATS
     /* R15 campaign Co-Op pause-page extension. Appended to preserve retail values. */
-    MENU_OBJECTIVES
+    MENU_OBJECTIVES,
+    /* R30 P9: appended so all pre-existing retail/Plus menu values stay stable. */
+    MENU_BOT_SCORES
 #endif
 } MPMENU;
 

@@ -887,7 +887,11 @@ void cheatTryActivateFromInputBuffer(void)
     }
     else
     {
+#ifdef GE_MODDED_CHEATS
+        applicableMask = (gamemode == GAMEMODE_MULTI) ? CHEAT_MASK_MPGAME : CHEAT_MASK_SPGAME;
+#else
         applicableMask = (getPlayerCount() == 1) ? CHEAT_MASK_SPGAME : CHEAT_MASK_MPGAME;
+#endif
     }
 
     // Iterate through all cheats until one is activated or all are checked
@@ -1028,7 +1032,7 @@ bool cheatCheckIfMPCheat(CHEAT_ID cheat_id)
 void cheatApplyFrontendSelectionsForStage(void)
 {
     s32 i;
-    s32 applicableMask = CHEAT_MASK_MPGAME >> (getPlayerCount() == 1);
+    s32 applicableMask = (gamemode == GAMEMODE_MULTI) ? CHEAT_MASK_MPGAME : CHEAT_MASK_SPGAME;
 
     for (i = 1; i < CHEAT_INVALID; i++)
     {

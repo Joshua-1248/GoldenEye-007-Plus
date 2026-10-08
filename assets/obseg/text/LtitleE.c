@@ -175,8 +175,13 @@ char *LtitleE[] = {
  "EGYPTIAN", //TITLE_STR_173
  "Citadel", //TITLE_STR_174
  "CITADEL", //TITLE_STR_175
+#ifdef GE_MODDED_CHEATS
+ "Courtyard", //TITLE_STR_176
+ "COURTYARD", //TITLE_STR_177
+#else
  "dest", //TITLE_STR_176
  "dest", //TITLE_STR_177
+#endif
  "Statue", //TITLE_STR_178
  "STATUE", //TITLE_STR_179
  "Cradle", //TITLE_STR_180
@@ -286,8 +291,22 @@ char *LtitleE[] = {
  "2.4 Goodhead\n", //TITLE_STR_284
  "Select Control Style\n", //TITLE_STR_285
  "Control Style\n", //TITLE_STR_286
+ "Only attacks opponents who are armed.", //TITLE_STR_BOTTRAIT_PACIFIST_DESC
+ "Prioritizes the opponent who last killed it.", //TITLE_STR_BOTTRAIT_VINDICTIVE_DESC
+ "Rushes opponents aggressively at close range.", //TITLE_STR_BOTTRAIT_PSYCHOTIC_DESC
+ "Starts heavily armored and moves more slowly.", //TITLE_STR_BOTTRAIT_JUGGERNAUT_DESC
+ "Starts armored and prioritizes armor pickups.", //TITLE_STR_BOTTRAIT_ARMOR_SPECIALIST_DESC
+ "Strongly favors explosive weapons.", //TITLE_STR_BOTTRAIT_PYROMANIAC_DESC
+ "Prioritizes the weakest opponent.", //TITLE_STR_BOTTRAIT_BULLY_DESC
+ "Avoids opponents with similarly powerful or stronger weapons.", //TITLE_STR_BOTTRAIT_FEARFUL_DESC
+ "Prioritizes the player with the highest score.", //TITLE_STR_BOTTRAIT_EQUALIZER_DESC
+ "Keeps pursuing one chosen opponent.", //TITLE_STR_BOTTRAIT_STALKER_DESC
+ "Strongly prefers melee combat.", //TITLE_STR_BOTTRAIT_MELEE_DESC
+ "Moves at twice the normal speed.", //TITLE_STR_BOTTRAIT_SPEEDY_DESC
+ "Cheats without any consequences to it. Uses unfair tactics such as starting armed and moving at twice the normal speed.", //TITLE_STR_BOTTRAIT_CHEAP_DESC
  #ifdef LANG_US 
- 0 //TITLE_STR_287_RUSSIANSOLDIER
+ 0, //TITLE_STR_287_RUSSIANSOLDIER
+ "Josh_7774" //TITLE_STR_JOSH_7774 (US index 288)
  #endif
  #ifdef LANG_JP
  "Russian Soldier\n", //TITLE_STR_287_RUSSIANSOLDIER
@@ -304,6 +323,7 @@ char *LtitleE[] = {
  "Siberian Special Forces\n", //TITLE_STR_298_SIBERIANSPECIALFORCES
  "Jungle Commando\n", //TITLE_STR_299_JUNGLECOMMANDO
  "Janus Special Forces\n", //TITLE_STR_300_JANUSSPECIALFORCES
- "Moonraker Elite\n" //TITLE_STR_301_MOONRAKERELITE
+ "Moonraker Elite\n", //TITLE_STR_301_MOONRAKERELITE
+ "Josh_7774" //TITLE_STR_JOSH_7774
  #endif
 };

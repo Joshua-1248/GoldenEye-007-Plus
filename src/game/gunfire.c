@@ -1206,6 +1206,9 @@ void gunCreateBeamForHand(enum GUNHAND hand)
             }
             else
             {
+                /* R27C2 publishes TP laser beams directly from the gameplay
+                 * firing tick, so a missing resolved ray here simply means this
+                 * hand has no beam to draw yet. */
                 chr->beams[hand].unk00 = -1;
             }
         }
@@ -2650,6 +2653,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     f32 sp8C;
     f32 sp88;
     enum ITEM_IDS var_s1;
+#ifdef GE_MODDED_CHEATS
+    enum ITEM_IDS r27tPreviousMeleePresentation;
+#endif
     struct sfx3 sp7C;
     struct PropRecord *temp_v0_8;
     Weapon1PTransformKeyframe *sp74;
@@ -2707,6 +2713,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     enum ITEM_IDS temp_v0_3;
     struct sfx3 sp7C;
     enum ITEM_IDS var_s1;
+#ifdef GE_MODDED_CHEATS
+    enum ITEM_IDS r27tPreviousMeleePresentation;
+#endif
     Weapon1PTransformKeyframe *sp74;
     struct PropRecord *temp_v0_8;
     f32 temp_f0_2;
@@ -2762,6 +2771,9 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     enum ITEM_IDS temp_v0_3;
     struct sfx3 sp7C;
     enum ITEM_IDS var_s1;
+#ifdef GE_MODDED_CHEATS
+    enum ITEM_IDS r27tPreviousMeleePresentation;
+#endif
     Weapon1PTransformKeyframe *sp74;
     struct PropRecord *temp_v0_8;
     f32 temp_f0_2;
@@ -3513,13 +3525,30 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
 
             handptr->weapon_action_state = GUN_ANIM_STATE_SWITCH_SWAP;
 
-            if (bondinvItemAvailable(ITEM_SNIPERRIFLE) != 0)
+#ifdef GE_MODDED_CHEATS
+            /* R27T: preserve an explicitly selected melee style across both
+             * forward and backward cycling. Before the first B->Z selection,
+             * and whenever the option is Off, retail behavior stays exact. */
+            if (g_ModMeleeQuickSwapEnabled
+                && modMeleeQuickSwapPlayerSelectionLocked(get_cur_playernum()))
             {
-                g_CurrentPlayer->cur_item_weapon_getname = ITEM_SNIPERRIFLE;
+                if (g_CurrentPlayer->cur_item_weapon_getname != ITEM_SNIPERRIFLE
+                    || bondinvItemAvailable(ITEM_SNIPERRIFLE) == 0)
+                {
+                    g_CurrentPlayer->cur_item_weapon_getname = ITEM_FIST;
+                }
             }
             else
+#endif
             {
-                g_CurrentPlayer->cur_item_weapon_getname = ITEM_FIST;
+                if (bondinvItemAvailable(ITEM_SNIPERRIFLE) != 0)
+                {
+                    g_CurrentPlayer->cur_item_weapon_getname = ITEM_SNIPERRIFLE;
+                }
+                else
+                {
+                    g_CurrentPlayer->cur_item_weapon_getname = ITEM_FIST;
+                }
             }
         }
         else
@@ -3565,7 +3594,66 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                         }
                     }
                 }
+#ifdef GE_MODDED_CHEATS
+                /* R27T R6: on the very first quick-swap after spawn, retail's
+                 * cur_item_weapon_getname can already say Sniper Butt while
+                 * the first-person hand still has ITEM_FIST loaded. Capture
+                 * the model that is actually resident before the wrapper
+                 * schedules the normal ITEM_FIST reload. */
+                r27tPreviousMeleePresentation =
+                    g_CurrentPlayer->hand_item[hand];
+#endif
                 currentPlayerUnEquipWeaponWrapper(hand, handptr->weapon_next_weapon);
+#ifdef GE_MODDED_CHEATS
+                /* R27T R6: choose the opposite style from the presentation
+                 * that was actually visible, not from the startup selector.
+                 * This makes swap #1 identical to every later swap. */
+                if (hand == GUNRIGHT
+                    && g_ModMeleeQuickSwapEnabled
+                    && modMeleeQuickSwapPlayerSelectionPending(get_cur_playernum()))
+                {
+                    /* R27T R8 R1: compact form of the same selector rules.
+                     * After the first manual commit the selector is authority.
+                     * Before it, All Guns gets its Sniper-Butt -> Fist special
+                     * case and R6's resident-model startup disambiguation stays. */
+                    if (modMeleeQuickSwapPlayerSelectionLocked(get_cur_playernum()))
+                    {
+                        if (g_CurrentPlayer->cur_item_weapon_getname == ITEM_SNIPERRIFLE
+                            || bondinvItemAvailable(ITEM_SNIPERRIFLE) == 0)
+                        {
+                            g_CurrentPlayer->cur_item_weapon_getname = ITEM_FIST;
+                        }
+                        else
+                        {
+                            g_CurrentPlayer->cur_item_weapon_getname = ITEM_SNIPERRIFLE;
+                        }
+                    }
+                    else if (bondinvGetAllGunsFlag()
+                        && g_CurrentPlayer->cur_item_weapon_getname == ITEM_SNIPERRIFLE)
+                    {
+                        g_CurrentPlayer->cur_item_weapon_getname = ITEM_FIST;
+                    }
+                    else if (r27tPreviousMeleePresentation == ITEM_SNIPERRIFLE
+                        || (r27tPreviousMeleePresentation != ITEM_FIST
+                            && g_CurrentPlayer->cur_item_weapon_getname == ITEM_SNIPERRIFLE)
+                        || bondinvItemAvailable(ITEM_SNIPERRIFLE) == 0)
+                    {
+                        g_CurrentPlayer->cur_item_weapon_getname = ITEM_FIST;
+                    }
+                    else
+                    {
+                        g_CurrentPlayer->cur_item_weapon_getname = ITEM_SNIPERRIFLE;
+                    }
+
+                    modMeleeQuickSwapLockPlayerSelection(get_cur_playernum());
+
+                    if (g_CurrentPlayer->lock_hand_model[hand] == 0)
+                    {
+                        g_CurrentPlayer->hand_invisible[hand] = -1;
+                        g_CurrentPlayer->field_2A44[hand] = ITEM_FIST;
+                    }
+                }
+#endif
                 var_s1 = get_item_in_hand_or_watch_menu(hand);
                 handptr->weapon_action_state = GUN_ANIM_STATE_SWITCH_HOLD;
             }
@@ -6956,9 +7044,12 @@ void gunDrawSight(s32 *gdl) {
     f32 halfedxy[2];
 
 #ifdef GE_MODDED_CHEATS
-    /* Third Person owns a real depth-tested world-space reticle.  Never draw a
-     * second HUD-space sight over it; First Person keeps the retail path below. */
-    if (modThirdPersonActive(get_cur_playernum()))
+    /* Keep the authored world-space TP sight available as an optional mode.
+     * Default Third Person uses GoldenEye's ordinary HUD-space crosshair so
+     * geometry cannot hide it and its screen position remains identical to the
+     * camera/aim ray used by bullet_path_from_screen_center(). */
+    if (modThirdPersonActive(get_cur_playernum())
+        && g_ModTpWorldSpaceCrosshairEnabled)
     {
         return;
     }
@@ -7019,6 +7110,7 @@ void gunRenderThirdPersonWorldSight(Gfx **gdlptr)
     f32 screenheight;
 
     if (gdlptr == NULL || !modThirdPersonActive(get_cur_playernum())
+            || !g_ModTpWorldSpaceCrosshairEnabled
             || g_CurrentPlayer == NULL
             || g_CurrentPlayer->gunsightmode != 0
             || g_CurrentPlayer->mpmenuon != FALSE

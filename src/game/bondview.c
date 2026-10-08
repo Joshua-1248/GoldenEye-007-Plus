@@ -1375,7 +1375,11 @@ s32 bondviewGetRandomSpawnPadIndex(void)
  */
 void init_player_BONDdata(void)
 {
+#ifdef GE_MODDED_CHEATS
+    if (gamemode == GAMEMODE_MULTI)
+#else
     if (getPlayerCount() >= 2)
+#endif
     {
         g_CurrentPlayer->controldef = get_player_control_style(get_cur_playernum());
         cur_player_set_control_type(get_player_control_style(get_cur_playernum()));
@@ -1527,7 +1531,11 @@ void bondviewPlayerBeginLife(void)
 
     bondinvAddInvItem(ITEM_FIST);
 
+#ifdef GE_MODDED_CHEATS
+    if (gamemode == GAMEMODE_MULTI)
+#else
     if (getPlayerCount() >= 2)
+#endif
     {
         currentPlayerEquipWeaponWrapper(GUNLEFT, starting_weapon[GUNLEFT]);
         currentPlayerEquipWeaponWrapper(GUNRIGHT, starting_weapon[GUNRIGHT]);

@@ -30,10 +30,12 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
     f32 scale;
     f32 pov;
     s32 opcode;
+    s32 addedHeadRecords;
     ModelRwData_SwitchRecord *rwdata;
 
     scale = c_item_entries[body].scale * 0.10000001f;
     opcode = 0;
+    addedHeadRecords = FALSE;
     pov = c_item_entries[body].pov;
 
     if (
@@ -71,6 +73,7 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
             modelCalculateRwDataLen(headHeader);
 
             bodyHeader->numRecords += headHeader->numRecords;
+            addedHeadRecords = TRUE;
         }
     }
 
@@ -92,14 +95,20 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
   //
 #endif
 
+    /* numRecords is global model-header state.  The head count is only a
+     * temporary sizing aid for model instantiation and must be restored even
+     * when no animated model slot can satisfy the request.  Leaving it
+     * inflated makes every bot spawn/respawn retry progressively larger. */
+    if (addedHeadRecords)
+        bodyHeader->numRecords -= headHeader->numRecords;
+
     if (model != 0)
     {
         modelSetScale(model, scale);
         modelSetAnimTranslationScale(model, pov);
 
-        if ((headHeader != 0) && (c_item_entries[body].hasHead == 0))
+        if (addedHeadRecords)
         {
-            bodyHeader->numRecords -= headHeader->numRecords;
             modelAttachHead(model, opcode, headHeader);
 
             if ((sunglasses == 0) && ((s32) headHeader->numSwitches > 0))

@@ -11,7 +11,7 @@ MK=(R/'Makefile').read_text(errors='replace')
 checks=[]
 def ck(n,c): checks.append((n,bool(c))); print(('[PASS] ' if c else '[FAIL] ')+n)
 ck('authored TP crouched height is 46', '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in H)
-ck('current SRAM schema stores canonical absolute crouch height', '#define GE_SRAM_EXT_VERSION         3u' in F and 'record.crouch_camera_height_adjust = TP_CROUCH_CAM_HEIGHT_DEFAULT' in F)
+ck('current SRAM schema stores canonical absolute crouch height', '#define GE_SRAM_EXT_VERSION         4u' in F and 'record.crouch_camera_height_adjust = TP_CROUCH_CAM_HEIGHT_DEFAULT' in F)
 ck('legacy pre-absolute SRAM is migrated once at schema upgrade', 'GE_SRAM_EXT_V1_CROUCH_ABSOLUTE' in F and 'fileSramExtEnsureCurrentVersion' in F)
 ck('ordinary SRAM saves persist exact displayed height', 'record.crouch_camera_height_adjust = TP_CROUCH_CAM_HEIGHT_DEFAULT' in F and '+ g_ModThirdPersonCrouchCameraHeightAdjust;' in F)
 ck('load converts exact stored height back to runtime adjustment', 'record->crouch_camera_height_adjust - TP_CROUCH_CAM_HEIGHT_DEFAULT' in F)

@@ -34,7 +34,12 @@ ck('EEPROM extension transport maps byte offsets to 8-byte blocks', 'block = off
 ck('EEPROM16 build requires a real 16K probe result', 'joyGamePakProbe() == EEPROM_TYPE_16K' in FILE2)
 ck('extended settings are active for either SRAM or EEPROM16', '#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)' in FILE2 and '#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)' in FRONT and '#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)' in MPMENU)
 ck('legacy 512-byte save layout remains intact', 'save_data_size_must_remain_0x60' in FILE2 and 'GE_SRAM_LEGACY_SIZE   0x00000200u' in FILE2)
-ck('versioned extension journal remains in use', 'GE_SRAM_EXT_VERSION_LEGACY  1u' in FILE2 and 'GE_SRAM_EXT_VERSION_V2      2u' in FILE2 and 'GE_SRAM_EXT_VERSION         3u' in FILE2)
+ck('versioned extension journal remains in use',
+   'GE_SRAM_EXT_VERSION_LEGACY  1u' in FILE2 and
+   'GE_SRAM_EXT_VERSION_V2      2u' in FILE2 and
+   'GE_SRAM_EXT_VERSION_V3      3u' in FILE2 and
+   'GE_SRAM_EXT_VERSION         4u' in FILE2 and
+   'bank->version != GE_SRAM_EXT_VERSION_V3' in FILE2)
 ck('V46 audit is mandatory build prerequisite', 'eeprom16-backend-v46-audit:' in MAKE and 'eeprom16-backend-v46-audit' in next((x for x in MAKE.splitlines() if x.startswith('prerequisites:')), ''))
 
 bad=[n for n,ok in checks if not ok]

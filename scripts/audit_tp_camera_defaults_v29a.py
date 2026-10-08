@@ -8,7 +8,7 @@ o=(ROOT/'src/game/options.c').read_text(errors='replace')
 b=(ROOT/'src/game/bondview2.c').read_text(errors='replace')
 f=(ROOT/'src/game/file2.c').read_text(errors='replace')
 checks=[
- ('distance default 300', '#define TP_CAM_DISTANCE_DEFAULT 300' in h and '#define TP_CAM_DISTANCE_DEFAULT 300' in hroot),
+ ('distance default 310', '#define TP_CAM_DISTANCE_DEFAULT 310' in h and '#define TP_CAM_DISTANCE_DEFAULT 310' in hroot),
  ('height default -12', '#define TP_CAM_HEIGHT_DEFAULT (-12)' in h and '#define TP_CAM_HEIGHT_DEFAULT (-12)' in hroot),
  ('horizontal default -24', '#define TP_CAM_HORIZONTAL_DEFAULT (-24)' in h and '#define TP_CAM_HORIZONTAL_DEFAULT (-24)' in hroot),
  ('down-frame default 24', '#define TP_CAM_DOWN_FRAME_DEFAULT 24' in h and '#define TP_CAM_DOWN_FRAME_DEFAULT 24' in hroot),

@@ -1,6 +1,7 @@
 #include <ultra64.h>
 #include <bondconstants.h>
 #include "mp_weapon.h"
+#include "options.h"
 #include "assets/obseg/text/LmpweaponsE.h"
 // data
 //D:80048670
@@ -233,7 +234,18 @@ u16* getPtrMPWeaponSetTextID(void)
 //return pointer to selected mp_weapon_set data
 struct s_mp_weapon_set* getPtrMPWeaponSetData(void)
 {
-    return mp_weapon_set_text_table[mp_weapon_set].weapon_set;
+    struct s_mp_weapon_set *set = mp_weapon_set_text_table[mp_weapon_set].weapon_set;
+
+#ifdef GE_MODDED_CHEATS
+    if (set == mp_weapon_set_remote_m || set == mp_weapon_set_timed_m)
+    {
+        s32 prop = g_ModAr33PropFixMpEnabled ? PROP_CHRM16 : PROP_CHRKALASH;
+        set[4].propID = prop;
+        set[5].propID = prop;
+    }
+#endif
+
+    return set;
 }
 
 //set mp weapon set

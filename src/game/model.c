@@ -30,6 +30,188 @@ typedef struct ModelGroupMtxBuildArg {
     ModelNode *parentnode;
 } ModelGroupMtxBuildArg;
 
+#ifdef GE_PHYSICAL_FASTPATHS
+/*
+ * R27L exact model trig cache.
+ *
+ * This is memoization, not approximation.  Cache misses execute the same
+ * retail sinf()/cosf() calls.  Cache hits return those exact stored f32
+ * results, keyed by the exact input float bit pattern.
+ *
+ * Keep +0/-0 and all other bit-distinct inputs separate.
+ */
+#define MOD_MODEL_TRIG_SLOT_COUNT 256
+#define MOD_MODEL_TRIG_WAYS 2
+#define MOD_MODEL_TRIG_SET_COUNT (MOD_MODEL_TRIG_SLOT_COUNT / MOD_MODEL_TRIG_WAYS)
+#define MOD_MODEL_TRIG_META_BYTES 0x1000
+#define MOD_MODEL_TRIG_WAY_OFFSET 0x1000
+
+typedef union ModModelTrigFloatBits
+{
+    f32 f;
+    u32 u;
+} ModModelTrigFloatBits;
+
+typedef struct ModModelTrigEntry
+{
+    u32 key;
+    f32 sine;
+    f32 cosine;
+    u8 valid;
+    u8 pad[3];
+} ModModelTrigEntry;
+
+extern u8 _modelTrigCacheStart[];
+extern u8 _modelTrigCacheEnd[];
+
+typedef char mod_model_trig_entry_size_must_be_16[
+    (sizeof(ModModelTrigEntry) == 16) ? 1 : -1];
+
+void modelInitTrigCache(void)
+{
+    ModModelTrigEntry *entries =
+        (ModModelTrigEntry *)_modelTrigCacheStart;
+    u8 *nextway = _modelTrigCacheStart + MOD_MODEL_TRIG_WAY_OFFSET;
+    s32 i;
+
+    for (i = 0; i < MOD_MODEL_TRIG_SLOT_COUNT; i++)
+    {
+        entries[i].key = 0;
+        entries[i].sine = 0.0f;
+        entries[i].cosine = 0.0f;
+        entries[i].valid = FALSE;
+        entries[i].pad[0] = 0;
+        entries[i].pad[1] = 0;
+        entries[i].pad[2] = 0;
+    }
+
+    for (i = 0; i < MOD_MODEL_TRIG_SET_COUNT; i++)
+    {
+        nextway[i] = 0;
+    }
+}
+
+static void modelSinCosExactCached(f32 angle, f32 *sine, f32 *cosine)
+{
+    ModModelTrigEntry *entries =
+        (ModModelTrigEntry *)_modelTrigCacheStart;
+    u8 *nextway = _modelTrigCacheStart + MOD_MODEL_TRIG_WAY_OFFSET;
+    ModModelTrigFloatBits bits;
+    u32 set;
+    u32 firstslot;
+    u32 slot;
+    u32 way;
+
+    bits.f = angle;
+    set = (bits.u ^ (bits.u >> 11) ^ (bits.u >> 22))
+        & (MOD_MODEL_TRIG_SET_COUNT - 1);
+    firstslot = set * MOD_MODEL_TRIG_WAYS;
+
+    for (way = 0; way < MOD_MODEL_TRIG_WAYS; way++)
+    {
+        slot = firstslot + way;
+
+        if (entries[slot].valid && entries[slot].key == bits.u)
+        {
+            *sine = entries[slot].sine;
+            *cosine = entries[slot].cosine;
+            return;
+        }
+    }
+
+    /*
+     * Same retail math on a miss.  Publish only after both values exist.
+     */
+    *cosine = cosf(angle);
+    *sine = sinf(angle);
+
+    way = nextway[set] & 1;
+    nextway[set] = way ^ 1;
+    slot = firstslot + way;
+
+    entries[slot].key = bits.u;
+    entries[slot].sine = *sine;
+    entries[slot].cosine = *cosine;
+    entries[slot].valid = TRUE;
+}
+
+static void modelSetPositionRotationXYZExactCached(
+    coord3d *position, coord3d *angles, Mtxf *matrix)
+{
+    f32 cos_x;
+    f32 sin_x;
+    f32 cos_y;
+    f32 sin_y;
+    f32 cos_z;
+    f32 sin_z;
+    f32 sin_x_sin_z;
+    f32 cos_x_sin_z;
+    f32 sin_x_cos_z;
+    f32 cos_x_cos_z;
+
+    modelSinCosExactCached(angles->f[0], &sin_x, &cos_x);
+    modelSinCosExactCached(angles->f[1], &sin_y, &cos_y);
+    modelSinCosExactCached(angles->f[2], &sin_z, &cos_z);
+
+    sin_x_sin_z = sin_x * sin_z;
+    cos_x_sin_z = cos_x * sin_z;
+    sin_x_cos_z = sin_x * cos_z;
+    cos_x_cos_z = cos_x * cos_z;
+
+    /* Same operation ordering as matrix_4x4_set_rotation_around_xyz(). */
+    matrix->m[0][0] = (cos_y * cos_z);
+    matrix->m[0][1] = (cos_y * sin_z);
+    matrix->m[0][2] = -sin_y;
+    matrix->m[0][3] = 0.0f;
+    matrix->m[1][0] = ((sin_x_cos_z * sin_y) - cos_x_sin_z);
+    matrix->m[1][1] = ((sin_x_sin_z * sin_y) + cos_x_cos_z);
+    matrix->m[1][2] = sin_x * cos_y;
+    matrix->m[1][3] = 0.0f;
+    matrix->m[2][0] = ((cos_x_cos_z * sin_y) + sin_x_sin_z);
+    matrix->m[2][1] = ((cos_x_sin_z * sin_y) - sin_x_cos_z);
+    matrix->m[2][2] = cos_x * cos_y;
+    matrix->m[2][3] = 0.0f;
+    matrix->m[3][0] = position->f[0];
+    matrix->m[3][1] = position->f[1];
+    matrix->m[3][2] = position->f[2];
+    matrix->m[3][3] = 1.0f;
+}
+
+static void modelQuaternionSetRotationXYZExactCached(
+    coord3d *angles, quatf q)
+{
+    f32 half_x = angles->f[0] * 0.5f;
+    f32 half_y = angles->f[1] * 0.5f;
+    f32 half_z = angles->f[2] * 0.5f;
+    f32 cos_x;
+    f32 sin_x;
+    f32 cos_y;
+    f32 sin_y;
+    f32 cos_z;
+    f32 sin_z;
+    f32 cos_x_cos_y;
+    f32 cos_x_sin_y;
+    f32 sin_x_cos_y;
+    f32 sin_x_sin_y;
+
+    modelSinCosExactCached(half_x, &sin_x, &cos_x);
+    modelSinCosExactCached(half_y, &sin_y, &cos_y);
+    modelSinCosExactCached(half_z, &sin_z, &cos_z);
+
+    cos_x_cos_y = cos_x * cos_y;
+    cos_x_sin_y = cos_x * sin_y;
+    sin_x_cos_y = sin_x * cos_y;
+    sin_x_sin_y = sin_x * sin_y;
+
+    /* Same operation ordering as quaternion_set_rotation_around_xyzf(). */
+    q[0] = (cos_x_cos_y * cos_z) + (sin_x_sin_y * sin_z);
+    q[1] = (sin_x_cos_y * cos_z) - (cos_x_sin_y * sin_z);
+    q[2] = (cos_x_sin_y * cos_z) + (sin_x_cos_y * sin_z);
+    q[3] = (cos_x_cos_y * sin_z) - (sin_x_sin_y * cos_z);
+}
+#endif
+
+
 // forward declarations
 void modelSetAnimFrame2WithChrStuff(struct Model *model, f32 framea, f32 frameb, f32 frame2a, f32 frame2b);
 
@@ -286,47 +468,113 @@ void modelGetScaledRootToOriginDir(Model* model, coord3d* coord)
 // PD: model0001a524
 s32 modelFindNodeMtxIndex(ModelNode *node, s32 arg1)
 {
-    s32 index;
-    union ModelRoData *rodata1;
-    union ModelRoData *rodata2;
-    union ModelRoData *rodata3;
-    union ModelRoData *rodata4;
-
-    while (node)
+#ifdef GE_PHYSICAL_FASTPATHS
+    /*
+     * R27K: almost every character/skeleton lookup asks for matrix slot 0.
+     * Walk the same parent chain and return the same authored matrix index,
+     * but avoid the generic 0x100/0x200 selector work in that common case.
+     */
+    if (modMicroOptimizationsEnabled() && arg1 == 0)
     {
-        switch (node->Opcode & 0xff)
+        while (node)
         {
-            case MODELNODE_OPCODE_HEADER:
-                rodata1 = node->Data;
-                return rodata1->Header.MatrixIndex;
+            switch (node->Opcode & 0xff)
+            {
+                case MODELNODE_OPCODE_HEADER:
+                    return node->Data->Header.MatrixIndex;
 
-            case MODELNODE_OPCODE_GROUP:
-                rodata2 = node->Data;
-                return rodata2->Group.MatrixIDs[arg1 == 0x200 ? 2 : (arg1 == 0x100 ? 1 : 0)];
+                case MODELNODE_OPCODE_GROUP:
+                case MODELNODE_OPCODE_OP03:
+                    return node->Data->Group.MatrixID0;
 
-            case MODELNODE_OPCODE_OP03:
-                rodata3 = node->Data;
-                return rodata3->Group.MatrixIDs[arg1 == 0x200 ? 2 : (arg1 == 0x100 ? 1 : 0)];
+                case MODELNODE_OPCODE_GROUPSIMPLE:
+                    return node->Data->GroupSimple.Group1;
+            }
 
-            case MODELNODE_OPCODE_GROUPSIMPLE:
-                rodata4 = node->Data;
-                return rodata4->GroupSimple.Group1;
-                break;
+            node = node->Parent;
         }
 
-        node = node->Parent;
+        return -1;
     }
+#endif
 
-    return -1;
+    {
+        s32 index;
+        union ModelRoData *rodata1;
+        union ModelRoData *rodata2;
+        union ModelRoData *rodata3;
+        union ModelRoData *rodata4;
+
+        while (node)
+        {
+            switch (node->Opcode & 0xff)
+            {
+                case MODELNODE_OPCODE_HEADER:
+                    rodata1 = node->Data;
+                    return rodata1->Header.MatrixIndex;
+
+                case MODELNODE_OPCODE_GROUP:
+                    rodata2 = node->Data;
+                    return rodata2->Group.MatrixIDs[arg1 == 0x200 ? 2 : (arg1 == 0x100 ? 1 : 0)];
+
+                case MODELNODE_OPCODE_OP03:
+                    rodata3 = node->Data;
+                    return rodata3->Group.MatrixIDs[arg1 == 0x200 ? 2 : (arg1 == 0x100 ? 1 : 0)];
+
+                case MODELNODE_OPCODE_GROUPSIMPLE:
+                    rodata4 = node->Data;
+                    return rodata4->GroupSimple.Group1;
+                    break;
+            }
+
+            node = node->Parent;
+        }
+
+        return -1;
+    }
 }
 
 
 // PD: model0001a5cc
-Mtxf *modelFindNodeMtx(struct Model *model, struct ModelNode *node, s32 arg2) {
-    s32 index = modelFindNodeMtxIndex(node, arg2);
+Mtxf *modelFindNodeMtx(struct Model *model, struct ModelNode *node, s32 arg2)
+{
+#ifdef GE_PHYSICAL_FASTPATHS
+    /*
+     * R27K: skeleton construction overwhelmingly requests arg2 == 0.
+     * Resolve the same matrix-bearing ancestor directly and return its exact
+     * render_pos entry, avoiding a second helper call on every lookup.
+     */
+    if (modMicroOptimizationsEnabled() && arg2 == 0)
+    {
+        while (node)
+        {
+            switch (node->Opcode & 0xff)
+            {
+                case MODELNODE_OPCODE_HEADER:
+                    return &model->render_pos[node->Data->Header.MatrixIndex].pos;
 
-    if (index >= 0) {
-        return &model->render_pos[index].pos;
+                case MODELNODE_OPCODE_GROUP:
+                case MODELNODE_OPCODE_OP03:
+                    return &model->render_pos[node->Data->Group.MatrixID0].pos;
+
+                case MODELNODE_OPCODE_GROUPSIMPLE:
+                    return &model->render_pos[node->Data->GroupSimple.Group1].pos;
+            }
+
+            node = node->Parent;
+        }
+
+        return NULL;
+    }
+#endif
+
+    {
+        s32 index = modelFindNodeMtxIndex(node, arg2);
+
+        if (index >= 0)
+        {
+            return &model->render_pos[index].pos;
+        }
     }
 
     return NULL;
@@ -1170,6 +1418,72 @@ void subcalcpos(Model *arg0)
     }
 }
 
+
+#ifdef GE_PHYSICAL_FASTPATHS
+/*
+ * R27N exact homogeneous model-matrix multiply.
+ *
+ * This is not a mathematical simplification. It performs the same three
+ * products and the same left-to-right single-precision additions as
+ * matrix_4x4_multiply_homogeneous(), including the separate final parent
+ * translation addition for j == 3. Only loop/branch bookkeeping is removed.
+ */
+static void modelMatrixMultiplyHomogeneousUnrolled(
+    Mtxf *lhs, Mtxf *rhs, Mtxf *result)
+{
+    f32 value;
+
+#define MODEL_MUL_DOT3(I, J) \
+    do { \
+        value = lhs->m[0][I] * rhs->m[J][0]; \
+        value += lhs->m[1][I] * rhs->m[J][1]; \
+        value += lhs->m[2][I] * rhs->m[J][2]; \
+        result->m[J][I] = value; \
+    } while (0)
+
+    MODEL_MUL_DOT3(0, 0);
+    MODEL_MUL_DOT3(0, 1);
+    MODEL_MUL_DOT3(0, 2);
+    MODEL_MUL_DOT3(0, 3);
+    result->m[3][0] += lhs->m[3][0];
+
+    MODEL_MUL_DOT3(1, 0);
+    MODEL_MUL_DOT3(1, 1);
+    MODEL_MUL_DOT3(1, 2);
+    MODEL_MUL_DOT3(1, 3);
+    result->m[3][1] += lhs->m[3][1];
+
+    MODEL_MUL_DOT3(2, 0);
+    MODEL_MUL_DOT3(2, 1);
+    MODEL_MUL_DOT3(2, 2);
+    MODEL_MUL_DOT3(2, 3);
+    result->m[3][2] += lhs->m[3][2];
+
+#undef MODEL_MUL_DOT3
+
+    result->m[0][3] = 0.0f;
+    result->m[1][3] = 0.0f;
+    result->m[2][3] = 0.0f;
+    result->m[3][3] = 1.0f;
+}
+
+#define MODEL_MATRIX_MUL_HOMO(LHS, RHS, RESULT) \
+    do { \
+        if (g_ModGameplayOptions3 & MODOPT3_ENABLE_MICROOPT) \
+        { \
+            modelMatrixMultiplyHomogeneousUnrolled((LHS), (RHS), (RESULT)); \
+        } \
+        else \
+        { \
+            matrix_4x4_multiply_homogeneous((LHS), (RHS), (RESULT)); \
+        } \
+    } while (0)
+#else
+#define MODEL_MATRIX_MUL_HOMO(LHS, RHS, RESULT) \
+    matrix_4x4_multiply_homogeneous((LHS), (RHS), (RESULT))
+#endif
+
+
 void process_01_group_heading(ModelRenderData* renderdata, Model* model, ModelNode* node)
 {
     union ModelRoData* rodata;
@@ -1214,7 +1528,7 @@ void process_01_group_heading(ModelRenderData* renderdata, Model* model, ModelNo
             matrix_scalar_multiply_2(scale, sp20.m[0]);
         }
 
-        matrix_4x4_multiply_homogeneous(var_a3, &sp20, &renderpos->pos);
+        MODEL_MATRIX_MUL_HOMO(var_a3, &sp20, &renderpos->pos);
         return;
     }
 
@@ -1274,10 +1588,19 @@ void modelBuildGroupMatrices(Mtxf **parentMtx, Model *model, ModelGroupMtxBuildA
     
     if (parent != NULL)
     {
-        matrix_4x4_set_position_and_rotation_around_xyz(&group->Origin, rot, &tmp);
+        #ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled())
+        {
+            modelSetPositionRotationXYZExactCached(&group->Origin, rot, &tmp);
+        }
+        else
+#endif
+        {
+            matrix_4x4_set_position_and_rotation_around_xyz(&group->Origin, rot, &tmp);
+        }
 
         matrix0_mtx = &render_pos[matrix0].pos;
-        matrix_4x4_multiply_homogeneous(parent, &tmp, matrix0_mtx);
+        MODEL_MATRIX_MUL_HOMO(parent, &tmp, matrix0_mtx);
 
         if (g_ModelJointPositionedFunc != NULL)
         {
@@ -1286,7 +1609,18 @@ void modelBuildGroupMatrices(Mtxf **parentMtx, Model *model, ModelGroupMtxBuildA
     }
     else
     {
-        matrix_4x4_set_position_and_rotation_around_xyz(&group->Origin, rot, &render_pos[matrix0].pos);
+        #ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled())
+        {
+            modelSetPositionRotationXYZExactCached(
+                &group->Origin, rot, &render_pos[matrix0].pos);
+        }
+        else
+#endif
+        {
+            matrix_4x4_set_position_and_rotation_around_xyz(
+                &group->Origin, rot, &render_pos[matrix0].pos);
+        }
     }
     
     if (flags & MODELGROUP_MTX_HAS_MATRIX1)
@@ -1297,7 +1631,7 @@ void modelBuildGroupMatrices(Mtxf **parentMtx, Model *model, ModelGroupMtxBuildA
         if (parent != NULL)
         {
             quaternion_to_transform_matrix(origin, q2, tmp.m);
-            matrix_4x4_multiply_homogeneous(parent, &tmp, &render_pos[matrix1].pos);
+            MODEL_MATRIX_MUL_HOMO(parent, &tmp, &render_pos[matrix1].pos);
         }
         else
         {
@@ -1347,7 +1681,7 @@ void modelBuildGroupMatrices(Mtxf **parentMtx, Model *model, ModelGroupMtxBuildA
         
         if (parent != NULL)
         {
-            matrix_4x4_multiply_homogeneous(parent, dst, &render_pos[matrix2].pos);
+            MODEL_MATRIX_MUL_HOMO(parent, dst, &render_pos[matrix2].pos);
         }
     }
 }
@@ -1392,7 +1726,7 @@ void sub_GAME_7F06DB5C(ModelRenderData *arg0, Model *arg1, ModelNode *arg2, quat
     if (sp9C != 0) {
         quaternion_to_transform_matrix(&spA0->Origin, arg3, &sp58);
         sp1C = (s32)&sp48[sp54];
-        matrix_4x4_multiply_homogeneous(sp9C, &sp58, (Mtxf *)sp1C);
+        MODEL_MATRIX_MUL_HOMO(sp9C, &sp58, (Mtxf *)sp1C);
         if (g_ModelJointPositionedFunc != NULL) {
             ((void (*)(s32, s32, s32)) g_ModelJointPositionedFunc)(sp54, sp1C, sp1C);
         }
@@ -1404,7 +1738,7 @@ void sub_GAME_7F06DB5C(ModelRenderData *arg0, Model *arg1, ModelNode *arg2, quat
         quaternion_7F05BC68(arg3, 0.5f, sp2C);
         if (sp9C != 0) {
             quaternion_to_transform_matrix(&spA0->Origin, sp2C, &sp58);
-            matrix_4x4_multiply_homogeneous(sp9C, &sp58, (Mtxf *)&sp48[sp50]);
+            MODEL_MATRIX_MUL_HOMO(sp9C, &sp58, (Mtxf *)&sp48[sp50]);
         } else {
             quaternion_to_transform_matrix(&spA0->Origin, sp2C, (Mtxf *)&sp48[sp50]);
         }
@@ -1434,7 +1768,7 @@ void sub_GAME_7F06DB5C(ModelRenderData *arg0, Model *arg1, ModelNode *arg2, quat
         matrix_column_3_scalar_multiply_2(sp24, (f32 *)sp28);
         matrix_4x4_set_position(&spA0->Origin, sp28);
         if (sp9C != 0) {
-            matrix_4x4_multiply_homogeneous(sp9C, sp28, (Mtxf *)&sp48[sp4C]);
+            MODEL_MATRIX_MUL_HOMO(sp9C, sp28, (Mtxf *)&sp48[sp4C]);
         }
     }
 }
@@ -1483,36 +1817,104 @@ u32 modelAnimReadBitsAsU16Angle(u8 *bitstream, u8 width, u32 bitOffset)
 }
 
 
+
+#ifdef GE_PHYSICAL_FASTPATHS
+/*
+ * R27J exact 12-bit animation decoder.
+ *
+ * All authored GE/GE+ character animations currently use 12-bit packed joint
+ * channels.  A channel number N begins at bit N*12, which means byte offsets
+ * alternate between a byte boundary and the low nibble of a byte.
+ *
+ * These helpers reproduce modelAnimReadBitsAsU16Angle(..., 12, N*12)
+ * exactly, including the retail left alignment into u16 (<< 4).
+ *
+ * Non-12-bit/custom animations retain the untouched generic reader.
+ */
+static u16 modelAnimRead12AsU16AngleFast(u8 *bitstream, u32 channel)
+{
+    u32 byteoffset = channel + (channel >> 1);
+    u32 value;
+
+    if (channel & 1)
+    {
+        value = (((u32)bitstream[byteoffset] & 0x0f) << 8)
+            | (u32)bitstream[byteoffset + 1];
+    }
+    else
+    {
+        value = ((u32)bitstream[byteoffset] << 4)
+            | ((u32)bitstream[byteoffset + 1] >> 4);
+    }
+
+    return (u16)(value << 4);
+}
+
+static void modelAnimRead3x12AsU16AngleFast(
+    u8 *bitstream, u32 channel, u16 rotation[3])
+{
+    u32 byteoffset = channel + (channel >> 1);
+    u32 b0 = bitstream[byteoffset + 0];
+    u32 b1 = bitstream[byteoffset + 1];
+    u32 b2 = bitstream[byteoffset + 2];
+    u32 b3 = bitstream[byteoffset + 3];
+    u32 b4 = bitstream[byteoffset + 4];
+
+    if (channel & 1)
+    {
+        rotation[0] = (u16)((((b0 & 0x0f) << 8) | b1) << 4);
+        rotation[1] = (u16)(((b2 << 4) | (b3 >> 4)) << 4);
+        rotation[2] = (u16)((((b3 & 0x0f) << 8) | b4) << 4);
+    }
+    else
+    {
+        rotation[0] = (u16)(((b0 << 4) | (b1 >> 4)) << 4);
+        rotation[1] = (u16)((((b1 & 0x0f) << 8) | b2) << 4);
+        rotation[2] = (u16)(((b3 << 4) | (b4 >> 4)) << 4);
+    }
+}
+#endif
+
+
 /**
  * Address: 7F06DEC0
  */
 void sub_GAME_7F06DEC0(s32 jointnum, s32 flip, ModelSkeleton *skeleton, ModelAnimation *anim, u8 *bitstream, coord3d *rot)
 {
     u32 bitoffset;
+    u32 channel;
     u8 width;
     u16 rotation[3];
 
     width = anim->unk06;
 
-    // Mirrored joint rotation?
     if (flip)
     {
-        bitoffset = skeleton->Joints[jointnum].mtxB * width;
+        channel = skeleton->Joints[jointnum].mtxB;
     }
     else
     {
-        bitoffset = skeleton->Joints[jointnum].mtxA * width;
+        channel = skeleton->Joints[jointnum].mtxA;
     }
 
-    width = anim->unk06;
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled() && width == 12)
+    {
+        modelAnimRead3x12AsU16AngleFast(bitstream, channel, rotation);
+    }
+    else
+#endif
+    {
+        bitoffset = channel * width;
 
-    rotation[0] = modelAnimReadBitsAsU16Angle(bitstream, width, bitoffset);
-    bitoffset += (unsigned long) width;
+        rotation[0] = modelAnimReadBitsAsU16Angle(bitstream, width, bitoffset);
+        bitoffset += (unsigned long) width;
 
-    rotation[1] = modelAnimReadBitsAsU16Angle(bitstream, width, bitoffset);
-    bitoffset += width;
+        rotation[1] = modelAnimReadBitsAsU16Angle(bitstream, width, bitoffset);
+        bitoffset += width;
 
-    rotation[2] = modelAnimReadBitsAsU16Angle(bitstream, width, bitoffset);
+        rotation[2] = modelAnimReadBitsAsU16Angle(bitstream, width, bitoffset);
+    }
 
     rot->x = (rotation[0] * M_TAU_F) / M_U16_MAX_VALUE_F;
 
@@ -1589,8 +1991,26 @@ void process_02_position(ModelRenderData *arg0, Model *model, ModelNode *node)
             sub_GAME_7F06D160(&rot3, &rot4, model->unk5c);
         }
 
-        quaternion_set_rotation_around_xyzf(&rot1, q1);
-        quaternion_set_rotation_around_xyzf(&rot3, q2);
+        #ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled())
+        {
+            modelQuaternionSetRotationXYZExactCached(&rot1, q1);
+        }
+        else
+#endif
+        {
+            quaternion_set_rotation_around_xyzf(&rot1, q1);
+        }
+        #ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled())
+        {
+            modelQuaternionSetRotationXYZExactCached(&rot3, q2);
+        }
+        else
+#endif
+        {
+            quaternion_set_rotation_around_xyzf(&rot3, q2);
+        }
         quaternion_ensure_shortest_path(q1, q2);
         quaternion_slerp(q1, q2, model->unk84, result);
         sub_GAME_7F06DB5C(arg0, model, node, result);
@@ -1644,7 +2064,7 @@ void sub_GAME_7F06E2B8(ModelRenderData *renderData, Model *model, ModelNode *nod
     if (mtx != NULL)
     {
         matrix_4x4_set_position_and_rotation_around_y((f32 *) &data->Group.Origin, angle, localMtxPtr);
-        matrix_4x4_multiply_homogeneous(mtx, &localMtx, &render_pos[m0].pos);
+        MODEL_MATRIX_MUL_HOMO(mtx, &localMtx, &render_pos[m0].pos);
     }
     else
     {
@@ -1674,7 +2094,7 @@ void sub_GAME_7F06E2B8(ModelRenderData *renderData, Model *model, ModelNode *nod
         if (mtx != NULL)
         {
             matrix_4x4_set_position_and_rotation_around_y((f32 *) &data->Group.Origin, angle, &localMtx);
-            matrix_4x4_multiply_homogeneous(mtx, localMtxPtr, &render_pos[m1].pos);
+            MODEL_MATRIX_MUL_HOMO(mtx, localMtxPtr, &render_pos[m1].pos);
         }
         else
         {
@@ -1714,7 +2134,7 @@ void sub_GAME_7F06E2B8(ModelRenderData *renderData, Model *model, ModelNode *nod
 
         if (mtx != NULL)
         {
-            matrix_4x4_multiply_homogeneous(mtx, matrixPtr, &render_pos[m2].pos);
+            MODEL_MATRIX_MUL_HOMO(mtx, matrixPtr, &render_pos[m2].pos);
         }
     }
 }
@@ -1722,8 +2142,9 @@ void sub_GAME_7F06E2B8(ModelRenderData *renderData, Model *model, ModelNode *nod
 
 // Decodes a packed joint angle from the animation bitstream using either mtxA or mtxB.
 f32 sub_GAME_7F06E540(s32 jointIndex, s32 useMtxB, ModelSkeleton *skeleton, ModelAnimation *anim, u8 *bitstream)
-{    
+{
     u32 bitOffset;
+    u32 channel;
     u32 raw;
     u8 width;
     f32 angle;
@@ -1731,19 +2152,36 @@ f32 sub_GAME_7F06E540(s32 jointIndex, s32 useMtxB, ModelSkeleton *skeleton, Mode
     angle = 0.0f;
     width = anim->unk06;
 
-    if (useMtxB != 0) {
-        bitOffset = skeleton->Joints[jointIndex].mtxB * width;
-    } else {
-        bitOffset = skeleton->Joints[jointIndex].mtxA * width;
+    if (useMtxB != 0)
+    {
+        channel = skeleton->Joints[jointIndex].mtxB;
+    }
+    else
+    {
+        channel = skeleton->Joints[jointIndex].mtxA;
     }
 
-    raw = modelAnimReadBitsAsU16Angle(bitstream, width, bitOffset);
+#ifdef GE_PHYSICAL_FASTPATHS
+    if (modMicroOptimizationsEnabled() && width == 12)
+    {
+        raw = modelAnimRead12AsU16AngleFast(bitstream, channel);
+    }
+    else
+#endif
+    {
+        bitOffset = channel * width;
+        raw = modelAnimReadBitsAsU16Angle(bitstream, width, bitOffset);
+    }
 
-    if (useMtxB != 0) {
-        if (raw != 0) {
+    if (useMtxB != 0)
+    {
+        if (raw != 0)
+        {
             angle = ((f32)(s32)(0x10000 - raw) * M_TAU_F) / M_U16_MAX_VALUE_F;
         }
-    } else {
+    }
+    else
+    {
         angle = ((f32)raw * M_TAU_F) / M_U16_MAX_VALUE_F;
     }
 
@@ -1806,7 +2244,7 @@ void process_15_subposition(ModelRenderData* arg0, Model *model, ModelNode *node
     if (sp68)
     {
         matrix_4x4_set_identity_and_position(&rodata->GroupSimple.Origin, &sp28);
-        matrix_4x4_multiply_homogeneous(sp68, &sp28, &matrices[mtxindex]);
+        MODEL_MATRIX_MUL_HOMO(sp68, &sp28, &matrices[mtxindex]);
     }
     else
     {
@@ -5678,6 +6116,111 @@ u32 *sub_GAME_7F07549C(void *arg0, f32 *arg1, f32 *arg2, ModelNode **nodeptr)
 }
 
 
+
+#ifdef GE_PHYSICAL_FASTPATHS
+/*
+ * R27I exact animation-frame cache.
+ *
+ * GoldenEye's current character animation assets have an aligned per-frame
+ * DMA size of at most 80 bytes. Cache only those raw immutable ROM bytes.
+ * Anything larger takes the untouched retail scratch-buffer path.
+ *
+ * 64 slots, 2 ways x 32 sets:
+ *   0x0000..0x13ff  raw frame data (64 * 80)
+ *   0x1400..0x15ff  metadata       (64 * 8)
+ *   0x1600..0x161f  replacement way (32 bytes)
+ *   remainder to 0x1700 reserved/padded by linker
+ *
+ * No cache state is placed in GoldenEye's retail lower-4-MiB BSS.
+ */
+#define MOD_ANIM_CACHE_SLOT_COUNT 64
+#define MOD_ANIM_CACHE_WAYS 2
+#define MOD_ANIM_CACHE_SET_COUNT (MOD_ANIM_CACHE_SLOT_COUNT / MOD_ANIM_CACHE_WAYS)
+#define MOD_ANIM_CACHE_SLOT_SIZE 80
+#define MOD_ANIM_CACHE_META_OFFSET 0x1400
+#define MOD_ANIM_CACHE_WAY_OFFSET  0x1600
+
+typedef struct ModAnimFrameCacheMeta
+{
+    u32 source;
+    u16 size;
+    u8 valid;
+    u8 pad;
+} ModAnimFrameCacheMeta;
+
+extern u8 _animFrameCacheStart[];
+extern u8 _animFrameCacheEnd[];
+
+typedef char mod_anim_cache_meta_size_must_be_8[
+    (sizeof(ModAnimFrameCacheMeta) == 8) ? 1 : -1];
+
+void modelInitAnimationFrameCache(void)
+{
+    ModAnimFrameCacheMeta *meta =
+        (ModAnimFrameCacheMeta *)(_animFrameCacheStart + MOD_ANIM_CACHE_META_OFFSET);
+    u8 *nextway = _animFrameCacheStart + MOD_ANIM_CACHE_WAY_OFFSET;
+    s32 i;
+
+    for (i = 0; i < MOD_ANIM_CACHE_SLOT_COUNT; i++)
+    {
+        meta[i].source = 0;
+        meta[i].size = 0;
+        meta[i].valid = FALSE;
+        meta[i].pad = 0;
+    }
+
+    for (i = 0; i < MOD_ANIM_CACHE_SET_COUNT; i++)
+    {
+        nextway[i] = 0;
+    }
+}
+
+static u32 modelAnimFrameCacheSet(u32 source)
+{
+    return ((source >> 4) ^ (source >> 11)) & (MOD_ANIM_CACHE_SET_COUNT - 1);
+}
+
+static s32 modelLoadAnimationFrameCached(u32 source, u32 size, u32 sourceoffset)
+{
+    ModAnimFrameCacheMeta *meta =
+        (ModAnimFrameCacheMeta *)(_animFrameCacheStart + MOD_ANIM_CACHE_META_OFFSET);
+    u8 *nextway = _animFrameCacheStart + MOD_ANIM_CACHE_WAY_OFFSET;
+    u32 set = modelAnimFrameCacheSet(source);
+    u32 firstslot = set * MOD_ANIM_CACHE_WAYS;
+    u32 slot;
+    u32 way;
+    u8 *dest;
+
+    for (way = 0; way < MOD_ANIM_CACHE_WAYS; way++)
+    {
+        slot = firstslot + way;
+
+        if (meta[slot].valid
+            && meta[slot].source == source
+            && meta[slot].size == size)
+        {
+            return (s32)(_animFrameCacheStart
+                + slot * MOD_ANIM_CACHE_SLOT_SIZE
+                + sourceoffset);
+        }
+    }
+
+    way = nextway[set] & 1;
+    nextway[set] = way ^ 1;
+    slot = firstslot + way;
+    dest = _animFrameCacheStart + slot * MOD_ANIM_CACHE_SLOT_SIZE;
+
+    romCopy(dest, (void *)source, size);
+
+    meta[slot].source = source;
+    meta[slot].size = size;
+    meta[slot].valid = TRUE;
+
+    return (s32)(dest + sourceoffset);
+}
+#endif
+
+
 /**
  * Address 7F0754BC.
  * Copy animation from ROM to RAM
@@ -5689,6 +6232,9 @@ s32 loadAnimationFrame(ModelAnimation* anim, s32 frame, ModelSkeleton* unused)
     s32 frameSize;
     u32 dest;
     u32 size;
+#ifdef GE_PHYSICAL_FASTPATHS
+    u32 sourceoffset;
+#endif
 
     ret = 0;
     frameSize = anim->unk0E >> 3; // divide by 8
@@ -5706,17 +6252,40 @@ s32 loadAnimationFrame(ModelAnimation* anim, s32 frame, ModelSkeleton* unused)
 
         // Get source of this animation in ROM with the offset of the frame we'll load
         source = anim->address + (frame * frameSize);
+#ifdef GE_PHYSICAL_FASTPATHS
+        sourceoffset = 0;
+#endif
         if (source & 1)
         {
             source--;
             frameSize++;
             ret++;
+#ifdef GE_PHYSICAL_FASTPATHS
+            sourceoffset = 1;
+#endif
         }
 
-        // Size of frame but 16-bytes aligned. Observed to be 80 bytes. Might differ for non-guards.
+        // Size of frame but 16-bytes aligned.
         size = ((u32) (frameSize + 15) >> 4) * 16;
 
-        // This copies one animation frame from ROM to the destination in RAM
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled() && size <= MOD_ANIM_CACHE_SLOT_SIZE)
+        {
+            s32 cachedret = modelLoadAnimationFrameCached(
+                (u32)source, size, sourceoffset);
+
+            /*
+             * Preserve retail scratch allocator progression even when the
+             * bytes themselves came from the exact Expansion Pak cache.
+             */
+            D_80036414->uselessPointer += 1;
+            D_80036414->animBufferPtr2 = dest + size;
+
+            return cachedret;
+        }
+#endif
+
+        // Retail fallback: copy one animation frame from ROM to scratch RAM.
         romCopy((void* ) dest, (void* ) source, size);
 
         // Increment this which serves nothing

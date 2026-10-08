@@ -40,6 +40,7 @@
 #include "game/frametiming.h"
 #ifdef GE_MODDED_CHEATS
 #include "game/mirroredlevels.h"
+#include "game/options.h"
 #endif
 #include "PR/R4300.h"
 
@@ -123,6 +124,9 @@ struct memallocstring memallocstringtable[] = {
 { LEVELID_AZTEC,        "-ml0 -me0 -mgfx60  -mvtx40 -mt855 -ma135"},
 { LEVELID_EGYPT,        "-ml0 -me0 -mgfx100 -mvtx50 -mt600 -ma250"},
 { LEVELID_CITADEL,      "-ml0 -me0 -mgfx100 -mvtx50 -mt650 -ma150"},
+#ifdef GE_MODDED_CHEATS
+{ LEVELID_COURTYARD,    "-ml0 -me0 -mgfx130 -mvtx100 -mt400 -ma300"},
+#endif
 { LEVELID_CUBA,         "-ml0 -me0 -mgfx100 -mvtx50 -mt300 -ma300"},
 #ifdef GE_MAP_MAKER
 /* Dedicated Map Maker test stage: generous editor-world/GFX headroom, no retail stage dependency. */
@@ -509,10 +513,39 @@ void bossMainloop(void)
 
                             gdl = firstGdl = dynGetMasterDisplayList();
 
+#ifdef GE_MODDED_CHEATS
+                            /*
+                             * R27P: the save-backed Debug option is the access
+                             * gate for MCM in GE+. Turning it Off also closes
+                             * any currently open MCM state cleanly.
+                             */
+                            if (!g_ModMasterControlDebugMenuEnabled && g_BossIsDebugMenuOpen)
+                            {
+                                if (show_debug_menu_flag)
+                                    debmenuResetBuffer();
+                                show_debug_menu_flag = FALSE;
+                                g_BossIsDebugMenuOpen = FALSE;
+                            }
+#define R27P_MCM_COMBO (L_TRIG | R_TRIG | U_JPAD | U_CBUTTONS)
+#endif
+
+#ifdef GE_MODDED_CHEATS
+                            /* Reset before MCM; Start-close may re-arm it below. */
+                            debugMenuBeginInputFrame();
+#endif
 #ifdef DEBUGMENU
                             //ported from pd beta, official way to open debug menu
 			                // If menu is open (?) or player has pressed C down + C up
-			                if (g_BossIsDebugMenuOpen || joyGetButtons(0, U_CBUTTONS | D_CBUTTONS) == (U_CBUTTONS | D_CBUTTONS)) {
+			                if (g_BossIsDebugMenuOpen
+#ifdef GE_MODDED_CHEATS
+                                || (g_ModMasterControlDebugMenuEnabled
+                                    && g_StageNum != LEVELID_TITLE
+                                    && joyGetButtons(0, R27P_MCM_COMBO) == R27P_MCM_COMBO
+                                    && joyGetButtonsPressedThisFrame(0, R27P_MCM_COMBO) != 0)
+#else
+                                || joyGetButtons(0, U_CBUTTONS | D_CBUTTONS) == (U_CBUTTONS | D_CBUTTONS)
+#endif
+                            ) {
 			                	joyStickXPos = joyGetStickX(0);
 			                	joyStickYPos = joyGetStickY(0);
 			                	joyButtons = joyGetButtons(0, ANY_BUTTON);
@@ -522,7 +555,14 @@ void bossMainloop(void)
 			                } else
 #endif
 #ifndef DEBUGMENU
-                            if (g_BossIsDebugMenuOpen)
+                            if (g_BossIsDebugMenuOpen
+#ifdef GE_MODDED_CHEATS
+                                || (g_ModMasterControlDebugMenuEnabled
+                                    && g_StageNum != LEVELID_TITLE
+                                    && joyGetButtons(0, R27P_MCM_COMBO) == R27P_MCM_COMBO
+                                    && joyGetButtonsPressedThisFrame(0, R27P_MCM_COMBO) != 0)
+#endif
+                            )
 #endif
                             {
 			                	joyStickXPos = joyGetStickX(0);
@@ -530,6 +570,10 @@ void bossMainloop(void)
 			                	joyButtons = joyGetButtons(0, ANY_BUTTON);
 			                	g_BossIsDebugMenuOpen = debug_menu_processor(joyStickXPos, joyStickYPos, joyButtons, joyGetButtonsPressedThisFrame(0, ANY_BUTTON));
 			                }
+
+#ifdef GE_MODDED_CHEATS
+#undef R27P_MCM_COMBO
+#endif
 
                             lvlManageMpGame();
                             shuffle_player_ids();

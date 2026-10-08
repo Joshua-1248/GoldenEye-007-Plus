@@ -81,8 +81,19 @@ u32 game_options_index = 0;
 #define MODWATCH_MODE_SPECIAL 0x000
 #define MODWATCH_MODE_CHEATS 0x100
 #define MODWATCH_MODE_LEVEL_DETAIL 0x200
+#define MODWATCH_MODE_PATCHES 0x300
+#define MODWATCH_MODE_TP_OPTIONS 0x400
+#define MODWATCH_MODE_DEBUG 0x500
+#define MODWATCH_MODE_EXPERIMENTAL 0x600
+#define MODWATCH_MODE_ENHANCEMENTS 0x700
+#define MODWATCH_DEATH_SUBMENU_FLAG 0x800
 #define MODWATCH_CHEAT_MODE MODWATCH_MODE_CHEATS
-#define MODWATCH_OPTION_ROWS 24
+#define MODWATCH_OPTION_ROWS 18
+#define MODWATCH_PATCH_ROWS 7
+#define MODWATCH_TP_ROWS 11
+#define MODWATCH_DEBUG_ROWS 1
+#define MODWATCH_EXPERIMENTAL_ROWS 1
+#define MODWATCH_ENHANCEMENTS_ROWS 3
 #define MODWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)
 #define MODWATCH_ACTION_ROWS 5
 #define MODWATCH_VISIBLE_ROWS 7
@@ -157,6 +168,103 @@ u8 g_PlayerThirdPerson[MAX_PLAYER_COUNT];
 u8 g_PlayerStayInTpOnDeath[MAX_PLAYER_COUNT];
 u8 g_ModStayInTpOnDeathDefault;
 u8 g_ModTpSightTranslucencyEnabled = TRUE;
+u8 g_ModMeleeQuickSwapEnabled = FALSE;
+/* One bit per player. The chosen style itself remains in the retail
+ * per-player cur_item_weapon_getname field. */
+static u8 g_ModMeleeQuickSwapLockedPlayers;
+
+void modMeleeQuickSwapSetEnabled(s32 enabled)
+{
+    g_ModMeleeQuickSwapEnabled = enabled ? TRUE : FALSE;
+
+    if (!g_ModMeleeQuickSwapEnabled)
+    {
+        g_ModMeleeQuickSwapLockedPlayers = 0;
+    }
+}
+
+void modMeleeQuickSwapResetPlayerSelection(s32 player)
+{
+    if (player >= 0 && player < MAX_PLAYER_COUNT)
+    {
+        g_ModMeleeQuickSwapLockedPlayers &=
+            ~((1u << player) | (1u << (player + MAX_PLAYER_COUNT)));
+    }
+}
+
+void modMeleeQuickSwapLockPlayerSelection(s32 player)
+{
+    if (player >= 0 && player < MAX_PLAYER_COUNT)
+    {
+        g_ModMeleeQuickSwapLockedPlayers |= 1u << player;
+        g_ModMeleeQuickSwapLockedPlayers &=
+            ~(1u << (player + MAX_PLAYER_COUNT));
+    }
+}
+
+s32 modMeleeQuickSwapPlayerSelectionLocked(s32 player)
+{
+    if (player < 0 || player >= MAX_PLAYER_COUNT)
+    {
+        return FALSE;
+    }
+
+    return (g_ModMeleeQuickSwapLockedPlayers & (1u << player)) != 0;
+}
+
+void modMeleeQuickSwapQueuePlayerSelection(s32 player)
+{
+    if (player >= 0 && player < MAX_PLAYER_COUNT)
+    {
+        /* R27T R7: queue only. The low per-player bit means a manual melee
+         * style has actually committed; do not set it until SWITCH_SWAP. */
+        g_ModMeleeQuickSwapLockedPlayers |=
+            (1u << (player + MAX_PLAYER_COUNT));
+    }
+}
+
+s32 modMeleeQuickSwapPlayerSelectionPending(s32 player)
+{
+    if (player < 0 || player >= MAX_PLAYER_COUNT)
+    {
+        return FALSE;
+    }
+
+    return (g_ModMeleeQuickSwapLockedPlayers
+        & (1u << (player + MAX_PLAYER_COUNT))) != 0;
+}
+
+void modMeleeQuickSwapClearPlayerSelectionPending(s32 player)
+{
+    if (player >= 0 && player < MAX_PLAYER_COUNT)
+    {
+        g_ModMeleeQuickSwapLockedPlayers &=
+            ~(1u << (player + MAX_PLAYER_COUNT));
+    }
+}
+
+/* R27B: global, save-backed enemy surface bullet-hole toggle. Default Off. */
+u8 g_ModEnemyBulletHolesEnabled = FALSE;
+/* R27C: optional TP patches/presentation modes. Both default Off. */
+u8 g_ModTpCornerShootingFixEnabled = FALSE;
+u8 g_ModTpWorldSpaceCrosshairEnabled = FALSE;
+/* R27O: remove the retail six-explosion pool cap. Authored default Off. */
+u8 g_ModUnlimitedExplosionsEnabled = FALSE;
+/* R27P: access gate for the retail Master Control debug menu. */
+u8 g_ModMasterControlDebugMenuEnabled = FALSE;
+/* R27D: main-menu-only single-player character override. Zero/zero is the authored default. */
+u16 g_ModSinglePlayerCharacter;
+u8 g_ModSinglePlayerMatchViewHeight;
+/* R27V Enhancements: contextual player deaths. Default Off. */
+u8 g_ModAdditionalPlayerDeathAnimationsEnabled;
+u8 g_ModStaggeringBackwardsDeathEnabled;
+/* R27W: reversible pickup/bug-fix options. BSS defaults Off. */
+u8 g_ModDisableBodyArmorEnabled;
+u8 g_ModSiloXMusicLoopFixEnabled;
+u8 g_ModAr33PropFixMpEnabled;
+u8 g_ModAlwaysShowCrosshairEnabled;
+/* Synchronous damage-call context; never persisted. */
+u8 g_ModPlayerGunshotDeathContext;
 u8 g_MpViewportLock;
 u8 g_MpKillCountMessageEnabled = TRUE;
 /* Temporary R22 runtime Third Person camera tuner.  Zero preserves TP21. */
@@ -1225,6 +1333,11 @@ static void modWatchToggleOption(s32 row)
         g_ModAntiAliasingEnabled ^= 1;
     }
 
+    if (row == 16)
+    {
+        g_ModEnemyBulletHolesEnabled ^= 1;
+    }
+
     if (row == 9 && !(gamemode == GAMEMODE_MULTI && g_MpViewportLock))
     {
         s32 player = get_cur_playernum();
@@ -1261,6 +1374,78 @@ static void modWatchToggleOption(s32 row)
 
     g_ModWatchSettingsDirty = TRUE;
     sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+}
+
+static void modWatchToggleBaseSpecial(s32 row)
+{
+    static const u8 oldrows[10] = {0,1,2,3,4,6,7,8,9,16};
+    if (row >= 0 && row < 10) modWatchToggleOption(oldrows[row]);
+    else if (row == 10)
+    {
+        modMeleeQuickSwapSetEnabled(!g_ModMeleeQuickSwapEnabled);
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+}
+
+static void modWatchTogglePatchOption(s32 row)
+{
+    if (row == 0) { modWatchToggleOption(11); return; }
+    if (row == 1) { modWatchToggleOption(5); return; }
+    if (row == 2) { modWatchToggleOption(15); return; }
+    if (row == 3)
+    {
+        g_ModTpCornerShootingFixEnabled ^= 1;
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+    else if (row == 4)
+    {
+        g_ModUnlimitedExplosionsEnabled ^= 1;
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+    else if (row == 5)
+    {
+        g_ModSiloXMusicLoopFixEnabled ^= 1;
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+    else if (row == 6)
+    {
+        g_ModAr33PropFixMpEnabled ^= 1;
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+}
+
+
+static void modWatchToggleDebugOption(s32 row)
+{
+    if (row == 0)
+    {
+        g_ModMasterControlDebugMenuEnabled ^= 1;
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+}
+
+static void modWatchToggleThirdPersonOption(s32 row)
+{
+    static const u8 oldrows[4] = {10,12,13,14};
+
+    if (row >= 0 && row < 4)
+    {
+        modWatchToggleOption(oldrows[row]);
+        return;
+    }
+
+    if (row == 10)
+    {
+        g_ModTpWorldSpaceCrosshairEnabled ^= 1;
+        g_ModWatchSettingsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
 }
 
 static void modWatchAdjustThirdPersonCamera(s32 row)
@@ -1359,30 +1544,43 @@ void watch_special_options_navigation(void)
 {
     s32 row = MODWATCH_STATE & MODWATCH_ROW_MASK;
     s32 mode = MODWATCH_STATE & MODWATCH_MODE_MASK;
+    s32 deathsubmenu = MODWATCH_STATE & MODWATCH_DEATH_SUBMENU_FLAG;
     s32 rows;
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
 
-    if (mode == MODWATCH_MODE_CHEATS)
+    if (deathsubmenu)
+        rows = 2;
+    else if (mode == MODWATCH_MODE_CHEATS)
         rows = modWatchCheatCount();
     else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
     {
         rows = levelModifiersGetCurrentStageModifierCount();
         if (rows == 0) rows = 1;
     }
+    else if (mode == MODWATCH_MODE_PATCHES)
+        rows = MODWATCH_PATCH_ROWS;
+    else if (mode == MODWATCH_MODE_TP_OPTIONS)
+        rows = MODWATCH_TP_ROWS;
+    else if (mode == MODWATCH_MODE_DEBUG)
+        rows = MODWATCH_DEBUG_ROWS;
+    else if (mode == MODWATCH_MODE_EXPERIMENTAL)
+        rows = MODWATCH_EXPERIMENTAL_ROWS;
+    else if (mode == MODWATCH_MODE_ENHANCEMENTS)
+        rows = MODWATCH_ENHANCEMENTS_ROWS;
     else
         rows = MODWATCH_OPTION_ROWS;
 
     if ((pressed & (U_CBUTTONS | U_JPAD)) || sub_GAME_7F0A5088())
     {
         row = row ? row - 1 : rows - 1;
-        MODWATCH_STATE = mode | row;
+        MODWATCH_STATE = mode | deathsubmenu | row;
         disable_watch_stick_y_nav_ready();
     }
     else if ((pressed & (D_CBUTTONS | D_JPAD)) || sub_GAME_7F0A50C4())
     {
         row++;
         if (row >= rows) row = 0;
-        MODWATCH_STATE = mode | row;
+        MODWATCH_STATE = mode | deathsubmenu | row;
         disable_watch_stick_y_nav_ready();
     }
 
@@ -1394,42 +1592,90 @@ void watch_special_options_navigation(void)
         }
         else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
         {
-            if (levelModifiersGetCurrentStage() == LEVELID_SILO)
-            {
-                if (levelModifiersSiloBetaVentActive())
-                    sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
-                else if (levelModifiersActivateSiloBetaVent())
-                    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
-                else
-                    sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
-            }
-            else if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
-            {
-                if (levelModifiersSetCitadelWater(!levelModifiersCitadelWaterActive()))
-                    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
-                else
-                    sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
-            }
+            if (levelModifiersToggleCurrentStageModifier(row))
+                sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
             else
-            {
                 sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
-            }
         }
-        else if (row <= 15)
+        else if (mode == MODWATCH_MODE_PATCHES)
         {
-            modWatchToggleOption(row);
+            modWatchTogglePatchOption(row);
         }
-        else if (row >= 16 && row <= 21)
+        else if (mode == MODWATCH_MODE_TP_OPTIONS)
         {
-            modWatchAdjustThirdPersonCamera(row - 5);
+            if (row <= 3 || row == 10)
+                modWatchToggleThirdPersonOption(row);
+            else
+                modWatchAdjustThirdPersonCamera(row + 7);
         }
-        else if (row == 22)
+        else if (mode == MODWATCH_MODE_DEBUG)
         {
+            modWatchToggleDebugOption(row);
+        }
+        else if (mode == MODWATCH_MODE_EXPERIMENTAL)
+        {
+            modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
+            g_ModWatchSettingsDirty = TRUE;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (deathsubmenu)
+        {
+            if (row) g_ModStaggeringBackwardsDeathEnabled ^= 1;
+            else g_ModAdditionalPlayerDeathAnimationsEnabled ^= 1;
+            g_ModWatchSettingsDirty = TRUE;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (mode == MODWATCH_MODE_ENHANCEMENTS)
+        {
+            if (row == 0) { MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS | MODWATCH_DEATH_SUBMENU_FLAG; sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL); return; }
+            if (row == 2) g_ModDisableBodyArmorEnabled ^= 1;
+            else g_ModAlwaysShowCrosshairEnabled ^= 1;
+            g_ModWatchSettingsDirty = TRUE;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row < 11)
+        {
+            modWatchToggleBaseSpecial(row);
+        }
+        else if (row == 11)
+        {
+            modWatchCommitDeferredSettings();
             MODWATCH_STATE = MODWATCH_MODE_LEVEL_DETAIL;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 12)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = MODWATCH_MODE_PATCHES;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 13)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = MODWATCH_MODE_TP_OPTIONS;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 14)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = MODWATCH_MODE_DEBUG;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 15)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = MODWATCH_MODE_EXPERIMENTAL;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 16)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS;
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else
         {
+            modWatchCommitDeferredSettings();
             MODWATCH_STATE = MODWATCH_MODE_CHEATS;
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
@@ -1438,15 +1684,33 @@ void watch_special_options_navigation(void)
 
     if (pressed & B_BUTTON)
     {
-        if (mode == MODWATCH_MODE_CHEATS)
+        if (deathsubmenu) { MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS; return; }
+        if (mode == MODWATCH_MODE_CHEATS) { MODWATCH_STATE = 17; return; }
+        if (mode == MODWATCH_MODE_LEVEL_DETAIL) { MODWATCH_STATE = 11; return; }
+        if (mode == MODWATCH_MODE_PATCHES)
         {
-            MODWATCH_STATE = 23;
-            return;
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = 12; return;
         }
-        if (mode == MODWATCH_MODE_LEVEL_DETAIL)
+        if (mode == MODWATCH_MODE_TP_OPTIONS)
         {
-            MODWATCH_STATE = 22;
-            return;
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = 13; return;
+        }
+        if (mode == MODWATCH_MODE_DEBUG)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = 14; return;
+        }
+        if (mode == MODWATCH_MODE_EXPERIMENTAL)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = 15; return;
+        }
+        if (mode == MODWATCH_MODE_ENHANCEMENTS)
+        {
+            modWatchCommitDeferredSettings();
+            MODWATCH_STATE = 16; return;
         }
     }
 
@@ -1471,6 +1735,7 @@ void watch_special_options_navigation(void)
         trigger_watch_zoom(WATCHZOOM1, 15.0f);
     }
 }
+
 #endif
 
 // WATCH_INDEX_GAME_OPTIONS
@@ -2081,7 +2346,11 @@ void sub_GAME_7F0A6A80(void)
     s32 temp_3;
     u32 random_value;
 
-    if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON))
+    if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON)
+#ifdef GE_MODDED_CHEATS
+        && !debugMenuStartExitConsumed()
+#endif
+    )
     {
 #ifdef GE_MODDED_CHEATS
         modWatchCommitDeferredSettings();
@@ -4582,22 +4851,43 @@ static Gfx *draw_watch_mod_text(Gfx *gdl, s32 x, s32 y, char *text, u32 colour,
             ptrFontBankGothic, colour, viGetX(), viGetY(), 0, 10);
 }
 
+static char *modWatchSpecialOptionDescription(s32 row)
+{
+    if (row == 2)
+        return "When killed, the head animation matches the speed of the players' death animation.";
+    if (row == 3)
+        return "When disabled, allows the player to shoot even while taking damage.";
+    if (row == 5)
+        return "When disabled, turns off the white flashing that occurs when taking damage.";
+    if (row == 7)
+        return "When disabled, turns off the sound that plays whenever the player takes damage.";
+    if (row == 10)
+        return "Allows switching melee weapon type from Slappers/Sniper Rifle Buttstock. Activate with holding B, then Z.";
+    return NULL;
+}
+
 Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
 {
     s32 row;
     s32 y;
+    s32 drawy;
     s32 selected = MODWATCH_STATE & MODWATCH_ROW_MASK;
     s32 mode = MODWATCH_STATE & MODWATCH_MODE_MASK;
+    s32 deathsubmenu = MODWATCH_STATE & MODWATCH_DEATH_SUBMENU_FLAG;
     s32 rowcount;
+    s32 visibleRows;
     s32 top;
     char *label;
     char *value;
+    char *description;
     char valuebuf[16];
     char titlebuf[32];
+    char wrappedDescription[128];
     u32 colour;
     const char *title;
 
-    if (mode == MODWATCH_MODE_CHEATS)
+    if (deathsubmenu) { rowcount = 2; title = NULL; }
+    else if (mode == MODWATCH_MODE_CHEATS)
     {
         rowcount = modWatchCheatCount();
         title = "IN-GAME CHEATS";
@@ -4609,22 +4899,59 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         sprintf(titlebuf, "%s MODIFIERS", levelModifiersGetCurrentStageName());
         title = titlebuf;
     }
+    else if (mode == MODWATCH_MODE_PATCHES)
+    {
+        rowcount = MODWATCH_PATCH_ROWS;
+        title = frontModGetOptionLabel(53);
+    }
+    else if (mode == MODWATCH_MODE_TP_OPTIONS)
+    {
+        rowcount = MODWATCH_TP_ROWS;
+        title = frontModGetOptionLabel(54);
+    }
+    else if (mode == MODWATCH_MODE_DEBUG)
+    {
+        rowcount = MODWATCH_DEBUG_ROWS;
+        title = frontModGetOptionLabel(71);
+    }
+    else if (mode == MODWATCH_MODE_EXPERIMENTAL)
+    {
+        rowcount = MODWATCH_EXPERIMENTAL_ROWS;
+        title = frontModGetOptionLabel(74);
+    }
+    else if (mode == MODWATCH_MODE_ENHANCEMENTS)
+    {
+        rowcount = MODWATCH_ENHANCEMENTS_ROWS;
+        title = frontModGetOptionLabel(76);
+    }
     else
     {
         rowcount = MODWATCH_OPTION_ROWS;
         title = "SPECIAL OPTIONS";
     }
 
-    top = selected >= MODWATCH_VISIBLE_ROWS - 1 ? selected - (MODWATCH_VISIBLE_ROWS - 2) : 0;
-    if (top + MODWATCH_VISIBLE_ROWS > rowcount)
-        top = rowcount > MODWATCH_VISIBLE_ROWS ? rowcount - MODWATCH_VISIBLE_ROWS : 0;
+    visibleRows = mode == MODWATCH_MODE_SPECIAL && !deathsubmenu ? 6 : MODWATCH_VISIBLE_ROWS;
+
+    top = selected >= visibleRows - 1 ? selected - (visibleRows - 2) : 0;
+    if (top + visibleRows > rowcount)
+        top = rowcount > visibleRows ? rowcount - visibleRows : 0;
 
     gdl = draw_background_health_and_armor(gdl, param_2, 0);
     if (check_watch_page_transistion_running() == 1) return gdl;
     gdl = microcode_constructor(gdl);
-    gdl = draw_watch_mod_text(gdl, 0xa0, 0x24, (char *)title, 0xa0ffa0f0, 1, 0);
 
-    for (row = top, y = 0x3f; row < top + MODWATCH_VISIBLE_ROWS && row < rowcount; row++, y += 0x12)
+    if (deathsubmenu)
+    {
+        gdl = draw_watch_mod_text(gdl,0xa0,0x1b,"ADDITIONAL DEATH ANIMATIONS",0xa0ffa0f0,1,0);
+        gdl = draw_watch_mod_text(gdl,0xa0,0x2d,"FOR PLAYER",0xa0ffa0f0,1,0);
+    }
+    else
+    {
+        gdl = draw_watch_mod_text(gdl,0xa0,0x24,(char *)title,0xa0ffa0f0,1,0);
+    }
+
+    for (row = top, y = deathsubmenu ? 0x4b : 0x3f;
+         row < top + visibleRows && row < rowcount; row++, y += 0x12)
     {
         colour = row == selected ? 0xa0ffa0f0 : 0x00ff00b0;
         value = "";
@@ -4647,25 +4974,60 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         }
         else if (mode == MODWATCH_MODE_LEVEL_DETAIL)
         {
-            if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
-            {
-                label = "Water";
-                value = levelModifiersCitadelWaterActive() ? "ON" : "OFF";
-            }
-            else if (levelModifiersGetCurrentStage() == LEVELID_SILO)
-            {
-                label = "Beta Vent Start";
-                value = levelModifiersSiloBetaVentActive() ? "ACTIVE" : "ACTIVATE";
-                if (levelModifiersSiloBetaVentActive()) colour = row == selected ? 0x809080d0 : 0x40704090;
-            }
-            else
-            {
-                label = "No modifiers available";
-                value = "";
-                colour = 0x40704090;
-            }
+            label = (char *)levelModifiersGetCurrentStageModifierName(row);
+            value = (char *)levelModifiersGetCurrentStageModifierValue(row);
+
+            if (levelModifiersCurrentStageModifierLocked(row))
+                colour = row == selected ? 0x809080d0 : 0x40704090;
         }
-        else if (row < 10)
+        else if (mode == MODWATCH_MODE_PATCHES)
+        {
+            s32 enabled;
+            if (row == 0) { label = frontModGetOptionLabel(46); enabled = modMicroOptimizationsEnabled(); }
+            else if (row == 1) { label = frontModGetOptionLabel(31); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) == 0; }
+            else if (row == 2) { label = frontModGetOptionLabel(50); enabled = g_ModAntiAliasingEnabled; }
+            else if (row == 3) { label = frontModGetOptionLabel(55); enabled = g_ModTpCornerShootingFixEnabled; }
+            else if (row == 4) { label = frontModGetOptionLabel(70); enabled = g_ModUnlimitedExplosionsEnabled; }
+            else if (row == 5) { label = frontModGetOptionLabel(80); enabled = g_ModSiloXMusicLoopFixEnabled; }
+            else { label = frontModGetOptionLabel(81); enabled = g_ModAr33PropFixMpEnabled; }
+            value = enabled ? "on" : "off";
+        }
+        else if (mode == MODWATCH_MODE_DEBUG)
+        {
+            label = frontModGetOptionLabel(72);
+            value = g_ModMasterControlDebugMenuEnabled ? "on" : "off";
+        }
+        else if (mode == MODWATCH_MODE_EXPERIMENTAL)
+        {
+            label = frontModGetOptionLabel(75);
+            value = modExperimentalJumpEnabled() ? "on" : "off";
+        }
+        else if (deathsubmenu)
+        {
+            label = frontModGetOptionLabel(row ? 83 : 82);
+            value = (row ? g_ModStaggeringBackwardsDeathEnabled : g_ModAdditionalPlayerDeathAnimationsEnabled) ? "on" : "off";
+        }
+        else if (mode == MODWATCH_MODE_ENHANCEMENTS)
+        {
+            if (row == 0) { label = "Additional Death Animations"; value = ""; }
+            else if (row == 1) { label = frontModGetOptionLabel(78); value = g_ModAlwaysShowCrosshairEnabled ? "on" : "off"; }
+            else { label = frontModGetOptionLabel(79); value = g_ModDisableBodyArmorEnabled ? "on" : "off"; }
+        }
+        else if (mode == MODWATCH_MODE_TP_OPTIONS)
+        {
+            if (row == 0) { label = frontModGetOptionLabel(47); value = modStayInTpOnDeath(get_cur_playernum()) ? "on" : "off"; }
+            else if (row == 1) { label = frontModGetOptionLabel(48); value = (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) ? "on" : "off"; }
+            else if (row == 2) { label = frontModGetOptionLabel(49); value = (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) ? "on" : "off"; }
+            else if (row == 3) { label = frontModGetOptionLabel(51); value = g_ModTpSightTranslucencyEnabled ? "on" : "off"; }
+            else if (row == 4) { label = frontModGetOptionLabel(56); sprintf(valuebuf,"%d",TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust); value=valuebuf; }
+            else if (row == 5) { label = frontModGetOptionLabel(57); sprintf(valuebuf,"%d",TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust); value=valuebuf; }
+            else if (row == 6) { label = frontModGetOptionLabel(58); sprintf(valuebuf,"%d",TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust); value=valuebuf; }
+            else if (row == 7) { label = frontModGetOptionLabel(59); sprintf(valuebuf,"%d",TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust); value=valuebuf; }
+            else if (row == 8) { label = frontModGetOptionLabel(60); sprintf(valuebuf,"%d",TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust); value=valuebuf; }
+            else if (row == 9) { label = frontModGetOptionLabel(61); sprintf(valuebuf,"%d",g_ModThirdPersonCrosshairRange); value=valuebuf; }
+            else { label = frontModGetOptionLabel(62); value = g_ModTpWorldSpaceCrosshairEnabled ? "on" : "off"; }
+        }
+        else if (row < 11)
         {
             s32 enabled;
             if (row == 0) { label = frontModGetOptionLabel(12); enabled = cur_player_get_headroll_setting(); }
@@ -4673,11 +5035,10 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
             else if (row == 2) { label = frontModGetOptionLabel(14); enabled = (g_ModGameplayOptions2 & MODOPT2_REALTIME_COLLAPSE) != 0; }
             else if (row == 3) { label = frontModGetOptionLabel(15); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_HITSTUN) == 0; }
             else if (row == 4) { label = frontModGetOptionLabel(30); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_KNOCKBACK) == 0; }
-            else if (row == 5) { label = frontModGetOptionLabel(31); enabled = (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) == 0; }
-            else if (row == 6) { label = frontModGetOptionLabel(16); enabled = (g_ModGameplayOptions2 & MODOPT2_DAMAGE_FLASH) != 0; }
-            else if (row == 7) { label = frontModGetOptionLabel(8); enabled = cur_player_get_crosshair_setting(); }
-            else if (row == 8) { label = frontModGetOptionLabel(29); enabled = cur_player_get_damage_sound_setting(); }
-            else
+            else if (row == 5) { label = frontModGetOptionLabel(16); enabled = (g_ModGameplayOptions2 & MODOPT2_DAMAGE_FLASH) != 0; }
+            else if (row == 6) { label = frontModGetOptionLabel(8); enabled = cur_player_get_crosshair_setting(); }
+            else if (row == 7) { label = frontModGetOptionLabel(29); enabled = cur_player_get_damage_sound_setting(); }
+            else if (row == 8)
             {
                 label = frontModGetOptionLabel(32);
                 enabled = modThirdPersonActive(get_cur_playernum());
@@ -4687,31 +5048,50 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
                     colour = 0x40704090;
                 }
             }
-            if (!(row == 9 && gamemode == GAMEMODE_MULTI && g_MpViewportLock)) value = enabled ? "on" : "off";
+            else if (row == 9) { label = frontModGetOptionLabel(52); enabled = g_ModEnemyBulletHolesEnabled; }
+            else { label = frontModGetOptionLabel(73); enabled = g_ModMeleeQuickSwapEnabled; }
+            if (!(row == 8 && gamemode == GAMEMODE_MULTI && g_MpViewportLock)) value = enabled ? "on" : "off";
         }
-        else if (row == 10) { label = frontModGetOptionLabel(47); value = modStayInTpOnDeath(get_cur_playernum()) ? "on" : "off"; }
-        else if (row == 11) { label = frontModGetOptionLabel(46); value = modMicroOptimizationsEnabled() ? "on" : "off"; }
-        else if (row == 12) { label = frontModGetOptionLabel(48); value = (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) ? "on" : "off"; }
-        else if (row == 13) { label = frontModGetOptionLabel(49); value = (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) ? "on" : "off"; }
-        else if (row == 14) { label = frontModGetOptionLabel(51); value = g_ModTpSightTranslucencyEnabled ? "on" : "off"; }
-        else if (row == 15) { label = frontModGetOptionLabel(50); value = g_ModAntiAliasingEnabled ? "on" : "off"; }
-        else if (row == 16) { label = "TP Cam Distance"; sprintf(valuebuf,"%d",TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust); value=valuebuf; }
-        else if (row == 17) { label = "TP Cam Height"; sprintf(valuebuf,"%d",TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust); value=valuebuf; }
-        else if (row == 18) { label = "TP Cam Horizontal"; sprintf(valuebuf,"%d",TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust); value=valuebuf; }
-        else if (row == 19) { label = "TP Cam Down Frame"; sprintf(valuebuf,"%d",TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust); value=valuebuf; }
-        else if (row == 20) { label = "TP Crouched Cam Height"; sprintf(valuebuf,"%d",TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust); value=valuebuf; }
-        else if (row == 21) { label = "TP Crosshair Range"; sprintf(valuebuf,"%d",g_ModThirdPersonCrosshairRange); value=valuebuf; }
-        else if (row == 22) { label = "Level Modifiers"; value = ">"; }
-        else { label = "In-Game Cheats"; value = ">"; }
+        else if (row == 11) { label = frontModGetOptionLabel(64); value = ">"; }
+        else if (row == 12) { label = frontModGetOptionLabel(53); value = ">"; }
+        else if (row == 13) { label = frontModGetOptionLabel(54); value = ">"; }
+        else if (row == 14) { label = frontModGetOptionLabel(71); value = ">"; }
+        else if (row == 15) { label = frontModGetOptionLabel(74); value = ">"; }
+        else if (row == 16) { label = frontModGetOptionLabel(76); value = ">"; }
+        else { label = frontModGetOptionLabel(65); value = ">"; }
 
-        gdl = draw_watch_mod_text(gdl,0x40,y,label,colour,0,0);
-        gdl = draw_watch_mod_text(gdl,0x10e,y,value,colour,0,1);
+        drawy = y;
+
+        if (mode == MODWATCH_MODE_ENHANCEMENTS && !deathsubmenu && row > 0)
+            drawy += 0x12;
+
+        gdl = draw_watch_mod_text(gdl,0x40,drawy,label,colour,0,0);
+
+        if (mode == MODWATCH_MODE_ENHANCEMENTS && !deathsubmenu && row == 0)
+            gdl = draw_watch_mod_text(gdl,0x40,drawy + 0x12,"For Player >",colour,0,0);
+        else
+            gdl = draw_watch_mod_text(gdl,0x10e,drawy,value,colour,0,1);
     }
 
-    if (mode != MODWATCH_MODE_SPECIAL)
+    if (mode == MODWATCH_MODE_SPECIAL)
+    {
+        description = modWatchSpecialOptionDescription(selected);
+
+        if (description != NULL)
+        {
+            textWrap(0xd0, description, wrappedDescription,
+                    ptrFontBankGothicChars, ptrFontBankGothic);
+            gdl = draw_watch_mod_text(gdl,0x40,0xab,wrappedDescription,
+                    0x00ff00b0,0,0);
+        }
+    }
+    else
+    {
         gdl = draw_watch_mod_text(gdl,0xa0,0xc8,"B: BACK",0x00800080,1,0);
+    }
     return gdl;
 }
+
 #endif
 
 

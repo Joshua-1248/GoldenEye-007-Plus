@@ -3,6 +3,14 @@
 #include "initexplosioncasing.h"
 #include "explosion.h"
 
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+extern u8 _unlimitedExplosionPoolStart[];
+extern u8 _unlimitedExplosionPoolEnd[];
+
+typedef char r27o_explosion_size_must_be_0x3e0[
+    (sizeof(struct Explosion) == 0x3E0) ? 1 : -1];
+#endif
+
 #ifndef DEBUG
     #define osSyncPrintf()
 #endif
@@ -20,7 +28,17 @@ void alloc_explosion_smoke_casing_scorch_impact_buffers(void)
     g_SpExplosionDamageMult = 1.0f;
 
     osSyncPrintf("Allocating %d bytes for explosion data\n", EXPLOSION_BUFFER_LEN * sizeof(struct Explosion));
-    g_ExplosionBuffer = (struct Explosion *)mempAllocBytesInBank(EXPLOSION_BUFFER_LEN * sizeof(struct Explosion), MEMPOOL_STAGE);
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+    /*
+     * R27O R3: never take the expanded explosion array from MEMPOOL_STAGE.
+     * The old 64-entry allocation consumed roughly 63 KiB of the stage heap,
+     * crowding later textures/resources and causing corruption/freezes.
+     */
+    g_ExplosionBuffer = (struct Explosion *)_unlimitedExplosionPoolStart;
+#else
+    g_ExplosionBuffer = (struct Explosion *)mempAllocBytesInBank(
+        EXPLOSION_BUFFER_LEN * sizeof(struct Explosion), MEMPOOL_STAGE);
+#endif
 
     for (i=0; i<EXPLOSION_BUFFER_LEN; i++)
     {

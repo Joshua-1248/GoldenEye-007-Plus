@@ -9,6 +9,7 @@
 #include "lv.h"
 #ifdef GE_MODDED_CHEATS
 #include "front.h"
+#include "options.h"
 #endif
 
 struct player *g_playerPointers[4];
@@ -764,6 +765,9 @@ void initBONDdataforPlayer(s32 player_num)
     g_playerPointers[player_num]->field_2A30 = 0;
     g_playerPointers[player_num]->field_2A34 = 0;
     g_playerPointers[player_num]->cur_item_weapon_getname = ITEM_FIST;
+#ifdef GE_MODDED_CHEATS
+    modMeleeQuickSwapResetPlayerSelection(player_num);
+#endif
     g_playerPointers[player_num]->actual_health = 1.0f;
     g_playerPointers[player_num]->actual_armor = 1.0f;
     g_playerPointers[player_num]->cur_player_control_type_0 = CONTROLLER_CONFIG_HONEY;

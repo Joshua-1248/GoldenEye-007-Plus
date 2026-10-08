@@ -50,6 +50,7 @@
 #define MODOPT3_DIRECTIONAL_SHOULDER    0x20
 #define MODOPT3_TP_CROUCH_CAM           0x10
 #define MODOPT3_ENABLE_MICROOPT          0x01
+#define MODOPT3_EXPERIMENTAL_JUMP       0x02
 /* Micro-optimizations stay Off by default.  TP Sight Translucency is stored
  * in the extended-settings journal, not in the camera-pack/signature bits. */
 #define DEFAULT_MOD_OPTIONS3            MODOPT3_SIGNATURE
@@ -66,6 +67,8 @@ extern u8 g_ModGameplayOptions3;
 extern s32 g_ModAntiAliasingEnabled;
 s32 modMicroOptimizationsEnabled(void);
 void modSetMicroOptimizationsEnabled(s32 enabled);
+s32 modExperimentalJumpEnabled(void);
+void modSetExperimentalJumpEnabled(s32 enabled);
 void fileStoreThirdPersonCameraSettings(save_data *save);
 void fileLoadThirdPersonCameraSettings(save_data *save);
 s32 fileLoadExtendedSettings(save_data *save);

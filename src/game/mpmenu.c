@@ -22,6 +22,9 @@
 #include "cheat.h"
 #include "debugmenu_handler.h"
 #include "levelmodifiers.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 #include "assets/obseg/text/LmpmenuE.h"
 #include "assets/obseg/text/LoptionE.h"
 
@@ -59,11 +62,13 @@ u16 g_AwardNames[] = {
 void mpwatchPlayBeep(void);
 /* R21 MP watch configuration hub.  MENU_OBJECTIVES is repurposed outside the
  * old experimental objectives card as the inserted player-settings card. */
-static u8 mpcfg_mode[MAX_PLAYER_COUNT];      /* 0 hub, 1 options, 2 special, 3 cheats, 4+ level modifiers */
+static u8 mpcfg_mode[MAX_PLAYER_COUNT];      /* 0 hub, 1 options, 2 special, 3 cheats, 4 level modifiers, 5 patches, 6 TP options, 7 debug */
 static u8 mpcfg_row[MAX_PLAYER_COUNT];
 static u8 mpcfg_modal[MAX_PLAYER_COUNT];
 static u8 mpcfg_choice[MAX_PLAYER_COUNT];
 static u8 mpcfg_yready[MAX_PLAYER_COUNT] = {1,1,1,1};
+/* R27E: shared save-backed MP Special Options are committed at menu exit. */
+static u8 mpcfg_globals_dirty;
 #define MPWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)
 
 static s32 mpwatchIsDebugCheat(CHEAT_ID cheat)
@@ -102,15 +107,21 @@ static s32 mpwatchConfigRows(s32 mode)
 {
     if (mode == 0) return 4;
     if (mode == 1) return 8;
-    if (mode == 2) return 17;
+    if (mode == 2) return 19;
     if (mode == 3) return MPWATCH_TOGGLE_ROWS + 5;
     if (mode == 4)
     {
         s32 count = levelModifiersGetCurrentStageModifierCount();
         return count ? count : 1;
     }
+    if (mode == 5) return 7;
+    if (mode == 6) return 11;
+    if (mode == 7 || mode == 8) return 1;
+    if (mode == 9) return 3;
+    if (mode == 10) return 2;
     return 1;
 }
+
 
 static void mpwatchConfigMove(s32 player, s32 dir)
 {
@@ -119,6 +130,29 @@ static void mpwatchConfigMove(s32 player, s32 dir)
     if (r < 0) r = n - 1;
     if (r >= n) r = 0;
     mpcfg_row[player] = r;
+}
+
+static void mpwatchConfigStoreGlobals(void)
+{
+    save_data *save;
+
+    if (!mpcfg_globals_dirty)
+        return;
+
+    save = fileGetSaveForFoldernum(selected_folder_num);
+
+    if (save != NULL)
+    {
+        save->mod_options2 = g_ModGameplayOptions2;
+        save->mod_options3 = g_ModGameplayOptions3;
+        fileStoreThirdPersonCameraSettings(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+        fileStoreExtendedSettings(save);
+#endif
+        fileWriteSave(save);
+    }
+
+    mpcfg_globals_dirty = FALSE;
 }
 
 static void mpwatchConfigToggleSpecial(s32 player, s32 row)
@@ -138,10 +172,7 @@ static void mpwatchConfigToggleSpecial(s32 player, s32 row)
     }
     else if (row == 10) g_PlayerStayInTpOnDeath[player] ^= 1;
     else if (row == 11) g_MpKillCountMessageEnabled ^= 1;
-    else if (row == 12)
-    {
-        modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
-    }
+    else if (row == 12) modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
     else if (row == 13)
     {
         g_ModGameplayOptions3 ^= MODOPT3_TP_CROUCH_CAM;
@@ -152,31 +183,12 @@ static void mpwatchConfigToggleSpecial(s32 player, s32 row)
         g_ModGameplayOptions3 ^= MODOPT3_DIRECTIONAL_SHOULDER;
         g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
     }
-    else if (row == 15)
-    {
-        g_ModTpSightTranslucencyEnabled ^= 1;
-    }
-    else if (row == 16)
-    {
-        g_ModAntiAliasingEnabled ^= 1;
-    }
+    else if (row == 15) g_ModTpSightTranslucencyEnabled ^= 1;
+    else if (row == 16) g_ModAntiAliasingEnabled ^= 1;
+    else if (row == 17) g_ModEnemyBulletHolesEnabled ^= 1;
 
-    /* Global Special Options changed from the MP watch are save-backed too.
-     * Per-player presentation toggles remain session/player state, but shared
-     * gameplay/camera policy survives restart just like the main menu. */
-    if ((row >= 1 && row <= 6) || row == 12 || row == 13 || row == 14 || row == 15 || row == 16)
-    {
-        save_data *save = fileGetSaveForFoldernum(selected_folder_num);
-        if (save)
-        {
-            save->mod_options2 = g_ModGameplayOptions2;
-            save->mod_options3 = g_ModGameplayOptions3;
-            fileWriteSave(save);
-#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
-            fileStoreExtendedSettings(save);
-#endif
-        }
-    }
+    if ((row >= 1 && row <= 6) || (row >= 12 && row <= 17))
+        mpcfg_globals_dirty = TRUE;
 }
 
 static s32 mpwatchConfigSpecialValue(s32 player, s32 row)
@@ -197,7 +209,175 @@ static s32 mpwatchConfigSpecialValue(s32 player, s32 row)
     if (row == 13) return (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) != 0;
     if (row == 14) return (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) != 0;
     if (row == 15) return g_ModTpSightTranslucencyEnabled != 0;
-    return g_ModAntiAliasingEnabled != 0;
+    if (row == 16) return g_ModAntiAliasingEnabled != 0;
+    return g_ModEnemyBulletHolesEnabled != 0;
+}
+
+static void mpwatchConfigToggleBaseSpecial(s32 player, s32 row)
+{
+    static const u8 oldrows[11] = {0,1,2,3,4,6,7,8,9,11,17};
+    if (row >= 0 && row < 11) mpwatchConfigToggleSpecial(player, oldrows[row]);
+    else if (row == 11)
+    {
+        modMeleeQuickSwapSetEnabled(!g_ModMeleeQuickSwapEnabled);
+        mpcfg_globals_dirty = TRUE;
+    }
+}
+
+static s32 mpwatchConfigBaseSpecialValue(s32 player, s32 row)
+{
+    static const u8 oldrows[11] = {0,1,2,3,4,6,7,8,9,11,17};
+    if (row == 11) return g_ModMeleeQuickSwapEnabled != 0;
+    return row >= 0 && row < 11 ? mpwatchConfigSpecialValue(player, oldrows[row]) : FALSE;
+}
+
+static void mpwatchConfigTogglePatch(s32 player, s32 row)
+{
+    if (row == 0) mpwatchConfigToggleSpecial(player, 12);
+    else if (row == 1) mpwatchConfigToggleSpecial(player, 5);
+    else if (row == 2) mpwatchConfigToggleSpecial(player, 16);
+    else if (row == 3)
+    {
+        g_ModTpCornerShootingFixEnabled ^= 1;
+        mpcfg_globals_dirty = TRUE;
+    }
+    else if (row == 4)
+    {
+        g_ModUnlimitedExplosionsEnabled ^= 1;
+        mpcfg_globals_dirty = TRUE;
+    }
+    else if (row == 5)
+    {
+        g_ModSiloXMusicLoopFixEnabled ^= 1;
+        mpcfg_globals_dirty = TRUE;
+    }
+    else if (row == 6)
+    {
+        g_ModAr33PropFixMpEnabled ^= 1;
+        mpcfg_globals_dirty = TRUE;
+    }
+}
+
+static s32 mpwatchConfigPatchValue(s32 player, s32 row)
+{
+    if (row == 0) return mpwatchConfigSpecialValue(player, 12);
+    if (row == 1) return mpwatchConfigSpecialValue(player, 5);
+    if (row == 2) return mpwatchConfigSpecialValue(player, 16);
+    if (row == 3) return g_ModTpCornerShootingFixEnabled != 0;
+    if (row == 4) return g_ModUnlimitedExplosionsEnabled != 0;
+    if (row == 5) return g_ModSiloXMusicLoopFixEnabled != 0;
+    return g_ModAr33PropFixMpEnabled != 0;
+}
+
+
+static void mpwatchConfigToggleDebug(s32 player, s32 row)
+{
+    (void)player;
+
+    if (row == 0)
+    {
+        g_ModMasterControlDebugMenuEnabled ^= 1;
+        mpcfg_globals_dirty = TRUE;
+    }
+}
+
+static s32 mpwatchConfigDebugValue(s32 player, s32 row)
+{
+    (void)player;
+    return row == 0 ? (g_ModMasterControlDebugMenuEnabled != 0) : FALSE;
+}
+
+static void mpwatchConfigToggleTpOption(s32 player, s32 row)
+{
+    static const u8 oldrows[4] = {10,13,14,15};
+    if (row >= 0 && row < 4)
+    {
+        mpwatchConfigToggleSpecial(player, oldrows[row]);
+    }
+    else if (row == 10)
+    {
+        g_ModTpWorldSpaceCrosshairEnabled ^= 1;
+        mpcfg_globals_dirty = TRUE;
+    }
+}
+
+static s32 mpwatchConfigTpOptionValue(s32 player, s32 row)
+{
+    static const u8 oldrows[4] = {10,13,14,15};
+    if (row >= 0 && row < 4) return mpwatchConfigSpecialValue(player, oldrows[row]);
+    if (row == 10) return g_ModTpWorldSpaceCrosshairEnabled != 0;
+    return 0;
+}
+
+static void mpwatchConfigAdjustTpCamera(s32 player, s32 row, s32 dir)
+{
+    if (dir == 0) dir = 1;
+
+    if (row == 4)
+    {
+        s32 actual = TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust
+            + dir * TP_CAM_DISTANCE_STEP;
+        if (actual < TP_CAM_DISTANCE_MIN) actual = TP_CAM_DISTANCE_MIN;
+        if (actual > TP_CAM_DISTANCE_MAX) actual = TP_CAM_DISTANCE_MAX;
+        g_ModThirdPersonCameraDistanceAdjust = actual - TP_CAM_DISTANCE_DEFAULT;
+    }
+    else if (row == 5)
+    {
+        s32 value = g_ModThirdPersonCameraHeightAdjust + dir * 2;
+        if (value < -48) value = -48;
+        if (value > 72) value = 72;
+        g_ModThirdPersonCameraHeightAdjust = value;
+    }
+    else if (row == 6)
+    {
+        s32 value = g_ModThirdPersonCameraHorizontalAdjust + dir * 2;
+        if (value < -60) value = -60;
+        if (value > 100) value = 100;
+        g_ModThirdPersonCameraHorizontalAdjust = value;
+    }
+    else if (row == 7)
+    {
+        s32 value = g_ModThirdPersonCameraDownFrameAdjust + dir;
+        if (value < -24) value = -24;
+        if (value > 72) value = 72;
+        g_ModThirdPersonCameraDownFrameAdjust = value;
+    }
+    else if (row == 8)
+    {
+        s32 height = TP_CROUCH_CAM_HEIGHT_DEFAULT
+            + g_ModThirdPersonCrouchCameraHeightAdjust + dir * 2;
+        if (height < 0) height = 0;
+        if (height > 96) height = 96;
+        g_ModThirdPersonCrouchCameraHeightAdjust = height - TP_CROUCH_CAM_HEIGHT_DEFAULT;
+    }
+    else if (row == 9)
+    {
+        s32 value = g_ModThirdPersonCrosshairRange + dir * 250;
+        if (value < TP_CROSSHAIR_RANGE_MIN) value = TP_CROSSHAIR_RANGE_MIN;
+        if (value > TP_CROSSHAIR_RANGE_MAX) value = TP_CROSSHAIR_RANGE_MAX;
+        g_ModThirdPersonCrosshairRange = value;
+    }
+
+    mpcfg_globals_dirty = TRUE;
+}
+
+static void mpwatchConfigTpValueText(s32 player, s32 row, char *buf, s32 buflen, char **out)
+{
+    if (row <= 3 || row == 10)
+    {
+        *out = mpwatchConfigTpOptionValue(player, row) ? "on" : "off";
+        return;
+    }
+
+    if (row == 4) sprintf(buf, "%d", TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust);
+    else if (row == 5) sprintf(buf, "%d", TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust);
+    else if (row == 6) sprintf(buf, "%d", TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust);
+    else if (row == 7) sprintf(buf, "%d", TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust);
+    else if (row == 8) sprintf(buf, "%d", TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust);
+    else if (row == 9) sprintf(buf, "%d", g_ModThirdPersonCrosshairRange);
+    else buf[0] = '\0';
+    *out = buf;
+    (void)buflen;
 }
 
 static s32 mpwatchConfigOptionBit(s32 player, s32 row)
@@ -270,9 +450,56 @@ static s32 mpwatchConfigHandleInput(s32 player)
 
     if (pressed & B_BUTTON)
     {
-        if (mode == 4) { mpcfg_mode[player]=0; mpcfg_row[player]=2; mpwatchPlayBeep(); return 1; }
+        if (mode == 4) { mpcfg_mode[player]=2; mpcfg_row[player]=12; mpwatchPlayBeep(); return 1; }
+        if (mode == 5)
+        {
+            mpwatchConfigStoreGlobals();
+            mpcfg_mode[player]=2; mpcfg_row[player]=13; mpwatchPlayBeep(); return 1;
+        }
+        if (mode == 6)
+        {
+            mpwatchConfigStoreGlobals();
+            mpcfg_mode[player]=2; mpcfg_row[player]=14; mpwatchPlayBeep(); return 1;
+        }
+        if (mode == 7)
+        {
+            mpwatchConfigStoreGlobals();
+            mpcfg_mode[player]=2; mpcfg_row[player]=15; mpwatchPlayBeep(); return 1;
+        }
+        if (mode == 8)
+        {
+            mpwatchConfigStoreGlobals();
+            mpcfg_mode[player]=2; mpcfg_row[player]=16; mpwatchPlayBeep(); return 1;
+        }
+        if (mode == 10) { mpcfg_mode[player]=9; mpcfg_row[player]=0; mpwatchPlayBeep(); return 1; }
+        if (mode == 9)
+        {
+            mpwatchConfigStoreGlobals();
+            mpcfg_mode[player]=2; mpcfg_row[player]=17; mpwatchPlayBeep(); return 1;
+        }
+        if (mode == 2)
+        {
+            mpwatchConfigStoreGlobals();
+            mpcfg_mode[player]=0; mpcfg_row[player]=1; mpwatchPlayBeep(); return 1;
+        }
         if (mode) { mpcfg_mode[player]=0; mpcfg_row[player]=0; mpwatchPlayBeep(); return 1; }
         return 0;
+    }
+
+    if (mode == 6 && mpcfg_row[player] >= 4 && mpcfg_row[player] <= 9)
+    {
+        if (pressed & (L_JPAD|L_CBUTTONS))
+        {
+            mpwatchConfigAdjustTpCamera(player, mpcfg_row[player], -1);
+            mpwatchPlayBeep();
+            return 1;
+        }
+        if (pressed & (R_JPAD|R_CBUTTONS))
+        {
+            mpwatchConfigAdjustTpCamera(player, mpcfg_row[player], 1);
+            mpwatchPlayBeep();
+            return 1;
+        }
     }
 
     if (pressed & A_BUTTON)
@@ -288,7 +515,62 @@ static s32 mpwatchConfigHandleInput(s32 player)
             mpcfg_choice[player]=mpwatchConfigOptionBit(player,row);
             mpcfg_modal[player]=1; mpwatchPlayBeep();
         }
-        else if (mode == 2) { mpwatchConfigToggleSpecial(player,row); mpwatchPlayBeep(); }
+        else if (mode == 2)
+        {
+            if (row < 12)
+            {
+                mpwatchConfigToggleBaseSpecial(player,row);
+            }
+            else
+            {
+                /* Entering another page leaves Special Options, so flush the
+                 * accumulated shared settings once before changing mode. */
+                mpwatchConfigStoreGlobals();
+                if (row == 12) { mpcfg_mode[player]=4; mpcfg_row[player]=0; }
+                else if (row == 13) { mpcfg_mode[player]=5; mpcfg_row[player]=0; }
+                else if (row == 14) { mpcfg_mode[player]=6; mpcfg_row[player]=0; }
+                else if (row == 15) { mpcfg_mode[player]=7; mpcfg_row[player]=0; }
+                else if (row == 16) { mpcfg_mode[player]=8; mpcfg_row[player]=0; }
+                else if (row == 17) { mpcfg_mode[player]=9; mpcfg_row[player]=0; }
+                else { mpcfg_mode[player]=3; mpcfg_row[player]=0; }
+            }
+            mpwatchPlayBeep();
+        }
+        else if (mode == 5)
+        {
+            mpwatchConfigTogglePatch(player,row);
+            mpwatchPlayBeep();
+        }
+        else if (mode == 6)
+        {
+            if (row <= 3 || row == 10) mpwatchConfigToggleTpOption(player,row);
+            else mpwatchConfigAdjustTpCamera(player,row,1);
+            mpwatchPlayBeep();
+        }
+        else if (mode == 7)
+        {
+            mpwatchConfigToggleDebug(player,row);
+            mpwatchPlayBeep();
+        }
+        else if (mode == 8)
+{
+    modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
+    mpcfg_globals_dirty = TRUE;
+    mpwatchPlayBeep();
+}
+        else if (mode == 10)
+        {
+            if (mpcfg_row[player]) g_ModStaggeringBackwardsDeathEnabled ^= 1;
+            else g_ModAdditionalPlayerDeathAnimationsEnabled ^= 1;
+            mpcfg_globals_dirty = TRUE; mpwatchPlayBeep();
+        }
+        else if (mode == 9)
+        {
+            if (mpcfg_row[player] == 0) { mpcfg_mode[player]=10; mpcfg_row[player]=0; mpwatchPlayBeep(); return 1; }
+            if (mpcfg_row[player] == 2) g_ModDisableBodyArmorEnabled ^= 1;
+            else g_ModAlwaysShowCrosshairEnabled ^= 1;
+            mpcfg_globals_dirty = TRUE; mpwatchPlayBeep();
+        }
         else if (mode == 3)
         {
             if (row >= MPWATCH_TOGGLE_ROWS)
@@ -310,21 +592,14 @@ static s32 mpwatchConfigHandleInput(s32 player)
         }
         else if (mode == 4)
         {
-            if (levelModifiersGetCurrentStage() == LEVELID_SILO)
-            {
-                if (!levelModifiersSiloBetaVentActive())
-                    levelModifiersActivateSiloBetaVent();
-            }
-            else if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
-            {
-                levelModifiersSetCitadelWater(!levelModifiersCitadelWaterActive());
-            }
+            levelModifiersToggleCurrentStageModifier(row);
             mpwatchPlayBeep();
         }
         return 1;
     }
     return mode != 0;
 }
+
 
 typedef enum MPWATCH_CLASS
 {
@@ -369,6 +644,11 @@ static void mpwatchMenuGoRight(void)
         g_CurrentPlayer->mpmenumode = c == MPWATCH_CLASS_COOP ? MENU_GOWOC : MENU_LOSSES;
         return;
     }
+    if ((c == MPWATCH_CLASS_MULTIPLAYER || c == MPWATCH_CLASS_GAMEOVER_MULTI)
+        && g_CurrentPlayer->mpmenumode == MENU_KILLS)
+    { g_CurrentPlayer->mpmenumode = MENU_BOT_SCORES; return; }
+    if (g_CurrentPlayer->mpmenumode == MENU_BOT_SCORES)
+    { g_CurrentPlayer->mpmenumode = MENU_SCORES; return; }
     if (c == MPWATCH_CLASS_COOP && g_CurrentPlayer->mpmenumode == MENU_SCORES)
     { g_CurrentPlayer->mpmenumode = MENU_EXIT; return; }
     g_CurrentPlayer->mpmenumode++;
@@ -386,6 +666,11 @@ static void mpwatchMenuGoLeft(void)
     { g_CurrentPlayer->mpmenumode = MENU_OBJECTIVES; return; }
     if (g_CurrentPlayer->mpmenumode == MENU_OBJECTIVES)
     { g_CurrentPlayer->mpmenumode = MENU_GOWOC; return; }
+    if ((c == MPWATCH_CLASS_MULTIPLAYER || c == MPWATCH_CLASS_GAMEOVER_MULTI)
+        && g_CurrentPlayer->mpmenumode == MENU_SCORES)
+    { g_CurrentPlayer->mpmenumode = MENU_BOT_SCORES; return; }
+    if (g_CurrentPlayer->mpmenumode == MENU_BOT_SCORES)
+    { g_CurrentPlayer->mpmenumode = MENU_KILLS; return; }
     if (c == MPWATCH_CLASS_COOP && g_CurrentPlayer->mpmenumode == MENU_EXIT)
     { g_CurrentPlayer->mpmenumode = MENU_SCORES; return; }
     g_CurrentPlayer->mpmenumode--;
@@ -399,7 +684,7 @@ s32 mpwatchMenuCanGoRight(void)
     if (c == MPWATCH_CLASS_COOP)
         return g_CurrentPlayer->mpmenumode != MENU_EXIT && g_CurrentPlayer->mpmenumode != MENU_EXIT_CONFIRM && g_CurrentPlayer->mpmenumode != MENU_FINISHED;
     if (c == MPWATCH_CLASS_GAMEOVER_MULTI || c == MPWATCH_CLASS_GAMEOVER_COOP)
-        return g_CurrentPlayer->mpmenumode == MENU_GOWOC || g_CurrentPlayer->mpmenumode == MENU_LOSSES || g_CurrentPlayer->mpmenumode == MENU_KILLS;
+        return g_CurrentPlayer->mpmenumode == MENU_GOWOC || g_CurrentPlayer->mpmenumode == MENU_LOSSES || g_CurrentPlayer->mpmenumode == MENU_KILLS || g_CurrentPlayer->mpmenumode == MENU_BOT_SCORES;
 #endif
     switch(g_CurrentPlayer->mpmenumode)
     {
@@ -409,6 +694,9 @@ s32 mpwatchMenuCanGoRight(void)
 #endif
         case MENU_LOSSES:
         case MENU_KILLS:
+#ifdef GE_MODDED_CHEATS
+        case MENU_BOT_SCORES:
+#endif
         case MENU_PAUSE:
             return 1;
         case MENU_EXIT:
@@ -429,12 +717,15 @@ s32 mpwatchMenuCanGoLeft(void)
     if (c == MPWATCH_CLASS_COOP)
         return g_CurrentPlayer->mpmenumode != MENU_OBJECTIVES;
     if (c == MPWATCH_CLASS_GAMEOVER_MULTI || c == MPWATCH_CLASS_GAMEOVER_COOP)
-        return g_CurrentPlayer->mpmenumode == MENU_LOSSES || g_CurrentPlayer->mpmenumode == MENU_KILLS || g_CurrentPlayer->mpmenumode == MENU_SCORES;
+        return g_CurrentPlayer->mpmenumode == MENU_LOSSES || g_CurrentPlayer->mpmenumode == MENU_KILLS || g_CurrentPlayer->mpmenumode == MENU_BOT_SCORES || g_CurrentPlayer->mpmenumode == MENU_SCORES;
 #endif
     switch(g_CurrentPlayer->mpmenumode)
     {
         case MENU_KILLS:
         case MENU_SCORES:
+#ifdef GE_MODDED_CHEATS
+        case MENU_BOT_SCORES:
+#endif
         case MENU_PAUSE:
         case MENU_EXIT:
             return 1;
@@ -455,9 +746,9 @@ s32 mpwatchMenuCanGoLeft(void)
 
 s32 mpwatchIsPlayerPressingRight(s32 player)
 {
-    s32 iVar3 = joyGetStickXInRange(player, -2, 1);
+    s32 stickx = joyGetStickX(player);
 
-    if ((joyGetButtonsPressedThisFrame(player, R_JPAD|R_CBUTTONS)) || ((iVar3 >= 1  && (g_CurrentPlayer->mpjoywascentre)))) 
+    if ((joyGetButtonsPressedThisFrame(player, R_JPAD|R_CBUTTONS)) || ((stickx > 30) && g_CurrentPlayer->mpjoywascentre))
     {
         return 1;
     }
@@ -467,9 +758,9 @@ s32 mpwatchIsPlayerPressingRight(s32 player)
 
 s32 mpwatchIsPlayerPressingLeft(s32 player)
 {
-    s32 iVar3 = joyGetStickXInRange(player, -2, 1);
+    s32 stickx = joyGetStickX(player);
 
-    if ((joyGetButtonsPressedThisFrame(player, L_JPAD|L_CBUTTONS)) || ((iVar3 < -1 && (g_CurrentPlayer->mpjoywascentre)))) 
+    if ((joyGetButtonsPressedThisFrame(player, L_JPAD|L_CBUTTONS)) || ((stickx < -30) && g_CurrentPlayer->mpjoywascentre))
     {
         return 1;
     }
@@ -998,7 +1289,7 @@ void mpwatchMenuTick(void)
 
     player_num = get_cur_playernum();
     player_count = getPlayerCount();
-    x_centered = joyGetStickXInRange(player_num, -2, 1);
+    x_centered = joyGetStickX(player_num);
 
     // The player in shuffled position 0 drives down g_gameOverFlag which is both a flag and a timer.
     if (!get_player_position_in_shuffled(player_num) && (g_gameOverFlag >= 2))
@@ -1011,7 +1302,11 @@ void mpwatchMenuTick(void)
         }
     }
 
+#ifdef GE_MODDED_CHEATS
+    if (gamemode == GAMEMODE_MULTI)
+#else
     if (player_count != 1)
+#endif
     {
         // If a player has their pause menu up when they die and the game isn't over, turn their menu off. 
         if ((g_CurrentPlayer->bonddead) && (!g_gameOverFlag))
@@ -1207,7 +1502,7 @@ void mpwatchMenuTick(void)
                     }
                 }
 
-                if ((x_centered == 0) || (x_centered == -1))
+                if (x_centered >= -20 && x_centered <= 20)
                 {
                     g_CurrentPlayer->mpjoywascentre = 1;
                     return;
@@ -1217,7 +1512,11 @@ void mpwatchMenuTick(void)
                 return;
             }
 
-            if (joyGetButtonsPressedThisFrame(player_num, START_BUTTON))
+            if (joyGetButtonsPressedThisFrame(player_num, START_BUTTON)
+#ifdef GE_MODDED_CHEATS
+                && !debugMenuStartExitConsumed()
+#endif
+            )
             {
                 mpwatchPlayBeep();
                 g_CurrentPlayer->mpmenuon = TRUE;
@@ -1244,13 +1543,13 @@ Gfx *display_text_for_playerdata_on_MP_menu(Gfx *gdl, s32 x, s32 y, s32 points, 
     s32 textwidth;
     s32 textheight;
     s32 unused;
-    u16 *text;
+    char text[16];
     s16 viX;
     s32 viY;
 
-    sprintf(&text, "%d", points);
+    sprintf(text, "%d", points);
 
-    textMeasure(&textheight, &textwidth, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
 
     textX = x - (textwidth >> 1);
     textY = y;
@@ -1260,37 +1559,37 @@ Gfx *display_text_for_playerdata_on_MP_menu(Gfx *gdl, s32 x, s32 y, s32 points, 
         case GREEN_NORMAL:
             viX = viGetX();
             viY = viGetY();
-            gdl = textRender(gdl, &textX, &textY, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0xFF00B0, viX, viY, 0, 0);
+            gdl = textRender(gdl, &textX, &textY, text, ptrFontBankGothicChars, ptrFontBankGothic, 0xFF00B0, viX, viY, 0, 0);
             break;
 
         case GREEN_HIGHLIGHT:
             viX = viGetX();
             viY = viGetY();
-            gdl = textRenderOutlined(gdl, &textX, &textY, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0xA0FFA0F0, 0x7000A0, viX, viY, 0, 0);
+            gdl = textRenderOutlined(gdl, &textX, &textY, text, ptrFontBankGothicChars, ptrFontBankGothic, 0xA0FFA0F0, 0x7000A0, viX, viY, 0, 0);
             break;
 
         case RED_NORMAL:
             viX = viGetX();
             viY = viGetY();
-            gdl = textRender(gdl, &textX, &textY, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0xFF4040B0, viX, viY, 0, 0);
+            gdl = textRender(gdl, &textX, &textY, text, ptrFontBankGothicChars, ptrFontBankGothic, 0xFF4040B0, viX, viY, 0, 0);
             break;
 
         case RED_HIGHLIGHT:
             viX = viGetX();
             viY = viGetY();
-            gdl = textRenderOutlined(gdl, &textX, &textY, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0xFFA0A0F0, 0x700000A0, viX, viY, 0, 0);
+            gdl = textRenderOutlined(gdl, &textX, &textY, text, ptrFontBankGothicChars, ptrFontBankGothic, 0xFFA0A0F0, 0x700000A0, viX, viY, 0, 0);
             break;
 
         case BLUE_NORMAL:
             viX = viGetX();
             viY = viGetY();
-            gdl = textRender(gdl, &textX, &textY, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0x4040FFB0, viX, viY, 0, 0);
+            gdl = textRender(gdl, &textX, &textY, text, ptrFontBankGothicChars, ptrFontBankGothic, 0x4040FFB0, viX, viY, 0, 0);
             break;
 
         case BLUE_HIGHLIGHT:
             viX = viGetX();
             viY = viGetY();
-            gdl = textRenderOutlined(gdl, &textX, &textY, &text, ptrFontBankGothicChars, ptrFontBankGothic, 0xA0A0FFF0, 0x70A0, viX, viY, 0, 0);
+            gdl = textRenderOutlined(gdl, &textX, &textY, text, ptrFontBankGothicChars, ptrFontBankGothic, 0xA0A0FFF0, 0x70A0, viX, viY, 0, 0);
             break;
     }
 
@@ -1339,6 +1638,9 @@ s32 get_points_for_mp_player(s32 playernum)
                 }
             }
 
+#ifdef GE_MODDED_CHEATS
+            points += modMpBotsGetHumanKills(playernum);
+#endif
             points += g_playerPlayerData[playernum].killed_gg_owner_count * (player_count - 2);
             break;
 
@@ -1550,6 +1852,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
     s32 h2;
     char rankbuffer[4];
     s32 two_player_x_offset;
+    s32 watch_y_offset;
     char *text;
     s32 scores[4];
     s32 i;
@@ -1585,7 +1888,11 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
     player_count = getPlayerCount();
     self_paused = 0;
  
+#ifdef GE_MODDED_CHEATS
+    if (gamemode != GAMEMODE_MULTI)
+#else
     if (player_count == 1)
+#endif
     {
         return gdl;
     }
@@ -1594,7 +1901,13 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
     {
         gdl = microcode_constructor(gdl);
     
-        if (player_count == 2)
+        watch_y_offset = 0;
+        if (player_count == 1)
+        {
+            two_player_x_offset = (viGetViewWidth() - 160) >> 1;
+            watch_y_offset = (viGetViewHeight() - 120) >> 1;
+        }
+        else if (player_count == 2)
         {
             two_player_x_offset = 80;
         }
@@ -1610,6 +1923,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             case MENU_KILLS:
             case MENU_SCORES:
 #ifdef GE_MODDED_CHEATS
+            case MENU_BOT_SCORES:
                 if (mpwatchUseCoopPauseCarousel() && g_CurrentPlayer->mpmenumode == MENU_SCORES)
                 {
                     /* R21 RC4: getStringID does not parenthesize TEXTSLOT.
@@ -1642,7 +1956,12 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                  * Use the stock watch header path so there is only one title. */
                 text = mpcfg_mode[curplayernum] == 2 ? "SPECIAL"
                     : mpcfg_mode[curplayernum] == 3 ? "CHEATS"
-                    : mpcfg_mode[curplayernum] >= 4 ? "LEVEL MODIFIERS" : "OPTIONS";
+                    : mpcfg_mode[curplayernum] == 4 ? "LEVEL MODIFIERS"
+                    : mpcfg_mode[curplayernum] == 5 ? "PATCHES"
+                    : mpcfg_mode[curplayernum] == 6 ? "THIRD-PERSON OPTIONS"
+                    : mpcfg_mode[curplayernum] == 7 ? "DEBUG"
+                    : mpcfg_mode[curplayernum] == 8 ? "EXPERIMENTAL"
+                    : mpcfg_mode[curplayernum] == 9 ? "ENHANCEMENTS" : "OPTIONS";
                 break;
 #endif
             case MENU_FINISHED:
@@ -1671,7 +1990,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
         textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
         x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-        y = (viGetViewTop() - (textheight >> 1)) + (22 + MPMENU_YOFF);
+        y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (22 + MPMENU_YOFF);
  
         if (self_paused)
         {
@@ -1708,7 +2027,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 x -= 8;
             }
 
-            y = viGetViewTop() + (22 + MPMENU_YOFF);
+            y = (viGetViewTop() + watch_y_offset) + (22 + MPMENU_YOFF);
             viewleft = viGetX();
             h1 = viGetY();
 
@@ -1732,7 +2051,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     x += 8;
                 }
 
-                y = viGetViewTop() + (22 + MPMENU_YOFF);
+                y = (viGetViewTop() + watch_y_offset) + (22 + MPMENU_YOFF);
                 viewleft = viGetX();
                 h1 = viGetY();
 
@@ -1748,6 +2067,26 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             }
         }
 
+#ifdef GE_MODDED_CHEATS
+        if (g_CurrentPlayer->mpmenumode == MENU_BOT_SCORES)
+        {
+            text = "BOT SCORES";
+            textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+            x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (50 + MPMENU_YOFF);
+            gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
+                0x00ff00b0, viGetX(), viGetY(), 0, 0);
+
+            for (i = 0; i < MOD_MP_BOT_MAX; i++)
+            {
+                gdl = display_text_for_playerdata_on_MP_menu(gdl,
+                    viGetViewLeft() + two_player_x_offset + ((i & 1) ? 96 : 64),
+                    (viGetViewTop() + watch_y_offset) + (64 + MPMENU_YOFF) + ((i >> 1) * 12),
+                    modMpBotsGetBotKills(i), GREEN_NORMAL);
+            }
+        }
+        else
+#endif
         if ((g_CurrentPlayer->mpmenumode == MENU_SCORES
 #ifdef GE_MODDED_CHEATS
             && !mpwatchIsCampaignCoop()
@@ -1779,7 +2118,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 textMeasure(&textheight, &textwidth, rankbuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0);
  
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                y = (viGetViewTop() - (textheight >> 1)) + (37 + MPMENU_YOFF);
+                y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (37 + MPMENU_YOFF);
                 viewleft = viGetX(); 
                 h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, rankbuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0x00ff00b0, viewleft, h1, 0, 0);
@@ -1800,7 +2139,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
                 /* Keep the normal multiplayer SCORES heading aligned a little
                  * higher, matching the visual placement of Kills/Losses. */
-                y = (viGetViewTop() - (textheight >> 1)) + (50 + MPMENU_YOFF)
+                y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (50 + MPMENU_YOFF)
                     + (g_gameOverFlag && !mpwatchIsCampaignCoop());
                 viewleft = viGetX(); 
                 h1 = viGetY();
@@ -1828,10 +2167,19 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     other_team_colour = GREEN_NORMAL;
                 }
  
-                if (player_count == 2)
+                if (player_count == 1)
                 {
                     viewleft = viGetViewLeft();
-                    x2 = viGetViewTop();
+                    x2 = viGetViewTop() + watch_y_offset;
+                    gdl = display_text_for_playerdata_on_MP_menu(gdl,
+                            viewleft + two_player_x_offset + 80,
+                            x2 + (78 + MPMENU_YOFF) - ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0),
+                            scores[0], current_colour);
+                }
+                else if (player_count == 2)
+                {
+                    viewleft = viGetViewLeft();
+                    x2 = (viGetViewTop() + watch_y_offset);
 
                     if (curplayernum == 0)
                     {
@@ -1845,7 +2193,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
                     gdl = display_text_for_playerdata_on_MP_menu(gdl, (viewleft + two_player_x_offset) + 80, x2 + (70 + MPMENU_YOFF) - ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0), scores[0], colour);
                     viewleft = viGetViewLeft();
-                    x2 = viGetViewTop();
+                    x2 = (viGetViewTop() + watch_y_offset);
 
                     curplayernum == 1 ? (colour = current_colour) : (q = g_playerPlayerData[1].have_token_or_goldengun == g_playerPlayerData[curplayernum].have_token_or_goldengun ? same_team_colour : other_team_colour, colour = q);
 
@@ -1854,7 +2202,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 else
                 {
                     viewleft = viGetViewLeft();
-                    x2 = viGetViewTop();
+                    x2 = (viGetViewTop() + watch_y_offset);
  
                     if (curplayernum == 0)
                     {
@@ -1868,7 +2216,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
                     gdl = display_text_for_playerdata_on_MP_menu(gdl, (viewleft + two_player_x_offset) + 64, x2 + (70 + MPMENU_YOFF) - ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0), scores[0], colour);
                     viewleft = viGetViewLeft();
-                    x2 = viGetViewTop();
+                    x2 = (viGetViewTop() + watch_y_offset);
  
                     if (curplayernum == 1)
                     {
@@ -1882,7 +2230,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
                     gdl = display_text_for_playerdata_on_MP_menu(gdl, (viewleft + two_player_x_offset) + 96, x2 + (70 + MPMENU_YOFF) - ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0), scores[1], colour);
                     viewleft = viGetViewLeft();
-                    x2 = viGetViewTop();
+                    x2 = (viGetViewTop() + watch_y_offset);
  
                     if (curplayernum == 2)
                     {
@@ -1899,7 +2247,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     if (player_count == 4)
                     {
                         viewleft = viGetViewLeft();
-                        x2 = viGetViewTop();
+                        x2 = (viGetViewTop() + watch_y_offset);
 
                         curplayernum == 3 ? (colour = current_colour) : (q = g_playerPlayerData[3].have_token_or_goldengun == g_playerPlayerData[curplayernum].have_token_or_goldengun ? same_team_colour : other_team_colour, colour = q);
                         gdl = display_text_for_playerdata_on_MP_menu(gdl, (viewleft + two_player_x_offset) + 96, x2 + (86 + MPMENU_YOFF) - ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0), scores[3], colour);
@@ -1918,7 +2266,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             text = "OBJECTIVES";
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-            y = (viGetViewTop() - (textheight >> 1)) + (37 + MPMENU_YOFF);
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (37 + MPMENU_YOFF);
             viewleft = viGetX();
             h1 = viGetY();
             gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
@@ -1952,7 +2300,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     sprintf(objectivebuffer, "Obj. %c: %s", 'A' + visibleobjective, objectivestatustext);
                     textMeasure(&textheight, &textwidth, objectivebuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                     x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                    y = viGetViewTop() + (51 + MPMENU_YOFF) + visibleobjective * 7;
+                    y = (viGetViewTop() + watch_y_offset) + (51 + MPMENU_YOFF) + visibleobjective * 7;
                     viewleft = viGetX();
                     h1 = viGetY();
                     gdl = textRender(gdl, &x, &y, objectivebuffer, ptrFontBankGothicChars, ptrFontBankGothic,
@@ -1966,7 +2314,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 text = "No objectives";
                 textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                y = viGetViewTop() + (55 + MPMENU_YOFF);
+                y = (viGetViewTop() + watch_y_offset) + (55 + MPMENU_YOFF);
                 viewleft = viGetX();
                 h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
@@ -1980,7 +2328,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 text = (char *)langGet(getStringID(LMPMENU, MPMENU_STR_1F_WEAPONOFCHOICE));
                 textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                y = viGetViewTop() + (87 + MPMENU_YOFF);
+                y = (viGetViewTop() + watch_y_offset) + (87 + MPMENU_YOFF);
                 viewleft = viGetX(); h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
                         0x00ff00b0, viewleft, h1, 0, 0);
@@ -1988,7 +2336,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 text = frontGetPlayersFavoriteWeaponInHand(curplayernum, 0);
                 textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                y = viGetViewTop() + (96 + MPMENU_YOFF);
+                y = (viGetViewTop() + watch_y_offset) + (96 + MPMENU_YOFF);
                 gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
                         0x00ff00b0, viGetX(), viGetY(), 0, 0);
             }
@@ -2006,15 +2354,17 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             char *label;
             char *vtext;
             char titlebuf[32];
+            char valuebuf[32];
             CHEAT_ID cheat;
 
             if (mode == 0)
             {
-                static char *hub[4] = {"Options","Special Options","Level Modifiers","In-Game Cheats"};
                 for (i=0;i<4;i++)
                 {
-                    text=hub[i]; textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0);
-                    x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+48+i*16+MPMENU_YOFF;
+                    text = i == 0 ? "Options" : i == 1 ? "Special Options"
+                        : i == 2 ? frontModGetOptionLabel(64) : frontModGetOptionLabel(65);
+                    textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0);
+                    x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=(viGetViewTop() + watch_y_offset)+48+i*16+MPMENU_YOFF;
                     gdl=textRender(gdl,&x,&y,text,ptrFontBankGothicChars,ptrFontBankGothic,i==row?0xa0ffa0f0:0x00ff00b0,viGetX(),viGetY(),0,0);
                 }
             }
@@ -2032,20 +2382,61 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 {
                     if (row < 4) label=frontModGetOptionLabel(12+row);
                     else if (row == 4) label=frontModGetOptionLabel(30);
-                    else if (row == 5) label=frontModGetOptionLabel(31);
-                    else if (row == 6) label=frontModGetOptionLabel(16);
-                    else if (row == 7) label=frontModGetOptionLabel(8);
-                    else if (row == 8) label=frontModGetOptionLabel(29);
-                    else if (row == 9) label=frontModGetOptionLabel(32);
-                    else if (row == 10) label=frontModGetOptionLabel(47);
-                    else if (row == 11) label=frontModGetOptionLabel(45);
-                    else if (row == 12) label=frontModGetOptionLabel(46);
-                    else if (row == 13) label=frontModGetOptionLabel(48);
-                    else if (row == 14) label=frontModGetOptionLabel(49);
-                    else if (row == 15) label=frontModGetOptionLabel(51);
-                    else label=frontModGetOptionLabel(50);
-                    value=mpwatchConfigSpecialValue(curplayernum,row);
-                    vtext=(row == 9 && g_MpViewportLock) ? frontModGetOptionLabel(37) : (value ? "on" : "off");
+                    else if (row == 5) label=frontModGetOptionLabel(16);
+                    else if (row == 6) label=frontModGetOptionLabel(8);
+                    else if (row == 7) label=frontModGetOptionLabel(29);
+                    else if (row == 8) label=frontModGetOptionLabel(32);
+                    else if (row == 9) label=frontModGetOptionLabel(45);
+                    else if (row == 10) label=frontModGetOptionLabel(52);
+                    else if (row == 11) label=frontModGetOptionLabel(73);
+                    else if (row == 12) { label=frontModGetOptionLabel(64); vtext=">"; }
+                    else if (row == 13) { label=frontModGetOptionLabel(53); vtext=">"; }
+                    else if (row == 14) { label=frontModGetOptionLabel(54); vtext=">"; }
+                    else if (row == 15) { label=frontModGetOptionLabel(71); vtext=">"; }
+                    else if (row == 16) { label=frontModGetOptionLabel(74); vtext=">"; }
+                    else if (row == 17) { label=frontModGetOptionLabel(76); vtext=">"; }
+                    else { label=frontModGetOptionLabel(65); vtext=">"; }
+
+                    if (row < 12)
+                    {
+                        value=mpwatchConfigBaseSpecialValue(curplayernum,row);
+                        vtext=(row == 8 && g_MpViewportLock) ? frontModGetOptionLabel(37) : (value ? "on" : "off");
+                    }
+                }
+                else if (mode == 5)
+                {
+                    label=frontModGetOptionLabel(row == 0 ? 46 : row == 1 ? 31 : row == 2 ? 50 : row == 3 ? 55 : row == 4 ? 70 : row == 5 ? 80 : 81);
+                    value=mpwatchConfigPatchValue(curplayernum,row);
+                    vtext=value ? "on" : "off";
+                }
+                else if (mode == 6)
+                {
+                    label=frontModGetOptionLabel(row <= 2 ? 47 + row : row == 3 ? 51 : 52 + row);
+                    mpwatchConfigTpValueText(curplayernum,row,valuebuf,sizeof(valuebuf),&vtext);
+                }
+                else if (mode == 7)
+                {
+                    label=frontModGetOptionLabel(72);
+                    value=mpwatchConfigDebugValue(curplayernum,row);
+                    vtext=value ? "on" : "off";
+                }
+                else if (mode == 8)
+                {
+                    label=frontModGetOptionLabel(75);
+                    value=modExperimentalJumpEnabled();
+                    vtext=value ? "on" : "off";
+                }
+                else if (mode == 10)
+                {
+                    label=frontModGetOptionLabel(row ? 83 : 82);
+                    value=row ? g_ModStaggeringBackwardsDeathEnabled : g_ModAdditionalPlayerDeathAnimationsEnabled;
+                    vtext=value ? "on" : "off";
+                }
+                else if (mode == 9)
+                {
+                    if (row == 0) { label=frontModGetOptionLabel(84); value=0; vtext=""; }
+                    else if (row == 1) { label=frontModGetOptionLabel(78); value=g_ModAlwaysShowCrosshairEnabled; vtext=value ? "on" : "off"; }
+                    else { label=frontModGetOptionLabel(79); value=g_ModDisableBodyArmorEnabled; vtext=value ? "on" : "off"; }
                 }
                 else if (mode == 3)
                 {
@@ -2063,21 +2454,8 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 }
                 else if (mode == 4)
                 {
-                    if (levelModifiersGetCurrentStage() == LEVELID_CITADEL)
-                    {
-                        label="Water";
-                        vtext=levelModifiersCitadelWaterActive()?"ON":"OFF";
-                    }
-                    else if (levelModifiersGetCurrentStage() == LEVELID_SILO)
-                    {
-                        label="Beta Vent Start";
-                        vtext=levelModifiersSiloBetaVentActive()?"ACTIVE":"ACTIVATE";
-                    }
-                    else
-                    {
-                        label="No modifiers available";
-                        vtext="";
-                    }
+                    label = (char *)levelModifiersGetCurrentStageModifierName(row);
+                    vtext = (char *)levelModifiersGetCurrentStageModifierValue(row);
                 }
                 else
                 {
@@ -2090,20 +2468,18 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     sprintf(titlebuf, "%s MODIFIERS", levelModifiersGetCurrentStageName());
                     text=titlebuf;
                     textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0);
-                    x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+39+MPMENU_YOFF;
+                    x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=(viGetViewTop() + watch_y_offset)+39+MPMENU_YOFF;
                     gdl=textRender(gdl,&x,&y,text,ptrFontBankGothicChars,ptrFontBankGothic,0xa0ffa0f0,viGetX(),viGetY(),0,0);
                 }
 
                 textMeasure(&textheight,&textwidth,label,ptrFontBankGothicChars,ptrFontBankGothic,0);
-                x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+57+MPMENU_YOFF;
-                gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 9 && g_MpViewportLock)
-                    || (mode == 4 && levelModifiersGetCurrentStageModifierCount() == 0)
-                    || (mode == 4 && levelModifiersGetCurrentStage() == LEVELID_SILO && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
+                x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=(viGetViewTop() + watch_y_offset)+57+MPMENU_YOFF;
+                gdl=textRender(gdl,&x,&y,label,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 8 && g_MpViewportLock)
+                    || (mode == 4 && levelModifiersCurrentStageModifierLocked(row))) ? 0x40704090 : 0xa0ffa0f0,viGetX(),viGetY(),0,0);
                 textMeasure(&textheight,&textwidth,vtext,ptrFontBankGothicChars,ptrFontBankGothic,0);
-                x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+75+MPMENU_YOFF;
-                gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 9 && g_MpViewportLock)
-                    || (mode == 4 && levelModifiersGetCurrentStageModifierCount() == 0)
-                    || (mode == 4 && levelModifiersGetCurrentStage() == LEVELID_SILO && levelModifiersSiloBetaVentActive())) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
+                x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=(viGetViewTop() + watch_y_offset)+75+MPMENU_YOFF;
+                gdl=textRender(gdl,&x,&y,vtext,ptrFontBankGothicChars,ptrFontBankGothic,((mode == 2 && row == 8 && g_MpViewportLock)
+                    || (mode == 4 && levelModifiersCurrentStageModifierLocked(row))) ? 0x40704090 : 0x00ff00b0,viGetX(),viGetY(),0,0);
 
                 if (mode == 1 && mpcfg_modal[curplayernum])
                 {
@@ -2111,16 +2487,16 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     {
                         text=frontModGetOptionLabel(21+(mpcfg_choice[curplayernum]&3));
                         textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0);
-                        x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=viGetViewTop()+94+MPMENU_YOFF;
+                        x=((viGetViewLeft()+two_player_x_offset)-(textwidth>>1))+80; y=(viGetViewTop() + watch_y_offset)+94+MPMENU_YOFF;
                         gdl=textRender(gdl,&x,&y,text,ptrFontBankGothicChars,ptrFontBankGothic,0xa0ffa0f0,viGetX(),viGetY(),0,0);
                     }
                     else
                     {
                         s32 opt = row == 7 ? PLAYER_OPTION_AUTOAIM : row - 1;
                         char *a=(char *)langGet(game_options_entries[opt].text[1]); char *b=(char *)langGet(game_options_entries[opt].text[2]);
-                        text=a; textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0); x=viGetViewLeft()+two_player_x_offset+48-(textwidth>>1); y=viGetViewTop()+94+MPMENU_YOFF;
+                        text=a; textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0); x=viGetViewLeft()+two_player_x_offset+48-(textwidth>>1); y=(viGetViewTop() + watch_y_offset)+94+MPMENU_YOFF;
                         gdl=textRender(gdl,&x,&y,text,ptrFontBankGothicChars,ptrFontBankGothic,mpcfg_choice[curplayernum]?0x00ff00b0:0xa0ffa0f0,viGetX(),viGetY(),0,0);
-                        text=b; textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0); x=viGetViewLeft()+two_player_x_offset+112-(textwidth>>1); y=viGetViewTop()+94+MPMENU_YOFF;
+                        text=b; textMeasure(&textheight,&textwidth,text,ptrFontBankGothicChars,ptrFontBankGothic,0); x=viGetViewLeft()+two_player_x_offset+112-(textwidth>>1); y=(viGetViewTop() + watch_y_offset)+94+MPMENU_YOFF;
                         gdl=textRender(gdl,&x,&y,text,ptrFontBankGothicChars,ptrFontBankGothic,mpcfg_choice[curplayernum]?0xa0ffa0f0:0x00ff00b0,viGetX(),viGetY(),0,0);
                     }
                 }
@@ -2141,7 +2517,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 write_playerrank_to_buffer(rankbuffer, curplayernum);
                 textMeasure(&textheight, &textwidth, rankbuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                y = (viGetViewTop() - (textheight >> 1)) + (37 + MPMENU_YOFF);
+                y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (37 + MPMENU_YOFF);
                 viewleft = viGetX(); h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, rankbuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0x00ff00b0, viewleft, h1, 0, 0);
             }
@@ -2162,7 +2538,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-            y = (viGetViewTop() - (textheight >> 1)) + (49 + MPMENU_YOFF)
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (49 + MPMENU_YOFF)
                 + ((!g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 1 : 0)
                 + ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0);
             viewleft = viGetX(); 
@@ -2182,7 +2558,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
 #endif
                 {
                     viewleft = viGetViewLeft();
-                    h1 = viGetViewTop();
+                    h1 = (viGetViewTop() + watch_y_offset);
                     x2 = player_count == 2 ? 80 : 64 + ((i & 1) << 5);
                     y = 70 + ((player_count == 2 ? i : i >> 1) << 4) + MPMENU_YOFF;
 #ifdef GE_MODDED_CHEATS
@@ -2217,7 +2593,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 write_playerrank_to_buffer(rankbuffer, curplayernum);
                 textMeasure(&textheight, &textwidth, rankbuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-                y = (viGetViewTop() - (textheight >> 1)) + (37 + MPMENU_YOFF);
+                y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (37 + MPMENU_YOFF);
                 viewleft = viGetX(); 
                 h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, rankbuffer, ptrFontBankGothicChars, ptrFontBankGothic, 0x00ff00b0, viewleft, h1, 0, 0);
@@ -2239,7 +2615,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-            y = (viGetViewTop() - (textheight >> 1)) + (49 + MPMENU_YOFF)
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (49 + MPMENU_YOFF)
                 + ((!g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 1 : 0)
                 + ((g_gameOverFlag && !mpwatchIsCampaignCoop()) ? 2 : 0);
             viewleft = viGetX(); 
@@ -2252,7 +2628,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             for (i = 0; i < player_count; i++)
             {
                 viewleft = viGetViewLeft();
-                h1 = viGetViewTop();
+                h1 = (viGetViewTop() + watch_y_offset);
                 x2 = player_count == 2 ? 80 : 64 + ((i & 1) << 5);
                 y = 70 + ((player_count == 2 ? i : i >> 1) << 4) + MPMENU_YOFF;
 
@@ -2291,7 +2667,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             text = "FRIENDLY KILLS";
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 80;
-            y = (viGetViewTop() - (textheight >> 1)) + (49 + MPMENU_YOFF);
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (49 + MPMENU_YOFF);
             gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
                     0x00ff00b0, viGetX(), viGetY(), 0, 0);
 
@@ -2303,7 +2679,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     if (m != i) friendly += g_playerPlayerData[i].kill_counts[m];
                 }
                 viewleft = viGetViewLeft();
-                h1 = viGetViewTop();
+                h1 = (viGetViewTop() + watch_y_offset);
                 x2 = player_count == 2 ? 80 : 64 + ((i & 1) << 5);
                 y = 70 + ((player_count == 2 ? i : i >> 1) << 4) + MPMENU_YOFF;
                 /* Friendly Kills uses the same two-pixel-up value grid in
@@ -2334,13 +2710,13 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             text = (char *) langGet(getStringID(LMPMENU, MPMENU_STR_1F_WEAPONOFCHOICE)); /* Weapon of choice: */
             textMeasure(&fav_textheight, &fav_textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + fav_x_offset) - (fav_textwidth >> 1)) + 80;
-            y = (viGetViewTop() - (fav_textheight >> 1)) + (37 + MPMENU_YOFF);
+            y = ((viGetViewTop() + watch_y_offset) - (fav_textheight >> 1)) + (37 + MPMENU_YOFF);
             viewleft = viGetX(); h1 = viGetY();
             gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, 0x00ff00b0, viewleft, h1, 0, 0);
             text = frontGetPlayersFavoriteWeaponInHand(curplayernum, 0);
             textMeasure(&fav_textheight, &fav_textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + fav_x_offset) - (fav_textwidth >> 1)) + 80;
-            x2 = viGetViewTop();
+            x2 = (viGetViewTop() + watch_y_offset);
  
             if (j_text_trigger) 
             { 
@@ -2362,7 +2738,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 text = (char *) g_CurrentPlayer->ptr_text_first_mp_award;
                 textMeasure(&fav_textheight, &fav_textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + fav_x_offset) - (fav_textwidth >> 1)) + 80;
-                y = (viGetViewTop() - (fav_textheight >> 1)) + (75 + MPMENU_YOFF);
+                y = ((viGetViewTop() + watch_y_offset) - (fav_textheight >> 1)) + (75 + MPMENU_YOFF);
                 viewleft = viGetX(); 
                 h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, 0x00ff00b0, viewleft, h1, 0, 0);
@@ -2373,7 +2749,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 text = (char *) g_CurrentPlayer->ptr_text_second_mp_award;
                 textMeasure(&fav_textheight, &fav_textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
                 x = ((viGetViewLeft() + fav_x_offset) - (fav_textwidth >> 1)) + 80;
-                y = (viGetViewTop() - (fav_textheight >> 1)) + (88 + MPMENU_YOFF);
+                y = ((viGetViewTop() + watch_y_offset) - (fav_textheight >> 1)) + (88 + MPMENU_YOFF);
                 viewleft = viGetX(); 
                 h1 = viGetY();
                 gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic, 0x00ff00b0, viewleft, h1, 0, 0);
@@ -2385,7 +2761,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             text = (char *) langGet(getStringID(LMPMENU, MPMENU_STR_20_CANCEL)); /* cancel */
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 54;
-            y = (viGetViewTop() - (textheight >> 1)) + (54 + MPMENU_YOFF);
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (54 + MPMENU_YOFF);
  
             if (g_CurrentPlayer->mpquitconfirm == 0)
             {
@@ -2403,7 +2779,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             text = (char *) langGet(getStringID(LMPMENU, MPMENU_STR_21_CONFIRM)); /* confirm */
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = ((viGetViewLeft() + two_player_x_offset) - (textwidth >> 1)) + 104;
-            y = (viGetViewTop() - (textheight >> 1)) + (54 + MPMENU_YOFF);
+            y = ((viGetViewTop() + watch_y_offset) - (textheight >> 1)) + (54 + MPMENU_YOFF);
  
             if (g_CurrentPlayer->mpquitconfirm == 1)
             {
@@ -2424,7 +2800,7 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
             text = (char *)langGet(getStringID(LMPMENU, MPMENU_STR_17_STARTTTOEXIT));
             textMeasure(&textheight, &textwidth, text, ptrFontBankGothicChars, ptrFontBankGothic, 0);
             x = viGetViewLeft() + (viGetViewWidth() >> 1) - (textwidth >> 1);
-            y = viGetViewTop() + viGetViewHeight() - textheight - 14;
+            y = (viGetViewTop() + watch_y_offset) + viGetViewHeight() - textheight - 14;
             gdl = textRender(gdl, &x, &y, text, ptrFontBankGothicChars, ptrFontBankGothic,
                     0x00ff00b0, viGetX(), viGetY(), 0, 0);
         }

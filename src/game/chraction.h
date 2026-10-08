@@ -85,6 +85,7 @@ s32 sub_GAME_7F02D630(ChrRecord *arg0, GUNHAND hand, coord3d *arg2);
 void chrlvTriggerFireWeapon(ChrRecord *arg0);
 s32 chrlvGeometryRelated7F02FC34(coord3d *arg0, coord3d *arg1, coord3d *arg2, f32 arg3);
 s32 chrlvIsArrivingLaterallyAtPos(coord3d *prevpos, coord3d *curpos, coord3d *targetpos, f32 range);
+waypoint *chrlvStanPathRelated(coord3d *pos, StandTile *stan);
 void chrlvActionTick(ChrRecord *arg0);
 void chrlvAllChrTick(void);
 s32 chrSawTargetRecently(ChrRecord *arg0);
@@ -145,5 +146,7 @@ bool chrDropItem(ChrRecord *self, s32 modelnum, u8 weaponid);
 void expand_09_characters(s32 stageid, GuardRecord *arg1, s32 arg2);
 void chrlvGetPatrolPercentOrPosition(ChrRecord *arg0, coord3d *arg1);
 s32 chrlvExplosionDamage(ChrRecord *arg0, coord3d *arg1, f32 arg2, s32 arg3);
+
+f32 chrlvPathingCollisionRelated7F0264B0(PropRecord *arg0, f32 arg1, f32 arg2);
 
 #endif

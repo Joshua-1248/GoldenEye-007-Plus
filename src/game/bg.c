@@ -5,6 +5,7 @@
 #include <bondconstants.h>
 #include <deb.h>
 #include <fr.h>
+#include "file2.h"
 #include <memp.h>
 #include "bg.h"
 #include "bondview.h"
@@ -209,6 +210,9 @@ struct levelentry levelinfotable[] = {
     {LEVELID_TEMPLE,   "bg/bg_dish_all_p.seg", "Tbg_dish_all_p_stanZ", 0.47142857,  1.0,        147.05882},
     {LEVELID_CAVERNS,  "bg/bg_cave_all_p.seg", "Tbg_cave_all_p_stanZ", 0.26824287,  1.0,        13.44086},
     {LEVELID_CITADEL,  "bg/bg_cat_all_p.seg",  "Tbg_cat_all_p_stanZ",  0.57639205,  1.0,        38.461536},
+#ifdef GE_MODDED_CHEATS
+    {LEVELID_COURTYARD, "cb", "cs", 0.23363999, 0.2, 100.0},
+#endif
     {LEVELID_CRADLE,   "bg/bg_crad_all_p.seg", "Tbg_crad_all_p_stanZ", 0.23571429,  1.0,        43.103451},
     {LEVELID_SHO,      "bg/bg_sho_all_p.seg",  "Tbg_sho_all_p_stanZ",  0.528,       1.0,        21.18644},
     {LEVELID_SURFACE2, "bg/bg_sevx_all_p.seg", "Tbg_sevx_all_p_stanZ", 0.45445713,  0.2,        22.603975},
@@ -308,19 +312,46 @@ struct BgFastPortalCache
 {
     s16 roomPortalHead[MAXROOMCOUNT];
     s16 roomPortalTail[MAXROOMCOUNT];
+    s16 roomDrawIndex[MAXROOMCOUNT];
     s16 portalNext[PORTMAX * 2];
     u32 roomLinks[MAXROOMCOUNT][BG_FAST_ROOM_LINK_WORDS];
     struct PortalMetric portalMetrics[PORTMAX];
     s32 portalCount;
 };
+typedef char r27g2_bg_fast_cache_fits_before_prop_room_cache[(sizeof(struct BgFastPortalCache) <= 0x2200) ? 1 : -1];
 extern u8 _gameFastBssStart[];
 #define g_BgFastCache (*(struct BgFastPortalCache *) _gameFastBssStart)
 #define g_BgFastRoomPortalHead (g_BgFastCache.roomPortalHead)
 #define g_BgFastRoomPortalTail (g_BgFastCache.roomPortalTail)
+#define g_BgFastRoomDrawIndex  (g_BgFastCache.roomDrawIndex)
 #define g_BgFastPortalNext     (g_BgFastCache.portalNext)
 #define g_BgFastRoomLinks      (g_BgFastCache.roomLinks)
 #define g_BgFastPortalMetrics  (g_BgFastCache.portalMetrics)
 #define g_BgFastPortalCount    (g_BgFastCache.portalCount)
+
+
+/* R27G2: validate the cached drawn-room index instead of clearing the sidecar
+ * every viewport.  Stale entries are harmless because both the active count
+ * and the room id must still agree before the index is accepted. */
+static s32 bgFastGetDrawnRoomIndex(s32 room)
+{
+    s32 index;
+
+    if ((u32)room >= MAXROOMCOUNT)
+    {
+        return -1;
+    }
+
+    index = g_BgFastRoomDrawIndex[room];
+
+    if ((u32)index < (u32)g_BgNumberOfRoomsDrawn
+            && dword_CODE_bss_8007FFA0[index].roomid == room)
+    {
+        return index;
+    }
+
+    return -1;
+}
 
 static void bgBuildPortalFastCache(void)
 {
@@ -332,6 +363,7 @@ static void bgBuildPortalFastCache(void)
     {
         g_BgFastRoomPortalHead[room] = -1;
         g_BgFastRoomPortalTail[room] = -1;
+        g_BgFastRoomDrawIndex[room] = -1;
 
         for (word = 0; word < BG_FAST_ROOM_LINK_WORDS; word++)
         {
@@ -568,6 +600,9 @@ s32 sub_GAME_7F0B39BC(int curroom,int unk1, bbox2d * screensize, s32 next)
 {
     int i;
     int temp;
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+    s32 usecache;
+#endif
 
     g_BgRoomInfo[curroom].room_rendered = '\x01';
 
@@ -575,10 +610,34 @@ s32 sub_GAME_7F0B39BC(int curroom,int unk1, bbox2d * screensize, s32 next)
         return 0;
     }
 
-    // Need g_BgNumberOfRoomsDrawn in a3
-    for (i = 0; i < g_BgNumberOfRoomsDrawn; i++)
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+    usecache = modMicroOptimizationsEnabled();
+
+    if (usecache)
+    {
+        i = bgFastGetDrawnRoomIndex(curroom);
+        if (i < 0)
+        {
+            i = 0;
+        }
+    }
+    else
+#endif
+    {
+        i = 0;
+    }
+
+    /* Retail first-match semantics are retained.  With a valid R27G2 sidecar,
+     * the loop begins directly at the authoritative existing entry. */
+    for (; i < g_BgNumberOfRoomsDrawn; i++)
     {
         if (curroom == dword_CODE_bss_8007FFA0[i].roomid) {
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+            if (usecache && (u32)curroom < MAXROOMCOUNT)
+            {
+                g_BgFastRoomDrawIndex[curroom] = (s16)i;
+            }
+#endif
             if (dword_CODE_bss_8007FFA0[i].unk1 < unk1) {
                 dword_CODE_bss_8007FFA0[i].unk1 = unk1;
             }
@@ -610,8 +669,6 @@ s32 sub_GAME_7F0B39BC(int curroom,int unk1, bbox2d * screensize, s32 next)
     if (eu_cdata_0x1f0d0 < 0x78) {
         g_BgNumberOfRoomsDrawn = eu_cdata_0x1f0d0;
     }
-
-    return 0;
 #else
     i = g_BgNumberOfRoomsDrawn;
     dword_CODE_bss_8007FFA0[i].roomid = curroom;
@@ -624,9 +681,19 @@ s32 sub_GAME_7F0B39BC(int curroom,int unk1, bbox2d * screensize, s32 next)
     g_BgNumberOfRoomsDrawn = i + 1;
 
     if (g_BgNumberOfRoomsDrawn) {}
+#endif
+
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+    /* In EU the saturated slot 0x77 can be outside g_BgNumberOfRoomsDrawn.
+     * Only remember an entry which retail lookups can actually see. */
+    if (usecache && (u32)curroom < MAXROOMCOUNT
+            && (u32)i < (u32)g_BgNumberOfRoomsDrawn)
+    {
+        g_BgFastRoomDrawIndex[curroom] = (s16)i;
+    }
+#endif
 
     return 0;
-#endif
 }
 
 
@@ -691,10 +758,34 @@ void bgResetPortalVisitCounts(void)
 s32 bgGet2dBboxByRoomId(s32 room_id, struct bbox2d *result)
 {
     s32 i;
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+    s32 usecache = modMicroOptimizationsEnabled();
+
+    if (usecache)
+    {
+        i = bgFastGetDrawnRoomIndex(room_id);
+
+        if (i >= 0)
+        {
+            result->f[0][0] = dword_CODE_bss_8007FFA0[i].bbox.f[0][0];
+            result->f[0][1] = dword_CODE_bss_8007FFA0[i].bbox.f[0][1];
+            result->f[1][0] = dword_CODE_bss_8007FFA0[i].bbox.f[1][0];
+            result->f[1][1] = dword_CODE_bss_8007FFA0[i].bbox.f[1][1];
+            return 1;
+        }
+    }
+#endif
+
     for (i=0; i<g_BgNumberOfRoomsDrawn; i++)
     {
         if (room_id == dword_CODE_bss_8007FFA0[i].roomid)
         {
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+            if (usecache && (u32)room_id < MAXROOMCOUNT)
+            {
+                g_BgFastRoomDrawIndex[room_id] = (s16)i;
+            }
+#endif
             result->f[0][0] = dword_CODE_bss_8007FFA0[i].bbox.f[0][0];
             result->f[0][1] = dword_CODE_bss_8007FFA0[i].bbox.f[0][1];
             result->f[1][0] = dword_CODE_bss_8007FFA0[i].bbox.f[1][0];
@@ -704,7 +795,6 @@ s32 bgGet2dBboxByRoomId(s32 room_id, struct bbox2d *result)
         }
     }
 
-    // It's pointless to set those because when this function returns false, result is unused
     result->f[0][0] = 0.0f;
     result->f[0][1] = 0.0f;
     result->f[1][0] = 0.0f;
@@ -1455,6 +1545,20 @@ void bgRoomVisibilityRelated(void)
 
     room = bondviewGetCurrentPlayersRoom();
     g_BgCurrentRoom = room;
+
+#ifdef GE_MODDED_CHEATS
+    /* R27S R7: bondview deliberately selected collision/STAN ownership for a
+     * synthetic Temple/Complex hole. Do not let the retail authored-portal
+     * room-correction walk below overwrite that choice before visibility. */
+    if (levelModifiersUseCurrentStanRoomForHoleTraversal()
+        && g_CurrentPlayer->field_488.current_tile_ptr != NULL
+        && (g_CurrentPlayer->field_488.current_tile_ptr_for_portals == NULL
+            || room != g_CurrentPlayer->field_488.current_tile_ptr_for_portals->room))
+    {
+        bgDetermineVisibleRooms();
+        return;
+    }
+#endif
 
     pos = bondviewGetCurrentPlayersPosition();
     pos3 = bondviewGetCurrentPlayersPosition3();
@@ -4916,6 +5020,50 @@ void *sub_GAME_7F0B8A24(s32 *pc)
 /**
  * Address: 7F0B8A6C
  */
+
+#ifdef GE_MODDED_CHEATS
+/*
+ * R27S R6: PD-style secondary portal root.
+ *
+ * Queue every authored GoldenEye BG portal attached to a root room. The
+ * existing bgProcessNextQueuedPortal traversal remains authoritative for all
+ * aperture, sidedness, recursion-depth and closed-portal decisions.
+ */
+static void bgQueueRootRoomPortals(s32 room, f32 *screenbounds)
+{
+    s32 portalnum;
+#ifdef GE_PHYSICAL_FASTPATHS
+    s32 node;
+
+    node = bgFastRoomFirstPortalNode(room);
+
+    while (node >= 0)
+    {
+        portalnum = node >> 1;
+#if defined(LEFTOVERDEBUG)
+        bgQueuePortalTraversal(0, room, portalnum, 1, screenbounds);
+#else
+        bgQueuePortalTraversal(room, portalnum, 1, screenbounds);
+#endif
+        node = g_BgFastPortalNext[node];
+    }
+#else
+    for (portalnum = 0; g_BgPortals[portalnum].offset_portal != NULL; portalnum++)
+    {
+        if (room == g_BgPortals[portalnum].connectedRoom1
+            || room == g_BgPortals[portalnum].connectedRoom2)
+        {
+#if defined(LEFTOVERDEBUG)
+            bgQueuePortalTraversal(0, room, portalnum, 1, screenbounds);
+#else
+            bgQueuePortalTraversal(room, portalnum, 1, screenbounds);
+#endif
+        }
+    }
+#endif
+}
+#endif
+
 void bgDetermineVisibleRooms(void) 
 {
     f32 screenbounds[4];
@@ -5000,6 +5148,30 @@ void bgDetermineVisibleRooms(void)
 
         sub_GAME_7F0B39BC(g_BgCurrentRoom, 0, &g_CurrentPlayer->screensize, 1);
 
+#ifdef GE_MODDED_CHEATS
+        /*
+         * R27S R6: seed the normal room and, when a synthetic STAN hole has
+         * split collision ownership from authored portal ownership, seed the
+         * other room as a second full-screen portal-traversal root.
+         */
+        bgQueueRootRoomPortals(g_BgCurrentRoom, screenbounds);
+
+        if (levelModifiersUseCurrentStanRoomForHoleTraversal()
+            && g_CurrentPlayer->field_488.current_tile_ptr_for_portals != NULL
+            && g_CurrentPlayer->field_488.current_tile_ptr_for_portals->room
+                != g_BgCurrentRoom)
+        {
+            temp_v1 = g_CurrentPlayer->field_488.current_tile_ptr_for_portals->room;
+
+            sub_GAME_7F0B39BC(
+                temp_v1,
+                0,
+                &g_CurrentPlayer->screensize,
+                1);
+
+            bgQueueRootRoomPortals(temp_v1, screenbounds);
+        }
+#else
 #ifdef GE_PHYSICAL_FASTPATHS
         {
             s32 node = bgFastRoomFirstPortalNode(g_BgCurrentRoom);
@@ -5028,6 +5200,7 @@ void bgDetermineVisibleRooms(void)
             }
         }
 #endif
+#endif
 
 #if defined(LEFTOVERDEBUG)
         sp44 = 0;
@@ -5045,6 +5218,7 @@ void bgDetermineVisibleRooms(void)
         }
 #endif
     }
+
 
 #ifdef GE_PHYSICAL_FASTPATHS
     for (var_s0 = 0; var_s0 < g_BgFastPortalCount; var_s0++)

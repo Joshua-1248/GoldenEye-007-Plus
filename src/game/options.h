@@ -144,15 +144,39 @@ extern u8 g_PlayerThirdPerson[MAX_PLAYER_COUNT];
 extern u8 g_PlayerStayInTpOnDeath[MAX_PLAYER_COUNT];
 extern u8 g_ModStayInTpOnDeathDefault;
 extern u8 g_ModTpSightTranslucencyEnabled;
+extern u8 g_ModMeleeQuickSwapEnabled;
+void modMeleeQuickSwapSetEnabled(s32 enabled);
+void modMeleeQuickSwapResetPlayerSelection(s32 player);
+void modMeleeQuickSwapLockPlayerSelection(s32 player);
+s32 modMeleeQuickSwapPlayerSelectionLocked(s32 player);
+void modMeleeQuickSwapQueuePlayerSelection(s32 player);
+s32 modMeleeQuickSwapPlayerSelectionPending(s32 player);
+void modMeleeQuickSwapClearPlayerSelectionPending(s32 player);
+extern u8 g_ModEnemyBulletHolesEnabled;
+extern u8 g_ModTpCornerShootingFixEnabled;
+extern u8 g_ModTpWorldSpaceCrosshairEnabled;
+extern u8 g_ModUnlimitedExplosionsEnabled;
+extern u8 g_ModMasterControlDebugMenuEnabled;
+extern u16 g_ModSinglePlayerCharacter;
+extern u8 g_ModSinglePlayerMatchViewHeight;
+extern u8 g_ModAdditionalPlayerDeathAnimationsEnabled;
+extern u8 g_ModStaggeringBackwardsDeathEnabled;
+#define g_ModFacilityGasLeakDeathEnabled g_ModAdditionalPlayerDeathAnimationsEnabled
+extern u8 g_ModDisableBodyArmorEnabled;
+extern u8 g_ModSiloXMusicLoopFixEnabled;
+extern u8 g_ModAr33PropFixMpEnabled;
+void modSyncBodyArmorPickups(void);
+extern u8 g_ModAlwaysShowCrosshairEnabled;
+extern u8 g_ModPlayerGunshotDeathContext;
 extern u8 g_MpViewportLock; /* 0=None, 1=1st Person, 2=3rd Person */
 extern u8 g_MpKillCountMessageEnabled; /* global MP/Co-Op HUD message toggle; default On */
 /* R22 camera-tuning controls.  These are session-local signed offsets from
- * the current defaults (distance 300, neutral height -12, horizontal -24,
+ * the current defaults (distance 310, neutral height -12, horizontal -24,
  * downward screen-up framing 6). */
 /* GoldenEye Plus authored Third Person camera defaults.  These are release
  * behavior, not EEPROM encoding parameters.  Persistence stores only the
  * signed adjustments around these exact bases. */
-#define TP_CAM_DISTANCE_DEFAULT 300
+#define TP_CAM_DISTANCE_DEFAULT 310
 #define TP_CAM_HEIGHT_DEFAULT (-12)
 #define TP_CAM_HORIZONTAL_DEFAULT (-24)
 #define TP_CAM_DOWN_FRAME_DEFAULT 24

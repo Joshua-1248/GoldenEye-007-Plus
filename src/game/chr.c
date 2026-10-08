@@ -30,6 +30,9 @@
 #include "matrixmath.h"
 #include "objecthandler.h"
 #include "options.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 #include "player.h"
 #include "propobj.h"
 #include "stan.h"
@@ -57,7 +60,7 @@ void chrUpdateAnim( ChrRecord *chr, s32 tickamount);
 void sub_GAME_7F057D44(f32 *arg0, f32 *arg1, f32 arg2);
 f32  get_007_health_mod(void);
 #ifdef GE_MODDED_CHEATS
-s32 bondviewGetThirdPersonLocalBodyAlpha(void);
+s32 bondviewGetThirdPersonLocalBodyAlpha(s32 withalpha);
 s32 bondviewThirdPersonPresentationActive(s32 player);
 #endif
 
@@ -1939,6 +1942,18 @@ s32 sub_GAME_7F01FC10(Model *model, coord3d *src, coord3d *dst, f32 *ground_y)
 
     if (chr->prop->stan != NULL)
     {
+#ifdef GE_MODDED_CHEATS
+        /*
+         * R27Z/R28 player-like Simulant motor.
+         *
+         * Perfect Dark injects bot lateral movement at this exact conceptual
+         * seam: after animation proposes a root destination, before native chr
+         * collision/floor resolution.  For a Plus bot this overrides only X/Z.
+         * Every ordinary guard/player/cinematic chr remains on the existing
+         * path because modMpBotsApplyLateral returns FALSE for them.
+         */
+        modMpBotsApplyLateral(chr, src, dst);
+#endif
         if ((chr->actiontype == ACT_DIE) && (chr->act_die.timeextra > ground))
         {
 #ifdef BUGFIX_R1
@@ -2901,6 +2916,51 @@ void chrHandleJointPositioned(enum CHR_RENDER_PART bodypart, Mtxf *matrix)
 #undef FIVEPI_OVER_18
 
 
+#ifdef GE_PHYSICAL_FASTPATHS
+/*
+ * R27M: return TRUE only when chrHandleJointPositioned can have an effect.
+ *
+ * The callback modifies only arm/torso/head matrices, and only for:
+ *   - current aim offsets,
+ *   - an active flinch envelope, or
+ *   - DK-mode body scaling.
+ *
+ * If none of those are active, every callback invocation during this body
+ * matrix build is guaranteed to return without changing the matrix.
+ */
+static s32 chrNeedsJointPositionedCallback(ChrRecord *chr)
+{
+    if (chr->aimuplshoulder != 0.0f
+        || chr->aimuprshoulder != 0.0f
+        || chr->aimupback != 0.0f
+        || chr->aimsideback != 0.0f
+        || chr->flinchcnt >= 0)
+    {
+        return TRUE;
+    }
+
+#ifdef BUGFIX_R1
+    if (cheatIsActive(CHEAT_DK_MODE)
+        && chrCanUseDKModeScaling(chr->bodynum, chr->headnum))
+    {
+        return TRUE;
+    }
+#else
+    /*
+     * Match the existing GE_PHYSICAL_FASTPATHS DK-mode test used by
+     * chrHandleJointPositioned() itself when Micro-Optimizations is enabled.
+     */
+    if ((((u8)g_CheatPlayerTextRelated[CHEAT_DK_MODE] >> player_num) & 1) != 0)
+    {
+        return TRUE;
+    }
+#endif
+
+    return FALSE;
+}
+#endif
+
+
 /**
  * Address 0x7F020D94.
  * 
@@ -2987,6 +3047,7 @@ s32 chrTick(PropRecord *prop)
     s32 tickamount;
 #ifdef GE_MODDED_CHEATS
     s32 coopMode;
+    s32 botMode;
     s32 coopFullTick;
     s32 savedPlayerNum;
     s32 targetPlayerNum;
@@ -3008,12 +3069,20 @@ s32 chrTick(PropRecord *prop)
     coopMode = gamemode == GAMEMODE_MULTI
         && get_scenario() == SCENARIO_COOP
         && prop->type == PROP_TYPE_CHR;
-    coopFullTick = !coopMode
-        || (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
+    botMode = gamemode == GAMEMODE_MULTI
+        && prop->type == PROP_TYPE_CHR
+        && modMpBotsGetSlotForChr(chr) >= 0;
+    coopFullTick = !(coopMode || botMode)
+        || (coopMode && lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)
         || get_player_position_in_shuffled(get_cur_playernum()) == 0;
 
+    /* Simulant animation/simulation advances on the shared full tick only. */
+    if (botMode && !coopFullTick)
+    {
+        tickamount = 0;
+    }
 #ifndef GE_PHYSICAL_FASTPATHS
-    if (coopMode && !coopFullTick)
+    else if (coopMode && !coopFullTick)
     {
         tickamount = 0;
     }
@@ -3054,6 +3123,11 @@ s32 chrTick(PropRecord *prop)
                         set_cur_player(savedPlayerNum);
                     }
                 }
+            }
+            else if (botMode)
+            {
+                if (coopFullTick)
+                    chrlvActionTick(chr);
             }
             else
 #endif
@@ -3222,7 +3296,11 @@ s32 chrTick(PropRecord *prop)
             if (coopFullTick)
 #endif
             {
-                if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
+                /* Simulant movement is simulation-owned, not visibility-owned.
+                 * Their lateral motor is applied from chrUpdateAnim, so an
+                 * off-screen bot must still execute it on the one shared full
+                 * tick in split-screen. */
+                if (botMode || headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
                 {
                     chrUpdateAnim(chr, tickamount);
                 }
@@ -3263,7 +3341,7 @@ after_position_update:
     }
 
 #ifdef GE_MODDED_CHEATS
-    if (!coopMode || coopFullTick)
+    if (!(coopMode || botMode) || coopFullTick)
 #endif
     {
         chrUpdateAimProperties(chr);
@@ -3311,7 +3389,6 @@ after_position_update:
         }
 #endif
 
-        g_ModelJointPositionedFunc = chrHandleJointPositioned;
         g_CurModelChr = chr;
 
 #ifdef GE_PHYSICAL_FASTPATHS
@@ -3324,7 +3401,7 @@ after_position_update:
         if (g_CurModelChr->flinchcnt >= 0)
         {
 #ifdef GE_MODDED_CHEATS
-            if (!coopMode || coopFullTick)
+            if (!(coopMode || botMode) || coopFullTick)
 #endif
             {
                 g_CurModelChr->flinchcnt += g_ClockTimer;
@@ -3340,6 +3417,22 @@ after_position_update:
             }
         }
 
+#ifdef GE_PHYSICAL_FASTPATHS
+        if (modMicroOptimizationsEnabled())
+        {
+            g_ModelJointPositionedFunc =
+                chrNeedsJointPositionedCallback(g_CurModelChr)
+                    ? chrHandleJointPositioned
+                    : NULL;
+        }
+        else
+        {
+            g_ModelJointPositionedFunc = chrHandleJointPositioned;
+        }
+#else
+        g_ModelJointPositionedFunc = chrHandleJointPositioned;
+#endif
+
         subcalcmatrices(&renderdata, model);
 
         g_ModelJointPositionedFunc = NULL;
@@ -3350,7 +3443,7 @@ after_position_update:
 #endif
 
 #ifdef GE_MODDED_CHEATS
-        if (!coopMode || coopFullTick)
+        if (!(coopMode || botMode) || coopFullTick)
 #endif
         {
             update_color_shading(&chr->shadecol, &chr->nextcol);
@@ -3586,7 +3679,7 @@ after_position_update:
         }
 
 #ifdef GE_MODDED_CHEATS
-        if (!coopMode || coopFullTick)
+        if (!(coopMode || botMode) || coopFullTick)
 #endif
         {
 #ifdef GE_MODDED_CHEATS
@@ -3715,7 +3808,7 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
      * visible from other players' split-screen cameras too. */
     if (g_CurrentPlayer != NULL && prop == g_CurrentPlayer->prop)
     {
-        s32 localalpha = bondviewGetThirdPersonLocalBodyAlpha();
+        s32 localalpha = bondviewGetThirdPersonLocalBodyAlpha(withalpha);
         if (localalpha < chrfadealpha)
         {
             chrfadealpha = localalpha;

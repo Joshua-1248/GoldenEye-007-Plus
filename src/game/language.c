@@ -187,6 +187,11 @@ LEVELID langGetLangBankIndexFromStagenum(LEVELID level)
             /* Plus V90 R3: Citadel already has the retail LcatE/LcatJ bank. */
             return_id = LCAT;
             break;
+#ifdef GE_MODDED_CHEATS
+        case LEVELID_COURTYARD:
+            return_id = LCAT;
+            break;
+#endif
         case LEVELID_CRADLE:
             return_id = LCRAD;
             break;

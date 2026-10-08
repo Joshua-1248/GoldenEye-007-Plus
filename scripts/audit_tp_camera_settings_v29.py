@@ -41,8 +41,8 @@ check('A release without B still exits gadget mode through normal forward cycle'
       'abReleaseWeaponAdvance = TRUE' in BONDVIEW and 'moveData.weaponForwardOffset = 1' in BONDVIEW)
 check('settled mission item to item switch remains immediate',
       'item-to-item browsing stays immediate and cheap' in BONDINV and 'currentPlayerUnEquipWeaponWrapper(GUNRIGHT, item);' in BONDINV)
-check('Micro-optimizations UI label uses lowercase o',
-      '0x6F2D6F70' in SPECTRUM and 'Micro-optimizations' in SPECTRUM)
+check('Micro-Optimizations UI label uses requested capitalization',
+      '0x6F2D4F70' in SPECTRUM and 'Micro-Optimizations' in SPECTRUM)
 check('V29 audit is mandatory build prerequisite',
       'tp-camera-settings-v29-audit:' in MAKE and 'tp-camera-settings-v29-audit' in MAKE.split('prerequisites:',1)[1].split('\n',1)[0])
 

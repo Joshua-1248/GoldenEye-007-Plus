@@ -355,8 +355,15 @@ Gfx *debmenuDraw(Gfx *gdl)
 	}
 
 	// Make sure there'll be a least 256 GBI commands free (2KB)
+#ifdef GE_MODDED_CHEATS
+    /* R27P R13: use Gfx-command units consistently.
+     * 256 Gfx commands == the intended 2 KiB reserve. */
+    available = dynGetFreeGfx(gdl) - 256;
+    needed = gdl2 - gdl;
+#else
 	available = dynGetFreeGfx(gdl) - 256 * sizeof(Gfx);
 	needed = (u32)gdl2 - (u32)gdl;
+#endif
 
 	if (needed <= 0) { // shouldn't be possible
 		return gdl;
@@ -421,7 +428,12 @@ Gfx *debmenuDraw(Gfx *gdl)
                     if(1)
 #endif
                     {
+#ifdef GE_MODDED_CHEATS
+	/* R27P R13: 128 Gfx commands == 1 KiB. */
+	if (dynGetFreeGfx(gdl) >= 128)
+#else
 				    	if (dynGetFreeGfx(gdl) >= 1024)
+#endif
                         {
 
 				    		gSPTextureRectangle(gdl++,

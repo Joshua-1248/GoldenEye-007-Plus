@@ -19,8 +19,10 @@
 #include "file.h"
 #include "file2.h"
 #include "front.h"
+#include "explosion.h"
 #include "glass.h"
 #include "gun.h"
+#include "image.h"
 #include "initanitable.h"
 #include "loadobjectmodel.h"
 #include "lv.h"
@@ -32,6 +34,11 @@
 #include "player.h"
 #include "propobj.h"
 #include "stan.h"
+#include "tex.h"
+#include "options.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 
 #ifdef GE_PHYSICAL_FASTPATHS
 extern s32 g_SelectedDifficulty;
@@ -108,6 +115,50 @@ f32 get_distance_actor_to_position            (ChrRecord *self, coord3d *arg1);
 f32 chrlvPathingCollisionRelated              (PropRecord *arg0, f32 arg1, f32 arg2, s32 cdtypes, f32 unkHeight, f32 unkA);
 f32 chrlvPathingCollisionRelated7F0264B0      (PropRecord *arg0, f32 arg1, f32 arg2);
 void triggered_on_shot_hit                    (ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_animation_id, ITEM_IDS item);
+void chrStopFiring                            (ChrRecord *self);
+#ifdef GE_MODDED_CHEATS
+/* Simulants are player stand-ins, not guards.  Their death presentation uses
+ * the same generic animation pool as a human player and deliberately ignores
+ * guard hit-part and explosion-specific death tables. */
+static void chrlvStartSimulantPlayerDeath(ChrRecord *self)
+{
+    s32 count = g_bondviewBondDeathAnimationsCount;
+    s32 anim;
+
+    if (self == NULL || self->model == NULL)
+        return;
+
+    if (count <= 0)
+    {
+        count = 0;
+        while (g_bondviewBondDeathAnimations[count] != 0)
+            count++;
+    }
+
+    if (count <= 0)
+        return;
+
+    anim = g_bondviewBondDeathAnimations[randomGetNext() % (u32)count];
+
+    chrStopFiring(self);
+    self->actiontype = ACT_DIE;
+    self->act_die.notifychrindex = 0;
+    self->act_die.thudframe1 = -1.0f;
+    self->act_die.thudframe2 = -1.0f;
+    self->act_die.timeextra = 0.0f;
+    self->act_die.elapseextra = 0.0f;
+    self->act_die.extraspeed.f[0] = 0.0f;
+    self->act_die.extraspeed.f[1] = 0.0f;
+    self->act_die.extraspeed.f[2] = 0.0f;
+    self->sleep = 0;
+
+    /* bheadStartDeathAnimation(..., speed=1) resolves to speed 0.5 and a
+     * 12-frame merge.  Use those exact human-player values on the bot model. */
+    modelSetAnimation(self->model,
+        (struct ModelAnimation *)((s32)&ptr_animation_table->data[0] + anim),
+        randomGetNext() & 1, 0.0f, 0.5f, 12.0f);
+}
+#endif
 s32 chrlvAttackAnimationRelated7F026F30       (ChrRecord *self, f32 *result);
 s32 chrlvStanRoomRelated                      (ChrRecord *self, coord3d *arg1, StandTile *tile);
 f32 chrlvModelScaleAnimationRelated           (ChrRecord *self);
@@ -120,7 +171,6 @@ waypoint *chrlvStanPathRelated                (coord3d *arg0, StandTile *arg1);
 s32 chrlvStanRoomRelatedPad                   (ChrRecord *self, PadRecord *arg1);
 void sub_GAME_7F025560                        (ChrRecord *self, s32 attack_type, s32 arg2);
 coord3d *chrlvGetChrOrPresetLocation          (ChrRecord *self, s32 flags, s32 lookup_id, StandTile **stan);
-void chrStopFiring                            (ChrRecord *self);
 void sub_GAME_7F0281F4                        (ChrRecord *self);
 s32 plot_course_for_actor                     (ChrRecord *self, coord3d *arg1, StandTile *stan, SPEED speed);
 void chrlvPlotCourseRelated                   (ChrRecord *self);
@@ -2644,6 +2694,14 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
         }
     }
 
+#ifdef GE_MODDED_CHEATS
+    /* Human multiplayer damage is ignored while damageshowtime is active.
+     * Give Simulants the same post-hit grace window before any damage/audio
+     * side effects are allowed.  This also rejects shots into dead corpses. */
+    if (modMpBotsGetSlotForChr(self) >= 0 && !modMpBotsCanTakeDamage(self))
+        return FALSE;
+#endif
+
     self->numarghs++;
     self->chrflags |= CHRFLAG_WAS_HIT;
 #ifdef GE_MODDED_CHEATS
@@ -2651,6 +2709,7 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
     if (isPlayer && self->prop->type != PROP_TYPE_VIEWER)
     {
         chrCoopSetTargetPlayer(self, CHRLV_GET_CUR_PLAYERNUM());
+        modMpBotsNotifyHumanHit(self, CHRLV_GET_CUR_PLAYERNUM());
     }
 #endif
 
@@ -2741,7 +2800,15 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
         {
             playerNum = CHRLV_GET_CUR_PLAYERNUM();
             set_cur_player(getPlayerPointerIndex(self->prop));
+#ifdef GE_MODDED_CHEATS
+            g_ModPlayerGunshotDeathContext =
+                g_ModStaggeringBackwardsDeathEnabled
+                && ((angle < 1.5707964f) || (angle > 4.712389f));
+#endif
             record_damage_kills(damageToCause * 0.125f, vector->x, vector->z, playerNum, 1);
+#ifdef GE_MODDED_CHEATS
+            g_ModPlayerGunshotDeathContext = FALSE;
+#endif
             set_cur_player(playerNum);
         }
         else
@@ -2751,6 +2818,11 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
             if (!cheatIsActive(76))
 #    endif
                 self->damage += damageToCause;
+
+#ifdef GE_MODDED_CHEATS
+            if (modMpBotsGetSlotForChr(self) >= 0 && damageToCause > 0.0f)
+                modMpBotsOnDamageAccepted(self);
+#endif
 
             if (self->damage < 0.0f)
             {
@@ -2763,6 +2835,26 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
             }
         }
 
+#ifdef GE_MODDED_CHEATS
+        if (hitpart != HIT_HAT
+            && modMpBotsGetSlotForChr(self) >= 0 && damageToCause > 0.0f)
+        {
+            /* Damage still accumulates through GoldenEye's normal ChrRecord
+             * path, but Simulants never enter guard ACT_ARGH/PREARGH.  A
+             * lethal hit transitions directly into the human-player death
+             * animation pool, independent of hit part. */
+            if (self->damage >= self->maxdamage)
+            {
+                chrlvStartSimulantPlayerDeath(self);
+                chrDropItems(self);
+                increment_num_kills_display_text_in_MP();
+
+                if (self->chrflags & CHRFLAG_COUNT_DEATH_AS_CIVILIAN)
+                    inc_cur_civilian_casualties();
+            }
+        }
+        else
+#endif
         if (hitpart != HIT_HAT)
         {
             // Cancel current animation and prepare for argh
@@ -2825,6 +2917,11 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
         return 0;
     }
 
+#ifdef GE_MODDED_CHEATS
+    if (modMpBotsGetSlotForChr(self) >= 0 && !modMpBotsCanTakeDamage(self))
+        return 0;
+#endif
+
     self->chrflags |= CHRFLAG_WAS_HIT;
     if (self->chrflags & CHRFLAG_INVINCIBLE)
     {
@@ -2834,6 +2931,11 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
     self->numarghs += 1;
     self->damage += damage;
     self->chrflags |= CHRFLAG_WAS_DAMAGED;
+
+#ifdef GE_MODDED_CHEATS
+    if (modMpBotsGetSlotForChr(self) >= 0 && damage > 0.0f)
+        modMpBotsOnDamageAccepted(self);
+#endif
 
     if (self->damage > 0.0f)
     {
@@ -2885,6 +2987,23 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
         }
 #endif
 
+#ifdef GE_MODDED_CHEATS
+        /* Human multiplayer deaths do not switch to guard explosion-death
+         * clips.  Preserve the explosion impulse above, but use the same
+         * generic player death pool as a gunshot. */
+        if (modMpBotsGetSlotForChr(self) >= 0)
+        {
+            /* Player-style Simulant deaths do not inherit the guard explosion
+             * launch impulse.  Keep explosion damage, but leave the corpse at
+             * its actual death position. */
+            self->fallspeed.f[0] = 0.0f;
+            self->fallspeed.f[1] = 0.0f;
+            self->fallspeed.f[2] = 0.0f;
+            chrlvStartSimulantPlayerDeath(self);
+            goto simulant_explosion_death_bookkeeping;
+        }
+#endif
+
         if (atan < subroty)
         {
             phi_f12 += M_TAU_F;
@@ -2924,9 +3043,15 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
             modelSetAnimEndFrame(self_model, sp38->anonymous_6);
         }
 
+#ifdef GE_MODDED_CHEATS
+simulant_explosion_death_bookkeeping:
+#endif
         if (arg3 != 0)
         {
-            play_sound_for_shot_actor(self);
+#ifdef GE_MODDED_CHEATS
+            if (modMpBotsGetSlotForChr(self) < 0)
+#endif
+                play_sound_for_shot_actor(self);
         }
 
         chrDropItems(self);
@@ -6196,7 +6321,11 @@ s32 chrlvUpdateAimendsideback(ChrRecord *self, struct weapon_firing_animation_ta
     if ((attack_type & TARGET_FRONT_OF_CHR) == 0)
     {
 #ifdef GE_MODDED_CHEATS
-        if ((attack_type & TARGET_BOND)
+        if ((attack_type & TARGET_BOND) && modMpBotsGetTargetProp(self) != NULL)
+        {
+            player_prop = modMpBotsGetTargetProp(self);
+        }
+        else if ((attack_type & TARGET_BOND)
             && gamemode == GAMEMODE_MULTI
             && CHRLV_GET_SCENARIO() == SCENARIO_COOP)
         {
@@ -6219,6 +6348,15 @@ s32 chrlvUpdateAimendsideback(ChrRecord *self, struct weapon_firing_animation_ta
 
         if (attack_type & TARGET_BOND)
         {
+#ifdef GE_MODDED_CHEATS
+            if (modMpBotsGetTargetProp(self) != NULL)
+            {
+                /* Bot targets are explicit props, not the viewport's current Bond.
+                 * The firing ray performs the authoritative obstruction test. */
+                seen_bond_flag = 1;
+            }
+            else
+#endif
             if ((attack_type & TARGET_DONTTURN) != 0)
             {
                 seen_bond_flag = 1;
@@ -6781,6 +6919,16 @@ void chrlvUpdateShotbondsum(ChrRecord *self, s32 *arg1, s32 *arg2, ITEM_IDS item
 #endif
 
 #ifdef GE_MODDED_CHEATS
+    /* Bots use the physical firing ray for hits.  Retail shotbondsum directly
+     * damages g_CurrentPlayer, which is unrelated to an explicit bot target
+     * in split-screen multiplayer. */
+    if (modMpBotsGetSlotForChr(self) >= 0)
+    {
+        *arg1 = 0;
+        *arg2 = 0;
+        self->shotbondsum = 0.0f;
+        return;
+    }
 #ifdef GE_PHYSICAL_FASTPATHS
     if (modMicroOptimizationsEnabled() ? coop_active :
         (gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP))
@@ -6943,7 +7091,25 @@ void chrlvUpdateShotbondsum(ChrRecord *self, s32 *arg1, s32 *arg2, ITEM_IDS item
                 t2 *= 3.0f;
             }
 
+#ifdef GE_MODDED_CHEATS
+            /* R27V R14: mark only front-half ordinary guard gunfire.
+             * The wall geometry itself is deferred into record_damage_kills()
+             * so it executes before Bond is transitioned into the dead state. */
+            dx = self_prop->pos.x - g_CurrentPlayer->prop->pos.x;
+            dz = self_prop->pos.z - g_CurrentPlayer->prop->pos.z;
+            subroty = atan2f(dx, dz) - bondviewGetPlayerYawRadians();
+
+            if (subroty < 0.0f)
+                subroty += M_TAU_F;
+
+            g_ModPlayerGunshotDeathContext =
+                g_ModStaggeringBackwardsDeathEnabled
+                && ((subroty < 1.5707964f) || (subroty > 4.712389f));
+#endif
             bondviewCallRecordDamageKills(t2, subroty, -1, 1);
+#ifdef GE_MODDED_CHEATS
+            g_ModPlayerGunshotDeathContext = FALSE;
+#endif
 
             self->shotbondsum = 0.0f;
 
@@ -7050,6 +7216,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
     Mtxf sp1C8;
     coord3d sp1BC;  // 444
     PropRecord *weapon_prop;
+    ITEM_IDS attack_item;
     coord3d sp1AC; // 428
     Mtxf sp16C;
     Mtxf sp12C;
@@ -7061,6 +7228,15 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
     s32 sp44;
     s32 unused;
     f32 sp4C;
+#ifdef GE_MODDED_CHEATS
+    HitThing enemybghit;
+    s32 enemybghitvalid;
+    s32 enemybgroom;
+    PropRecord *enemyhitprop;
+    coord3d enemyhitend;
+    s32 enemyobjvisual;
+    s32 botextracdtypes;
+#endif
 #ifdef GE_PHYSICAL_FASTPATHS
 #ifdef GE_MODDED_CHEATS
     s32 coop_active = 0;
@@ -7069,6 +7245,9 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
 
     self_prop = self->prop;
     weapon_prop = CHRLV_GET_EQUIPPED_WEAPON_PROP(self, hand);
+#ifdef GE_MODDED_CHEATS
+    botextracdtypes = modMpBotsGetSlotForChr(self) >= 0 ? CDTYPE_PLAYERS : 0;
+#endif
 
     if (weapon_prop != NULL)
     {
@@ -7076,15 +7255,32 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
         sp278 = 0;
         prop_selfchr = weapon_prop->chr;
 #ifdef GE_MODDED_CHEATS
+        /*
+         * R30 P2 R1: bot weapon is authoritative. PD aibots fire while their
+         * movement action remains independent, so ACT_ATTACK union state is
+         * not valid for them.
+         */
+        if (modMpBotsGetSlotForChr(self) >= 0 && weapon_prop->weapon != NULL)
+            attack_item = weapon_prop->weapon->weaponnum;
+        else
+#endif
+            attack_item = prop_selfchr->act_attack.attack_item;
+#ifdef GE_MODDED_CHEATS
 #ifdef GE_PHYSICAL_FASTPATHS
         if (modMicroOptimizationsEnabled())
         {
             coop_active = gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP;
         }
-        if (modMicroOptimizationsEnabled() ? coop_active :
+#endif
+        if (modMpBotsGetTargetProp(self) != NULL)
+        {
+            player_prop = modMpBotsGetTargetProp(self);
+        }
+#ifdef GE_PHYSICAL_FASTPATHS
+        else if (modMicroOptimizationsEnabled() ? coop_active :
             (gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP))
 #else
-        if (gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP)
+        else if (gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP)
 #endif
         {
             player_prop = chrCoopGetTargetProp(self);
@@ -7130,36 +7326,58 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
         if (
             (sp44 == 0)
             || (self->seen_bond_time >= (g_GlobalTimer - CHRLV_SEEN_RECENT_CHECK))
-            || (bondwalkItemGetAutomaticFiringRate(prop_selfchr->act_attack.attack_item) < 0))
+            || (bondwalkItemGetAutomaticFiringRate(attack_item) < 0))
         {
             sp268 = 0;
             sp264 = 0;
 
-            self->firecount[hand]++;
-
-            if (bondwalkItemGetAutomaticFiringRate(prop_selfchr->act_attack.attack_item) < 0)
+#ifdef GE_MODDED_CHEATS
+            if (modMpBotsGetSlotForChr(self) >= 0)
             {
+                /*
+                 * R30 P2 R1: PD botact owns Simulant fire interval. One queued
+                 * trigger means one authoritative GE low-level ray; do not
+                 * apply the guard ACT_ATTACK cadence a second time.
+                 */
+                self->firecount[hand]++;
                 sp268 = 1;
                 sp264 = 1;
             }
-            else if (((s32) self->firecount[hand] % bondwalkItemGetAutomaticFiringRate(prop_selfchr->act_attack.attack_item)) == 0)
+            else
+#endif
             {
-                sp268 = 1;
+                self->firecount[hand]++;
 
-                if ((((s32) self->firecount[hand] % (s32) (bondwalkItemGetAutomaticFiringRate(prop_selfchr->act_attack.attack_item) * 2)) == 0)
-                    || (prop_selfchr->act_attack.attack_item == ITEM_LASER))
+                if (bondwalkItemGetAutomaticFiringRate(attack_item) < 0)
                 {
+                    sp268 = 1;
                     sp264 = 1;
                 }
-            }
-            else
-            {
-                sp278 = 1;
+                else if (((s32) self->firecount[hand] % bondwalkItemGetAutomaticFiringRate(attack_item)) == 0)
+                {
+                    sp268 = 1;
+
+                    if ((((s32) self->firecount[hand] % (s32) (bondwalkItemGetAutomaticFiringRate(attack_item) * 2)) == 0)
+                        || (attack_item == ITEM_LASER))
+                    {
+                        sp264 = 1;
+                    }
+                }
+                else
+                {
+                    sp278 = 1;
+                }
             }
 
             if (sp268 != 0)
             {
                 sp254 = NULL;
+#ifdef GE_MODDED_CHEATS
+                enemybghitvalid = FALSE;
+                enemybgroom = 0;
+                enemyhitprop = NULL;
+                enemyobjvisual = FALSE;
+#endif
                 subroty = chrlvGetSubrotySideback(self);
                 sp24C = sub_GAME_7F02C27C(self);
                 self_stan = self_prop->stan;
@@ -7197,7 +7415,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                     }
                 }
 
-                if (stanTestLineUnobstructed(&self_stan, self_prop->pos.x, self_prop->pos.f[2], sp240.f[0], sp240.f[2], CDTYPE_DOORS, sp240.f[1] - self->ground, sp240.f[1] - self->ground, 0.0f, 1.0f) != 0)
+                if (stanTestLineUnobstructed(&self_stan, self_prop->pos.x, self_prop->pos.f[2], sp240.f[0], sp240.f[2], CDTYPE_DOORS | botextracdtypes, sp240.f[1] - self->ground, sp240.f[1] - self->ground, 0.0f, 1.0f) != 0)
                 {
                     sp238 = self_stan;
                 }
@@ -7213,7 +7431,24 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                     sp230 = 0;
                     sp22C = 1;
 
-                    sp21C = chrlvAttackRelated7F0292A8(self, &sp240, sp238);
+                    #ifdef GE_MODDED_CHEATS
+                    if (modMpBotsGetSlotForChr(self) >= 0)
+                    {
+                        /*
+                         * P1 already maintains targetinsight for the explicit
+                         * bot target. Avoid chrlvAttackRelated7F0292A8 here:
+                         * that helper reads ACT_ATTACK.entityid when a bot is
+                         * still in ACT_GOPOS. The physical ray below remains
+                         * the final obstruction authority.
+                         */
+                        sp21C = 1;
+                    }
+                    else
+#endif
+                    {
+                        sp21C = chrlvAttackRelated7F0292A8(self, &sp240, sp238);
+                    }
+
 
                     sp220.f[0] = cosf(sp24C) * sinf(subroty);
                     sp220.f[1] = sinf(sp24C);
@@ -7227,10 +7462,24 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                     stanResetHits();
                     self_stan = sp238;
 
-                    if (stanTestLineUnobstructed(&self_stan, sp240.f[0], sp240.f[2], sp258.f[0], sp258.f[2], CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_CHRS | CDTYPE_PATHBLOCKER, sp240.f[1], sp240.f[1], sp258.f[1], sp258.f[1]) == 0)
+                    if (stanTestLineUnobstructed(&self_stan, sp240.f[0], sp240.f[2], sp258.f[0], sp258.f[2], CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_CHRS | CDTYPE_PATHBLOCKER | botextracdtypes, sp240.f[1], sp240.f[1], sp258.f[1], sp258.f[1]) == 0)
                     {
                         chrlvStanLineDirIntersection(&sp240, &sp220, &sp258);
                         sp254 = self_stan;
+#ifdef GE_MODDED_CHEATS
+                        /* Preserve the actual collision endpoint/prop before the
+                         * retail tracer/spark path backs sp258 away by 26 units. */
+                        enemyhitprop = stanSavedColl_posData;
+                        enemyhitend = sp258;
+
+                        /* Use Bond's finite-segment all-room BG resolver.  A visible
+                         * wall triangle may belong to an adjacent room at a portal. */
+                        if (g_ModEnemyBulletHolesEnabled && enemyhitprop == NULL)
+                        {
+                            enemybghitvalid = chrpropFindNearestBgHitOnSegment(
+                                &sp240, &enemyhitend, &enemybghit, &enemybgroom);
+                        }
+#endif
                         sp258.f[0] -= 26.0f * sp220.f[0];
                         sp258.f[1] -= 26.0f * sp220.f[1];
                         sp258.f[2] -= 26.0f * sp220.f[2];
@@ -7270,7 +7519,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                     }
                     else
 #endif
-                    if (prop_selfchr->act_attack.attack_item == ITEM_ROCKETLAUNCH)
+                    if (attack_item == ITEM_ROCKETLAUNCH)
                     {
                         if (((dx * dx) + (dy * dy) + (dz * dz)) > 160000.0f)
                         {
@@ -7324,7 +7573,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                             sp27C = 0;
                         }
                     }
-                    else if (prop_selfchr->act_attack.attack_item == ITEM_GRENADELAUNCH)
+                    else if (attack_item == ITEM_GRENADELAUNCH)
                     {
                         if (((dx * dx) + (dy * dy) + (dz * dz)) > 160000.0f)
                         {
@@ -7368,7 +7617,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
 
                             if (((dx * dx) + (dy * dy) + (dz * dz)) <= sp20C)
                             {
-                                chrlvUpdateShotbondsum(self, &sp234, &sp230, prop_selfchr->act_attack.attack_item);
+                                chrlvUpdateShotbondsum(self, &sp234, &sp230, attack_item);
                                 sp22C = sp230 == 0;
 
                                 if ((sp234 != 0) && ((self->actiontype == ACT_ATTACK) || (self->actiontype == ACT_ATTACKROLL)))
@@ -7391,7 +7640,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                             sp258.f[1] = player_prop->pos.f[1];
                             sp258.f[2] = player_prop->pos.f[2];
                             sp254 = player_prop->stan;
-                            recall_joy2_hits_edit_detail_edit_flag(prop_selfchr->act_attack.attack_item, &player_prop->type, -1);
+                            recall_joy2_hits_edit_detail_edit_flag(attack_item, &player_prop->type, -1);
                         }
                         else
                         {
@@ -7405,43 +7654,138 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                             }
                         }
 
+#ifdef GE_MODDED_CHEATS
+                        /* Enemy Bullet Holes is presentation-only.  Background
+                         * surfaces reproduce Bond's complete ordinary impact
+                         * response; object/door surfaces use an exact model probe
+                         * plus the visual-only front half of objHit().  The AI's
+                         * existing collision/damage decision remains authoritative. */
+                        if (g_ModEnemyBulletHolesEnabled && sp230 == 0)
+                        {
+                            if (enemybghitvalid && enemybgroom > 0
+                                    && enemyhitprop == NULL)
+                            {
+                                struct image_sound *impact_sounds;
+                                s32 impact_index;
+                                s32 material = 0;
+                                coord3d sparkpos = enemybghit.hitpos;
+                                u8 impactrooms[2];
+
+                                if (enemybghit.texturenum < 0)
+                                    impact_sounds = g_HitTypeSounds[0];
+                                else
+                                {
+                                    material = ((u8 *)(&g_Textures[enemybghit.texturenum]))[0] & 0xf;
+                                    impact_sounds = g_HitTypeSounds[material];
+                                }
+
+                                if (attack_item != ITEM_WATCHLASER)
+                                {
+                                    if (impact_sounds->thing2_len > 0)
+                                    {
+                                        impact_index = randomGetNext() % impact_sounds->thing2_len;
+                                        explosionCreateBulletImpact(&enemybghit.hitpos,
+                                            &enemybghit.normal,
+                                            impact_sounds->thing2[impact_index],
+                                            (s16)enemybgroom, 0, -1, 0);
+                                    }
+
+                                    /* This is the same tiny material-dependent
+                                     * surface-chip burst Bond creates.  It is not
+                                     * penetration and does not alter AI damage. */
+                                    if (material != 5 && material != 6)
+                                    {
+                                        impactrooms[0] = (u8)enemybgroom;
+                                        impactrooms[1] = 0xff;
+                                        explosionCreate(0, &enemybghit.hitpos, sp254,
+                                            1, 0, CHRLV_GET_CUR_PLAYERNUM(),
+                                            impactrooms, 0);
+                                    }
+                                }
+
+                                sparkpos.x -= 26.0f * sp220.x;
+                                sparkpos.y -= 26.0f * sp220.y;
+                                sparkpos.z -= 26.0f * sp220.z;
+                                bullet_spark_create(&sparkpos, 1, 26.0f,
+                                    (s16)enemybgroom);
+                            }
+                            else if (enemyhitprop != NULL
+                                    && (enemyhitprop->type == PROP_TYPE_OBJ
+                                        || enemyhitprop->type == PROP_TYPE_WEAPON
+                                        || enemyhitprop->type == PROP_TYPE_DOOR))
+                            {
+                                ShotData visualshot;
+                                BulletHit visualhit;
+
+                                if (chrpropProbeObjectHitOnSegment(enemyhitprop,
+                                        &sp240, &enemyhitend,
+                                        attack_item,
+                                        &visualshot, &visualhit))
+                                {
+                                    objCreateBulletImpactVisual(&visualshot, &visualhit);
+                                    enemyobjvisual = TRUE;
+                                }
+                            }
+                        }
+#endif
+
                         if (sp22C != 0)
                         {
                             if (sp254 != 0)
                             {
+#ifdef GE_MODDED_CHEATS
+                                /* The exact BG hit above already emitted the impact
+                                 * particle in the correct room.  Avoid the older
+                                 * approximate STAN-position spark doubling it. */
+                                if (!(g_ModEnemyBulletHolesEnabled && sp230 == 0
+                                    && ((enemybghitvalid && enemybgroom > 0
+                                         && enemyhitprop == NULL)
+                                        || enemyobjvisual)))
+#endif
                                 bullet_spark_create(&sp258, 1, 26.0f, (s16) sp254->room);
                             }
 
                             if (stanSavedColl_posData != NULL)
                             {
-                                recall_joy2_hits_edit_detail_edit_flag(prop_selfchr->act_attack.attack_item, &stanSavedColl_posData->type, -1);
+                                recall_joy2_hits_edit_detail_edit_flag(attack_item, &stanSavedColl_posData->type, -1);
 
                                 if (stanSavedColl_posData->type == PROP_TYPE_CHR)
                                 {
                                     if ((self->chrflags & CHRFLAG_CAN_SHOOT_CHRS) != 0)
                                     {
-                                        handles_shot_actors(stanSavedColl_posData->chr, 0xF, &sp220, prop_selfchr->act_attack.attack_item, 0);
+#ifdef GE_MODDED_CHEATS
+                                        modMpBotsNotifyBotHit(stanSavedColl_posData->chr, self);
+#endif
+                                        handles_shot_actors(stanSavedColl_posData->chr, 0xF, &sp220, attack_item, 0);
                                     }
                                 }
+#ifdef GE_MODDED_CHEATS
+                                else if (stanSavedColl_posData->type == PROP_TYPE_VIEWER
+                                    && modMpBotsGetSlotForChr(self) >= 0)
+                                {
+                                    modMpBotsDamageViewer(modMpBotsGetSlotForChr(self), stanSavedColl_posData,
+                                        attack_item, &sp220);
+                                }
+#endif
                                 else if ((stanSavedColl_posData->type == PROP_TYPE_OBJ) || (stanSavedColl_posData->type == PROP_TYPE_WEAPON))
                                 {
                                     chrobjMaybeDetonateObjectIfFlags(
                                         stanSavedColl_posData->obj,
-                                        CHRLV_GET_DESTRUCTION_AMOUNT(prop_selfchr->act_attack.attack_item),
+                                        CHRLV_GET_DESTRUCTION_AMOUNT(attack_item),
                                         &sp258,
-                                        prop_selfchr->act_attack.attack_item,
+                                        attack_item,
                                         CHRLV_GET_CUR_PLAYERNUM());
                                 }
                             }
                             else
                             {
-                                recall_joy2_hits_edit_flag(prop_selfchr->act_attack.attack_item, &sp258, -1);
+                                recall_joy2_hits_edit_flag(attack_item, &sp258, -1);
                             }
                         }
 
                         if (sp264 != 0)
                         {
-                            switch (prop_selfchr->act_attack.attack_item)
+                            switch (attack_item)
                             {
                                 case ITEM_WPPK:
                                 case ITEM_WPPKSIL:
@@ -7470,7 +7814,7 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
 
                         if (sp264 != 0)
                         {
-                            CapBeamLengthAndDecideIfRendered(&self->beams[hand], prop_selfchr->act_attack.attack_item, &sp240, &sp258);
+                            CapBeamLengthAndDecideIfRendered(&self->beams[hand], attack_item, &sp240, &sp258);
                         }
                     }
                 }
@@ -8389,6 +8733,13 @@ s32 chrlvApplySpeed(ChrRecord *self, coord3d *arg1, s32 arg2, f32 *speedPtr)
 
     maxSpeed *= self_model->playspeed;
     accel *= self_model->playspeed;
+#ifdef GE_MODDED_CHEATS
+    {
+        f32 botmult = modMpBotsGetMoveMultiplier(self);
+        maxSpeed *= botmult;
+        accel *= botmult;
+    }
+#endif
 
     // void chrobjCallsApplySpeed(f32 *openPosition, f32 maxFrac, f32 *speedPtr, f32 accel, f32 decel, f32 maxSpeed)
     chrobjCallsApplySpeed(

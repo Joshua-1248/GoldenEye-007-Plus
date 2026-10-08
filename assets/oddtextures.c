@@ -754,7 +754,8 @@ sImageTableEntry s_mpstageselimages[] = {
     {IMAGE_MP_COMPLEX, 0x44, 0x2C, 0, G_IM_FMT_I, G_IM_SIZ_8b, G_TX_CLAMP, G_TX_CLAMP, 0},    // level/smpcomplexicon
     {IMAGE_MP_CAVES, 0x44, 0x2C, 0, G_IM_FMT_I, G_IM_SIZ_8b, G_TX_CLAMP, G_TX_CLAMP, 0},      // level/smpcaveicon
     {IMAGE_MP_RANDOM, 0x44, 0x2C, 0, G_IM_FMT_I, G_IM_SIZ_8b, G_TX_CLAMP, G_TX_CLAMP, 0},     // bg/where
-    {IMAGE_MP_CITADEL, 0x44, 0x2C, 0, G_IM_FMT_I, G_IM_SIZ_8b, G_TX_CLAMP, G_TX_CLAMP, 0}     // Zoinkity Citadel portrait, V90 R2 engine-safe 68x44 I8 conversion
+    {IMAGE_MP_CITADEL, 0x44, 0x2C, 0, G_IM_FMT_I, G_IM_SIZ_8b, G_TX_CLAMP, G_TX_CLAMP, 0},    // Zoinkity Citadel portrait
+    {IMAGE_MP_COURTYARD, 0x44, 0x2C, 0, G_IM_FMT_I, G_IM_SIZ_8b, G_TX_CLAMP, G_TX_CLAMP, 0}  // BMW Courtyard portrait recovered from IPS MP_STATUE slot
 };
 
 

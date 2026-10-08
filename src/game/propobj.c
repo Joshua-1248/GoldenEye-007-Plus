@@ -9787,6 +9787,74 @@ void sub_GAME_7F04E9BC(PropRecord* prop, struct ShotData* shotdata)
 /**
  * Address: 7F04EA68
  */
+#ifdef GE_MODDED_CHEATS
+/* Bond-equivalent object/door impact presentation with all gameplay side
+ * effects deliberately removed.  Used by Enemy Bullet Holes only. */
+void objCreateBulletImpactVisual(ShotData *shotdata, BulletHit *hit)
+{
+    ObjectRecord *obj;
+    PropRecord *rootprop;
+    coord3d pos;
+    f32 rayt;
+
+    if (shotdata == NULL || hit == NULL || hit->prop == NULL || hit->prop->obj == NULL)
+        return;
+
+    rootprop = hit->prop;
+    while (rootprop->parent != NULL) rootprop = rootprop->parent;
+    obj = hit->prop->obj;
+
+    if (shotdata->viewDir.z > -0.0001f && shotdata->viewDir.z < 0.0001f)
+        return;
+
+    rayt = (-hit->dist - shotdata->viewOrigin.z) / shotdata->viewDir.z;
+    pos.x = shotdata->gunpos.x + rayt * shotdata->dir.x - 26.0f * shotdata->dir.x;
+    pos.y = shotdata->gunpos.y + rayt * shotdata->dir.y - 26.0f * shotdata->dir.y;
+    pos.z = shotdata->gunpos.z + rayt * shotdata->dir.z - 26.0f * shotdata->dir.z;
+
+    if (rootprop->stan != NULL)
+        bullet_spark_create(&pos, 1, 26.0f, rootprop->stan->room);
+
+    if (shotdata->weapon != ITEM_WATCHLASER)
+    {
+        s8 room_clear_flag = 0;
+
+        if (hit->countsAsPenetration == 0)
+        {
+            s16 impact_type = (randomGetNext() % 3) + 0x11;
+            if (obj->model != NULL && obj->model->obj != NULL
+                    && obj->model->obj->Skeleton == &skeleton_door)
+                room_clear_flag = 1;
+            explosionCreateBulletImpact(&hit->hit.hitpos, &hit->hit.normal,
+                impact_type, 1, hit->prop, hit->room, room_clear_flag);
+        }
+        else
+        {
+            struct image_sound *impact_sounds;
+            s16 texturenum = hit->hit.texturenum;
+
+            if (texturenum < 0) impact_sounds = g_HitTypeSounds[0];
+            else impact_sounds = g_HitTypeSounds[((u8 *)&g_Textures[texturenum])[0] & 0x0f];
+
+            if (obj->model != NULL && obj->model->obj != NULL
+                    && (((obj->model->obj->Skeleton == &skeleton_door)
+                         && (hit->unk44 == obj->model->obj->Switches[3]))
+                        || ((obj->model->obj->Skeleton == &skeleton_cctv)
+                         && (hit->unk44 == obj->model->obj->Switches[1]))))
+                room_clear_flag = 1;
+
+            if (impact_sounds->thing2_len > 0)
+            {
+                s32 thing2_index = randomGetNext() % impact_sounds->thing2_len;
+                explosionCreateBulletImpact(&hit->hit.hitpos, &hit->hit.normal,
+                    impact_sounds->thing2[thing2_index], 1, hit->prop, hit->room,
+                    room_clear_flag);
+            }
+        }
+    }
+}
+#endif
+
 void objHit(ShotData *shotdata, BulletHit *hit)
 {
     ObjectRecord *obj;
@@ -11117,6 +11185,11 @@ TICKOP objTickPlayer(struct PropRecord* prop)
     struct ObjectRecord* obj;
 
     obj = prop->obj;
+
+#ifdef GE_MODDED_CHEATS
+    if (g_ModDisableBodyArmorEnabled && obj->type == PROPDEF_ARMOUR)
+        return TICKOP_NONE;
+#endif
 
     if ((objIsCollectable(obj) != 0) && (obj->type != PROPDEF_HAT))
     {
@@ -14622,6 +14695,9 @@ bool check_if_toxic_gas_activated() //#MATCH
 
 void handle_gas_damage(void)
 {
+#ifdef GE_MODDED_CHEATS
+    s32 r27v_player_was_alive;
+#endif
     if (activate_gas_sound_timer != 0)
     {
         toxic_gas_sound_timer += g_GlobalTimerDelta;
@@ -14651,7 +14727,20 @@ void handle_gas_damage(void)
             }
             if (toxic_gas_sound_timer >= 1800.0f)
             {
+#ifdef GE_MODDED_CHEATS
+                r27v_player_was_alive = g_CurrentPlayer->bonddead == FALSE;
+#endif
                 record_damage_kills(0.125f, 0.0f, 0.0f, -1, 0);
+#ifdef GE_MODDED_CHEATS
+                if (g_ModAdditionalPlayerDeathAnimationsEnabled
+                    && bossGetStageNum() == LEVELID_FACILITY
+                    && r27v_player_was_alive
+                    && g_CurrentPlayer->bonddead != FALSE)
+                {
+                    /* 4 is the one-shot Death Neck selector. */
+                    g_CurrentPlayer->startnewbonddie = 4;
+                }
+#endif
             }
         }
 

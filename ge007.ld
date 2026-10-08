@@ -186,7 +186,11 @@ SECTIONS
     * is NOLOAD-style reserved RDRAM, intentionally outside retail's 4 MiB
     * data/BSS map. */
    _gameFastBssStart = ALIGN(_gameSegmentEnd, 16);
-   _gameFastBssEnd = _gameFastBssStart + 0x2400;
+   _gameFastBgCacheEnd = _gameFastBssStart + 0x2200;
+   _gameFastPropRoomCacheStart = _gameFastBgCacheEnd;
+   _gameFastPropRoomCacheEnd = _gameFastBssStart + 0x2400;
+   _gameFastBssEnd = _gameFastPropRoomCacheEnd;
+   ASSERT((_gameFastPropRoomCacheEnd - _gameFastPropRoomCacheStart) == 0x200, "prop render-room cache reservation drifted")
 
    /* R22: the retail stage texture pool has a deliberate low-memory fallback
     * which points materials at the start of the pool (garbage texels) rather
@@ -215,6 +219,54 @@ SECTIONS
    ASSERT((_thirdPersonBodyCacheEnd - _thirdPersonBodyCacheStart) == 0x2A000, "Third Person body cache reservation drifted")
    ASSERT(_thirdPersonBodyCacheEnd <= 0x80800000, "Third Person body cache exceeds 8 MiB RDRAM")
    ASSERT(_stageTexOverflowEnd <= _thirdPersonBodyCacheStart, "Third Person body cache overlaps stage texture overflow")
+
+   /*
+    * R27I: immutable animation-frame cache.
+    *
+    * Keep this separate from the R27G2 0x2400 render/visibility scratch and
+    * from all retail lower-4-MiB state.  64 x 80-byte data slots plus
+    * metadata/replacement state fit in 0x1700 bytes.
+    */
+   _animFrameCacheStart = ALIGN(_thirdPersonBodyCacheEnd, 16);
+   _animFrameCacheEnd = _animFrameCacheStart + 0x1700;
+   ASSERT((_animFrameCacheEnd - _animFrameCacheStart) == 0x1700, "animation frame cache reservation drifted")
+   ASSERT(_thirdPersonBodyCacheEnd <= _animFrameCacheStart, "animation frame cache overlaps Third Person body cache")
+   ASSERT(_animFrameCacheEnd <= 0x80800000, "animation frame cache exceeds 8 MiB RDRAM")
+
+   /*
+    * R27L: exact model sin/cos memoization cache.
+    *
+    * 256 entries x 16 bytes + 128 replacement bytes = 0x1080;
+    * reserve 0x1100 for alignment/headroom.
+    */
+   _modelTrigCacheStart = ALIGN(_animFrameCacheEnd, 16);
+   _modelTrigCacheEnd = _modelTrigCacheStart + 0x1100;
+   ASSERT((_modelTrigCacheEnd - _modelTrigCacheStart) == 0x1100, "model trig cache reservation drifted")
+   ASSERT(_animFrameCacheEnd <= _modelTrigCacheStart, "model trig cache overlaps animation frame cache")
+   ASSERT(_modelTrigCacheEnd <= 0x80800000, "model trig cache exceeds 8 MiB RDRAM")
+
+   /*
+    * R27O R3: expanded explosion storage must not consume MEMPOOL_STAGE.
+    * struct Explosion is 0x3E0 bytes in the N64 ABI; 64 entries = 0xF800.
+    */
+   _unlimitedExplosionPoolStart = ALIGN(_modelTrigCacheEnd, 16);
+   _unlimitedExplosionPoolEnd = _unlimitedExplosionPoolStart + 0xF800;
+   ASSERT((_unlimitedExplosionPoolEnd - _unlimitedExplosionPoolStart) == 0xF800, "Unlimited Explosions pool reservation drifted")
+   ASSERT(_modelTrigCacheEnd <= _unlimitedExplosionPoolStart, "Unlimited Explosions pool overlaps model trig cache")
+   ASSERT(_unlimitedExplosionPoolEnd <= 0x80800000, "Unlimited Explosions pool exceeds 8 MiB RDRAM")
+
+   /* R30 P5: Simulant body/head model-file cache.  Bot characters are selected
+    * freely and therefore cannot rely on the retail stage having preloaded the
+    * corresponding chr resources.  Keep those late loads out of MEMPOOL_STAGE. */
+   _modMpBotModelCacheStart = ALIGN(_unlimitedExplosionPoolEnd, 16);
+   _modMpBotTextureCacheEnd = 0x80800000;
+   _modMpBotTextureCacheStart = _modMpBotTextureCacheEnd - 0x10000;
+   _modMpBotModelCacheEnd = _modMpBotTextureCacheStart;
+   ASSERT((_modMpBotTextureCacheEnd - _modMpBotTextureCacheStart) == 0x10000, "Simulant texture cache reservation drifted")
+   ASSERT((_modMpBotModelCacheEnd - _modMpBotModelCacheStart) >= 0x5E000, "Simulant model cache too small")
+   ASSERT(_unlimitedExplosionPoolEnd <= _modMpBotModelCacheStart, "Simulant model cache overlaps explosion pool")
+   ASSERT(_modMpBotModelCacheEnd <= _modMpBotTextureCacheStart, "Simulant model cache overlaps texture cache")
+   ASSERT(_modMpBotTextureCacheEnd <= 0x80800000, "Simulant texture cache exceeds 8 MiB RDRAM")
    ASSERT(_gameSegmentStart == 0x80600000, "physical game segment start drifted")
    ASSERT(_gameSegmentRomStart == 0x00034B30, "physical game ROM start drifted from retail 0x34B30")
    ASSERT(_gameSegmentStart >= 0x80400000, "physical game segment must live in Expansion Pak RDRAM")

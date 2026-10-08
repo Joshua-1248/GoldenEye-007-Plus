@@ -474,6 +474,17 @@ void bondviewLoadSetupIntroSection(void)
     g_CurrentPlayer->field_3B8.f[1] = (g_CurrentPlayer->field_488.pos.f[1] / FIELD_3B8_FACTOR);
     g_CurrentPlayer->field_3B8.f[2] = (g_CurrentPlayer->field_488.pos.f[2] / FIELD_3B8_FACTOR);
 
+#ifdef GE_MODDED_CHEATS
+    /* R27Z/R29A: one-human Multiplayer is still Multiplayer. */
+    if (gamemode == GAMEMODE_MULTI)
+    {
+        bondviewSetCameraMode(CAMERAMODE_MP);
+    }
+    else
+    {
+        bondviewSetCameraMode(CAMERAMODE_INTRO);
+    }
+#else
     if (getPlayerCount() == 1)
     {
         bondviewSetCameraMode(CAMERAMODE_INTRO);
@@ -482,6 +493,7 @@ void bondviewLoadSetupIntroSection(void)
     {
         bondviewSetCameraMode(CAMERAMODE_MP);
     }
+#endif
 
     g_bondviewBondDeathAnimationsCount = 0;
     while (g_bondviewBondDeathAnimations[g_bondviewBondDeathAnimationsCount] != 0)
@@ -493,4 +505,8 @@ void bondviewLoadSetupIntroSection(void)
     g_CurrentPlayer->redbloodfinished = FALSE;
     g_CurrentPlayer->deathanimfinished = FALSE;
     camera_mode = CAMERAMODE_NONE;
+
+#ifdef GE_MODDED_CHEATS
+    levelModifiersOnStartPadsLoaded();
+#endif
 }

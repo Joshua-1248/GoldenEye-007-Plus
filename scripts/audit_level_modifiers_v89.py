@@ -24,24 +24,37 @@ def names_in(array_name):
 
 ck('Single-Player list exactly matches requested 20-level order',
    names_in('g_LevelModifierSpNames') == ['Dam','Facility','Runway','Surface 1','Bunker 1','Silo','Frigate','Surface 2','Bunker 2','Statue','Archives','Streets','Depot','Train','Jungle','Control','Caverns','Cradle','Aztec','Egyptian'])
-ck('Multiplayer list exactly matches requested six maps',
-   names_in('g_LevelModifierMpNames') == ['Temple','Complex','Caves','Library','Basement','Stack'])
+ck('Multiplayer list preserves original six and appends requested MP stages',
+   names_in('g_LevelModifierMpNames') == ['Temple','Complex','Caves','Library','Basement','Stack','Facility (MP)','Bunker (MP)','Statue (MP)','Archives (MP)','Caverns (MP)','Cradle (MP)','Egyptian (MP)'])
 ck('Miscellaneous list exactly matches Cuba/Citadel order',
    names_in('g_LevelModifierMiscNames') == ['Cuba','Citadel'])
 ck('only Silo is implemented initially',
    'category == LEVELMOD_CATEGORY_SINGLE_PLAYER && index == 5' in LM)
-ck('unimplemented frontend levels are dimmed', '0x606060C0' in F and 'levelModifiersLevelImplemented' in F)
-ck('frontend entry is directly below Map Maker', '"Map Maker"' in F and '"Level Modifiers"' in F and 'y = 103;' in F)
+ck('unimplemented frontend levels are dimmed', ('0x606060C0' in F or '0x60' in F) and 'levelModifiersLevelImplemented' in F)
+ck('frontend entry is directly below Map Maker', 'frontModGetOptionLabel(63)' in F and 'frontModGetOptionLabel(64)' in F and 'y = 103;' in F)
 ck('frontend category browser and level browser menu IDs are appended',
    all(x in BC for x in ['MENU_LEVEL_MODIFIERS,','MENU_LEVEL_MODIFIERS_LEVELS,','MENU_LEVEL_MODIFIERS_DETAIL,']))
-ck('SP Watch places Level Modifiers before In-Game Cheats',
-   'else if (row == 22) { label = "Level Modifiers"; value = ">"; }' in O and
-   'else { label = "In-Game Cheats"; value = ">"; }' in O)
+# R27C keeps Level Modifiers as the first terminal Special Options submenu,
+# followed by Patches, Third-Person Options and finally In-Game Cheats.
+ck('SP Watch places Level Modifiers before Patches/TP options and In-Game Cheats',
+   'else if (row == 10)' in O and 'MODWATCH_MODE_LEVEL_DETAIL' in O and
+   'else if (row == 11)' in O and 'MODWATCH_MODE_PATCHES' in O and
+   'else if (row == 12)' in O and 'MODWATCH_MODE_TP_OPTIONS' in O and
+   'MODWATCH_MODE_CHEATS' in O)
 ck('MP Watch hub places Level Modifiers before In-Game Cheats',
-   '{"Options","Special Options","Level Modifiers","In-Game Cheats"}' in MP)
+   'i == 2 ? frontModGetOptionLabel(64) : frontModGetOptionLabel(65)' in MP)
 ck('in-game Silo option is ACTIVATE/ACTIVE, not a reversible toggle',
-   '"ACTIVE" : "ACTIVATE"' in O and '"ACTIVE":"ACTIVATE"' in MP and
-   'levelModifiersActivateSiloBetaVent' in O and 'levelModifiersActivateSiloBetaVent' in MP)
+   (
+       ('"ACTIVE" : "ACTIVATE"' in O and '"ACTIVE":"ACTIVATE"' in MP and
+        'levelModifiersActivateSiloBetaVent' in O and
+        'levelModifiersActivateSiloBetaVent' in MP)
+       or
+       ('levelModifiersGetCurrentStageModifierValue' in O and
+        'levelModifiersGetCurrentStageModifierValue' in MP and
+        'levelModifiersToggleCurrentStageModifier' in O and
+        'levelModifiersToggleCurrentStageModifier' in MP and
+        '"ACTIVE"' in LM and '"ACTIVATE"' in LM)
+   ))
 ck('modifier policy framework supports both latched and reversible future modifiers',
    'LEVELMOD_POLICY_LATCHED' in LH and 'LEVELMOD_POLICY_REVERSIBLE' in LH)
 ck('Silo currently declares latched policy', 'return LEVELMOD_POLICY_LATCHED;' in LM)

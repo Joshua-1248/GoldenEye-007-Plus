@@ -1,5 +1,8 @@
 #include <ultra64.h>
+#include <math.h>
 #include <memp.h>
+#include <music.h>
+#include <snd.h>
 #include "game/mp_weapon.h"
 #include "game/front.h"
 #include "game/bondview_r.h"
@@ -14,6 +17,7 @@
 #include "initpathtablesomething.h"
 #include "limits.h"
 #include "loadobjectmodel.h"
+#include "lv.h"
 #include "language.h"
 #include "math_atan2f.h"
 #include "matrixmath.h"
@@ -22,12 +26,15 @@
 #include "objective.h"
 #include "objective_status.h"
 #include "objecthandler.h"
+#include "options.h"
 #include "player.h"
 #include "prop.h"
 #include "stan.h"
 #include "model.h"
 #ifdef GE_MODDED_CHEATS
 #include "mirroredlevels.h"
+#include "levelmodifiers.h"
+#include "mpbots.h"
 #endif
 #include "token.h"
 #ifdef GE_MAP_MAKER
@@ -45,6 +52,8 @@ extern ItemModelFileRecord PitemZ_entries[341];
 // forward declarations
 
 s32 load_proptype(PROPDEF_TYPE type);
+s32 getMaxNumRooms(void);
+s32 chrpropRayIntersectsRoomBbox(s32 room, coord3d *start, coord3d *dir);
 void sub_GAME_7F001BD4(struct BoundPadRecord *pad, struct coord3d *arg1);
 void domakedefaultobj(s32 arg0, ObjectRecord *arg1, s32 cmdindex);
 void weaponAssignToHome(s32 arg0, WeaponObjRecord* weapon, s32 cmdindex);
@@ -60,6 +69,1848 @@ void setupDoor(s32 arg0, struct DoorRecord *door, s32 arg2);
 
 
 #ifdef GE_MODDED_CHEATS
+
+/* R27S_R3_COMPACT_PATCH_TABLES_SAFE: exact R2 edits, compact run encoding. */
+extern s32 gptr_stan;
+static void lmPatchByteRun(u8 *b,u32 o,s32 n,u32 d,u8 a,u8 z,s32 on){u8 v=on?z:a;while(n--){b[o]=v;o+=d;}}
+static void lmPatchHalfRun(u8 *b,u32 o,s32 n,u32 d,u16 a,u16 z,s32 on){u16 v=on?z:a;while(n--){b[o]=(u8)(v>>8);b[o+1]=(u8)v;o+=d;}}
+s32 propLevelModifierApplyBetaSetupPatches(s32 levelid,s32 facilityDoors,s32 facilityTanks,s32 surfaceDoors,s32 bunkerDoors,s32 frigateKeepClear,s32 frigateRemoved)
+{
+    u8 *base=(u8 *)g_CurrentSetup.propDefs; s32 i;
+    if(base==NULL)return FALSE;
+    /* R27S_R4_NO_TABLE_RODATA: same exact writes, no static const lookup tables. */
+    if(levelid==LEVELID_FACILITY){
+        lmPatchByteRun(base,0x0149,9,0x100,0x9f,0x8f,facilityDoors);
+        lmPatchByteRun(base,0x0a49,16,0x100,0x9b,0x9a,facilityDoors);
+        for(i=0;i<4;i++){
+            base[0x3873+i*0x120]=facilityTanks?(u8)(0x10+i*2):(u8)(0x11+i*2);
+            base[0x38c8+i*0x120]=facilityTanks?0xa3:0xc3;
+            base[0x3839+i*0x120]=facilityTanks?0xf0:0x53;
+        }
+        for(i=0;i<8;i++){
+            base[0x889d+i*0x80]=facilityTanks?0x75:0x60;
+            base[0x889f+i*0x80]=facilityTanks?(u8)(0x11+(i&3)*2):(u8)(0x27+i);
+        }
+        for(i=0;i<4;i++)base[0x8ad4+i*0x80]=facilityTanks?0xa3:0xc3;
+        return TRUE;
+    }
+    if(levelid==LEVELID_SURFACE){lmPatchHalfRun(base,0x5148,8,0x100,0x00a6,0x00a7,surfaceDoors);return TRUE;}
+    if(levelid==LEVELID_BUNKER1){lmPatchHalfRun(base,0x35a8,8,0x100,0x008a,0x0089,bunkerDoors);lmPatchByteRun(base,0x3da8,2,0x100,0x00,0x87,bunkerDoors);return TRUE;}
+    if(levelid==LEVELID_FRIGATE){
+        lmPatchHalfRun(base,0x4fd8,2,0x200,0x0098,0x0099,frigateKeepClear);
+        if(g_CurrentSetup.pads!=NULL&&gptr_stan!=0){
+            g_CurrentSetup.pads[70].stan=(void *)((u8 *)gptr_stan+(frigateRemoved?0xdd64:0xbc94));
+            g_CurrentSetup.pads[71].stan=(void *)((u8 *)gptr_stan+(frigateRemoved?0xda04:0xbb54));
+            g_CurrentSetup.pads[74].stan=(void *)((u8 *)gptr_stan+(frigateRemoved?0xd774:0xb4ac));
+            g_CurrentSetup.pads[85].stan=(void *)((u8 *)gptr_stan+(frigateRemoved?0xd3b4:0x90a4));
+            g_CurrentSetup.pads[86].stan=(void *)((u8 *)gptr_stan+(frigateRemoved?0xd594:0xadec));
+            g_CurrentSetup.pads[89].stan=(void *)((u8 *)gptr_stan+(frigateRemoved?0xb6ac:0xa2dc));
+        }
+        return TRUE;
+    }
+    return TRUE;
+}
+
+
+/* R27Q_DAM_DOCK_RESTORATION
+ *
+ * The old GameShark speedboat restoration rewrote an already-live Dam prop:
+ * model 0x003e / pad 359 -> PROP_SPEEDBOAT (0x0122) / pad 111 (0x006f),
+ * then patched pad 111's NULL STAN pointer and manually corrected runtime Y.
+ *
+ * Do not reproduce those absolute-address writes.  Capture the pristine setup
+ * donor before proplvreset2 mutates it, repair the preserved unused pad through
+ * an existing symbolic Dam pad/STAN, then instantiate an additional object
+ * through the normal prop path.  The original dock prop is never touched.
+ *
+ * The historical dock-door restoration similarly moved two existing doors
+ * from pads 65/68 to 66/69.  Here we clone the two pristine DoorRecords and
+ * instantiate two additional doors, preserving the retail pair as well.
+ */
+static ObjectRecord g_LevelModifierDamBoatTemplate;
+static ObjectRecord g_LevelModifierDamBoatRuntime;
+/* R27R_DRIVABLE_SPEEDBOAT */
+static ObjectRecord g_LevelModifierDamDrivableBoatRuntime;
+static s32 g_LevelModifierDamDrivableBoatDriver = -1;
+static f32 g_LevelModifierDamDrivableBoatHeading = M_PI_F;
+static f32 g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+static f32 g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+static f32 g_LevelModifierDamDrivableBoatSteering = 0.0f;
+static ALSoundState *g_LevelModifierDamDrivableBoatSfx[2] = {NULL, NULL};
+static f32 g_LevelModifierDamDrivableBoatEnterBlend = 1.0f;
+static f32 g_LevelModifierDamDrivableBoatEnterStartYaw = 0.0f;
+static coord3d g_LevelModifierDamDrivableBoatEnterStartPos;
+static f32 g_LevelModifierDamDrivableBoatSteeringApplied = 0.0f;
+static s32 g_LevelModifierDamDrivableBoatUseWaterEnvelope = FALSE;
+
+#define DAM_DRIVABLE_BOAT_START_X        448.0f
+#define DAM_DRIVABLE_BOAT_START_Y       -768.0f
+#define DAM_DRIVABLE_BOAT_START_Z      -7200.0f
+#define DAM_DRIVABLE_BOAT_START_HEADING  M_PI_F
+#define DAM_DRIVABLE_BOAT_MAX_SPEED       25.0f
+#define DAM_DRIVABLE_BOAT_ACCEL            0.40f
+#define DAM_DRIVABLE_BOAT_DECEL            0.78f
+#define DAM_DRIVABLE_BOAT_TURN_DEG          1.65f
+#define DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET  -12.0f
+#define DAM_DRIVABLE_BOAT_ENTRY_RADIUS    360.0f
+#define DAM_DRIVABLE_BOAT_DECK_HALF_X      105.0f
+#define DAM_DRIVABLE_BOAT_DECK_HALF_Z     210.0f
+
+#define DAM_DRIVABLE_BOAT_COLLISION_Y_OFFSET 48.0f
+#define DAM_DRIVABLE_BOAT_ENTRY_Y_RANGE      220.0f
+#define DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET      M_PI_F
+#define DAM_DRIVABLE_BOAT_DECK_BOARD_MARGIN       95.0f
+#define DAM_DRIVABLE_BOAT_LAND_PROBE_RADIUS       55.0f
+#define DAM_DRIVABLE_BOAT_LAND_PROBE_FORWARD      95.0f
+#define DAM_DRIVABLE_BOAT_LAND_STEP_UP           450.0f
+#define DAM_DRIVABLE_BOAT_LAND_STEP_DOWN         350.0f
+#define DAM_DRIVABLE_BOAT_ENTER_TICKS             45.0f
+/* R27R_R5_SMOOTH_BOAT_WALK_VOLUME */
+#define DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET  8.0f
+#define DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET     55.0f
+#define DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z   115.0f
+#define DAM_DRIVABLE_BOAT_DECK_RAISE_FULL_Z    178.0f
+#define DAM_DRIVABLE_BOAT_DECK_TAPER_START_Z   135.0f
+#define DAM_DRIVABLE_BOAT_DECK_TIP_HALF_X       72.0f
+#define DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN      84.0f
+/* R27R_R11_RECTANGULAR_HULL_LONGER_COVERAGE */
+#define DAM_DRIVABLE_BOAT_HULL_HALF_X            88.0f
+#define DAM_DRIVABLE_BOAT_HULL_HALF_Z            220.0f
+/* R27R_R11_R1_RESTORE_BOAT_MOVEMENT */
+/* R27R_R7_RECTANGULAR_STAN_COVERAGE_Y856 */
+#define DAM_DRIVABLE_BOAT_TRANSITION_HALF_X     (DAM_DRIVABLE_BOAT_DECK_HALF_X + DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN)
+#define DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z     (DAM_DRIVABLE_BOAT_DECK_HALF_Z + DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN)
+/* R27R_R9_CLIP_BRIDGE_SMOOTH_ENTRY_STEERING */
+#define DAM_DRIVABLE_BOAT_CLIP_RELAX_EXTRA      18.0f
+#define DAM_DRIVABLE_BOAT_STEER_RESPONSE          0.060f
+/* R27R_R16_STATIONARY_TURN_SLOWER_ACCEL_LOWER_DRIVER */
+#define DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE  0.10f
+/* R27R_R10_LOCK_BOAT_TO_DAM_WATER_ROOM23 */
+/* R27R_R12_DISABLE_ROOM23_MOVEMENT_GATE */
+#define DAM_DRIVABLE_BOAT_WATER_ROOM              0x23
+#define DAM_DRIVABLE_BOAT_ROOM_PROBE_Y_OFFSET   4096.0f
+
+
+
+/* R27R_R6_STAN_GATED_TRANSITION_VOLUME */
+#define DAM_DRIVABLE_BOAT_STAN_TOUCH_RADIUS      96.0f
+#define DAM_DRIVABLE_BOAT_STAN_SAMPLE_RADIUS     14.0f
+#define DAM_DRIVABLE_BOAT_STAN_SAMPLE_STEP       24.0f
+#define DAM_DRIVABLE_BOAT_STAN_SAMPLE_RINGS       4
+
+#define DAM_DRIVABLE_BOAT_DECK_LAND_RADIUS      16.0f
+#define DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y       -676.0f
+
+static DoorRecord g_LevelModifierDamDoorTemplate[2];
+static DoorRecord g_LevelModifierDamDoorRuntime[2];
+static s32 g_LevelModifierDamBoatCommandIndex = -1;
+static s32 g_LevelModifierDamDoorCommandIndex[2] = {-1, -1};
+static s32 g_LevelModifierDamRestorePrepared = FALSE;
+
+static f32 propLevelModifierDamDrivableBoatAbs(f32 v)
+{
+    return v < 0.0f ? -v : v;
+}
+
+/* R27R_R21_R3_RESTORE_ABS_HELPER_LINK_FIX */
+void propLevelModifierDamDrivableBoatStopAudio(void)
+{
+    s32 i;
+
+    for (i = 0; i < 2; i++)
+    {
+        if (g_LevelModifierDamDrivableBoatSfx[i] != NULL)
+        {
+            sndCreatePostEvent(g_LevelModifierDamDrivableBoatSfx[i], 8, 0);
+
+            if (sndGetPlayingState(g_LevelModifierDamDrivableBoatSfx[i]) != AL_STOPPED)
+            {
+                sndDeactivate(g_LevelModifierDamDrivableBoatSfx[i]);
+            }
+
+            g_LevelModifierDamDrivableBoatSfx[i] = NULL;
+        }
+    }
+}
+
+static void propLevelModifierDamDrivableBoatUpdateAudio(void)
+{
+    f32 utilization;
+    s32 movingVolume;
+
+    if (g_LevelModifierDamDrivableBoatDriver < 0)
+    {
+        propLevelModifierDamDrivableBoatStopAudio();
+        return;
+    }
+
+    /* Temporary R27R audio: mirror the Tank sound arrangement until the
+     * existing trainidl/speedbt bank entries are identified. */
+    if (g_LevelModifierDamDrivableBoatSfx[0] == NULL
+        || sndGetPlayingState(g_LevelModifierDamDrivableBoatSfx[0]) == AL_STOPPED)
+    {
+        g_LevelModifierDamDrivableBoatSfx[0] = NULL;
+
+        if (lvlGetControlsLockedFlag() == 0)
+        {
+            sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr,
+                TRUCK_RUN_SFX, &g_LevelModifierDamDrivableBoatSfx[0]);
+        }
+    }
+
+    utilization = propLevelModifierDamDrivableBoatAbs(
+        g_LevelModifierDamDrivableBoatSpeed) / DAM_DRIVABLE_BOAT_MAX_SPEED;
+
+    if (utilization > 1.0f)
+        utilization = 1.0f;
+
+    if (g_LevelModifierDamDrivableBoatSfx[0] != NULL)
+    {
+        s32 idleVolume = (s32)(25000.0f + utilization * 7767.0f);
+        if (idleVolume > 0x7fff)
+            idleVolume = 0x7fff;
+        sndCreatePostEvent(g_LevelModifierDamDrivableBoatSfx[0], 8, idleVolume);
+    }
+
+    if (utilization > 0.015f)
+    {
+        if (g_LevelModifierDamDrivableBoatSfx[1] == NULL
+            || sndGetPlayingState(g_LevelModifierDamDrivableBoatSfx[1]) == AL_STOPPED)
+        {
+            g_LevelModifierDamDrivableBoatSfx[1] = NULL;
+
+            if (lvlGetControlsLockedFlag() == 0)
+            {
+                sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr,
+                    TANK_SFX, &g_LevelModifierDamDrivableBoatSfx[1]);
+            }
+        }
+
+        movingVolume = (s32)(12000.0f + utilization * 20767.0f);
+        if (movingVolume > 0x7fff)
+            movingVolume = 0x7fff;
+
+        if (g_LevelModifierDamDrivableBoatSfx[1] != NULL)
+            sndCreatePostEvent(g_LevelModifierDamDrivableBoatSfx[1], 8, movingVolume);
+    }
+    else if (g_LevelModifierDamDrivableBoatSfx[1] != NULL)
+    {
+        if (sndGetPlayingState(g_LevelModifierDamDrivableBoatSfx[1]) != AL_STOPPED)
+            sndDeactivate(g_LevelModifierDamDrivableBoatSfx[1]);
+        g_LevelModifierDamDrivableBoatSfx[1] = NULL;
+    }
+}
+
+static s32 propLevelModifierDamDrivableBoatBgSegmentBlocked(
+    const coord3d *from, const coord3d *to)
+{
+    coord3d dir;
+    coord3d scaledstart;
+    coord3d worldhit;
+    HitThing hit;
+    f32 bgscale;
+    f32 invscale;
+    f32 len2;
+    f32 frac;
+    s32 room;
+
+    dir.x = to->x - from->x;
+    dir.y = to->y - from->y;
+    dir.z = to->z - from->z;
+
+    len2 = dir.x * dir.x + dir.y * dir.y + dir.z * dir.z;
+
+    if (len2 <= 0.000001f)
+        return FALSE;
+
+    bgscale = get_room_data_float1() * bgGetLevelVisibilityScale();
+    invscale = get_room_data_float2();
+
+    scaledstart.x = from->x * bgscale;
+    scaledstart.y = from->y * bgscale;
+    scaledstart.z = from->z * bgscale;
+
+    for (room = 1; room < getMaxNumRooms(); room++)
+    {
+        if (chrpropRayIntersectsRoomBbox(room, &scaledstart, &dir)
+            && bgTestBulletHitBackground((coord3d *)from, (coord3d *)to,
+                room, &hit))
+        {
+            worldhit.x = hit.hitpos.x * invscale;
+            worldhit.y = hit.hitpos.y * invscale;
+            worldhit.z = hit.hitpos.z * invscale;
+
+            frac = ((worldhit.x - from->x) * dir.x
+                  + (worldhit.y - from->y) * dir.y
+                  + (worldhit.z - from->z) * dir.z) / len2;
+
+            if (frac >= 0.035f && frac <= 1.0005f)
+                return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static s32 propLevelModifierDamDrivableBoatWaterSurfacePresent(
+    const coord3d *center)
+{
+    coord3d from;
+    coord3d to;
+
+    from = *center;
+    to = *center;
+
+    from.y = DAM_DRIVABLE_BOAT_START_Y + 36.0f;
+    to.y = DAM_DRIVABLE_BOAT_START_Y - 36.0f;
+
+    return propLevelModifierDamDrivableBoatBgSegmentBlocked(&from, &to);
+}
+
+static s32 propLevelModifierDamDrivableBoatLandUnderHull(
+    const coord3d *center)
+{
+    coord3d probe;
+    StandTile *tile;
+    f32 groundY;
+
+    probe = *center;
+    probe.y = DAM_DRIVABLE_BOAT_START_Y + 500.0f;
+
+    tile = stanFindGroundAtCyl(
+        &probe, DAM_DRIVABLE_BOAT_LAND_PROBE_RADIUS, NULL, &groundY);
+
+    if (tile == NULL)
+        return FALSE;
+
+    return groundY > DAM_DRIVABLE_BOAT_START_Y + 30.0f;
+}
+
+static void propLevelModifierDamDrivableBoatHullPoint(
+    coord3d *out, const coord3d *center, f32 heading,
+    f32 localx, f32 localz, f32 yoffset)
+{
+    Mtxf rot;
+    coord3d local;
+
+    local.x = localx;
+    local.y = 0.0f;
+    local.z = localz;
+
+    matrix_4x4_set_rotation_around_y(
+        M_TAU_F - heading + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET, &rot);
+    mtx4RotateVecInPlace(&rot, &local);
+
+    out->x = center->x + local.x;
+    out->y = DAM_DRIVABLE_BOAT_START_Y + yoffset;
+    out->z = center->z + local.z;
+}
+
+static s32 propLevelModifierDamDrivableBoatInWaterRoom(
+    const coord3d *center)
+{
+    coord3d probe;
+    StandTile *tile;
+    f32 groundY;
+    u8 rooms[2];
+
+    if (center == NULL)
+        return FALSE;
+
+    rooms[0] = DAM_DRIVABLE_BOAT_WATER_ROOM;
+    rooms[1] = 0xff;
+
+    probe = *center;
+    probe.y = DAM_DRIVABLE_BOAT_START_Y + 512.0f;
+
+    /*
+     * Query the authored lake room directly. An unfiltered high-Y lookup can
+     * pick the dock or mountain STAN above the water and trap the boat at its
+     * spawn even though Room 0x23 water is valid underneath.
+     */
+    tile = stanFindGroundAtCyl(&probe, 8.0f, rooms, &groundY);
+
+    if (tile == NULL)
+        return FALSE;
+
+    return tile->room == DAM_DRIVABLE_BOAT_WATER_ROOM;
+}
+
+static s32 propLevelModifierDamDrivableBoatHullBlocked(
+    const coord3d *oldpos, f32 oldheading,
+    const coord3d *newpos, f32 newheading)
+{
+    ObjectRecord *obj = &g_LevelModifierDamDrivableBoatRuntime;
+    f32 xmin;
+    f32 xmax;
+    f32 zmin;
+    f32 zmax;
+    f32 midx;
+    f32 midz;
+    f32 lx[9];
+    f32 lz[9];
+    f32 yoffsets[3];
+    coord3d from;
+    coord3d to;
+    s32 i;
+    s32 h;
+
+    if (obj->prop == NULL || obj->model == NULL)
+        return TRUE;
+
+    if (g_LevelModifierDamDrivableBoatUseWaterEnvelope
+        && !propLevelModifierDamDrivableBoatWaterSurfacePresent(newpos))
+    {
+        return TRUE;
+    }
+
+    if (propLevelModifierDamDrivableBoatLandUnderHull(newpos))
+        return TRUE;
+
+    /*
+     * R11: use a fixed boat-local rectangle instead of deriving the hard
+     * collision footprint from the speedboat model bbox. This makes the
+     * vehicle's driving collision predictable and symmetric.
+     */
+    xmin = -DAM_DRIVABLE_BOAT_HULL_HALF_X;
+    xmax =  DAM_DRIVABLE_BOAT_HULL_HALF_X;
+    zmin = -DAM_DRIVABLE_BOAT_HULL_HALF_Z;
+    zmax =  DAM_DRIVABLE_BOAT_HULL_HALF_Z;
+    midx = 0.0f;
+    midz = 0.0f;
+
+    /* Center, four corners, and four edge midpoints. */
+    lx[0] = midx; lz[0] = midz;
+    lx[1] = xmin; lz[1] = zmin;
+    lx[2] = xmax; lz[2] = zmin;
+    lx[3] = xmax; lz[3] = zmax;
+    lx[4] = xmin; lz[4] = zmax;
+    lx[5] = midx; lz[5] = zmin;
+    lx[6] = xmax; lz[6] = midz;
+    lx[7] = midx; lz[7] = zmax;
+    lx[8] = xmin; lz[8] = midz;
+
+    yoffsets[0] = 12.0f;
+    yoffsets[1] = 64.0f;
+    yoffsets[2] = 132.0f;
+
+    for (h = 0; h < 3; h++)
+    {
+        for (i = 0; i < 9; i++)
+        {
+            propLevelModifierDamDrivableBoatHullPoint(
+                &from, oldpos, oldheading, lx[i], lz[i], yoffsets[h]);
+            propLevelModifierDamDrivableBoatHullPoint(
+                &to, newpos, newheading, lx[i], lz[i], yoffsets[h]);
+
+            if (propLevelModifierDamDrivableBoatBgSegmentBlocked(
+                    &from, &to))
+            {
+                return TRUE;
+            }
+        }
+    }
+
+    return FALSE;
+}
+
+static void propLevelModifierDamDrivableBoatApplyTransform(void)
+{
+    Mtxf mtx;
+    ObjectRecord *obj = &g_LevelModifierDamDrivableBoatRuntime;
+
+    if (obj->prop == NULL || obj->model == NULL)
+        return;
+
+    matrix_4x4_set_rotation_around_y(
+        M_TAU_F - g_LevelModifierDamDrivableBoatHeading
+            + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET,
+        &mtx);
+    matrix_scalar_multiply(obj->model->scale, &mtx);
+    matrix_4x4_copy(&mtx, &obj->mtx);
+
+    obj->runtime_pos = obj->prop->pos;
+    setupUpdateObjectRoomPosition(obj);
+    chrobjCollisionRelated(obj);
+}
+
+static void propLevelModifierDamDrivableBoatPlaceDriver(void)
+{
+    coord3d bbmin;
+    coord3d bbmax;
+    coord3d target;
+    coord3d placed;
+    coord3d *p;
+    f32 remain;
+    f32 eyeOffset;
+
+    if (!propLevelModifierDamDrivableBoatCurrentPlayerDriving()
+        || g_CurrentPlayer == NULL
+        || g_CurrentPlayer->prop == NULL
+        || g_LevelModifierDamDrivableBoatRuntime.prop == NULL)
+    {
+        return;
+    }
+
+    p = &g_LevelModifierDamDrivableBoatRuntime.prop->pos;
+
+    /*
+     * R27R_R15_ENTRY_VERTICAL_REFERENCE_FIX
+     *
+     * collision_position.y is Bond's first-person eye/collision height.
+     * field_70 is his authoritative body/floor/base Y. R9 accidentally
+     * interpolated from eye-space Y to the boat's base/driver Y, then stored
+     * that mixed value back into field_70. The normal view code subsequently
+     * added Bond's eye height again, producing the "Bond rises up" feeling
+     * during embark.
+     *
+     * Preserve the live eye-height offset, interpolate only the base Y, then
+     * rebuild collision_position.y from base + eye offset.
+     */
+    eyeOffset = g_CurrentPlayer->field_488.collision_position.y
+        - g_CurrentPlayer->field_70;
+
+    target.x = p->x;
+    target.y = p->y + DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET;
+    target.z = p->z;
+    placed = target;
+
+    if (g_LevelModifierDamDrivableBoatEnterBlend < 1.0f)
+    {
+        remain = (cosf(g_LevelModifierDamDrivableBoatEnterBlend
+            * M_PI_F) + 1.0f) * 0.5f;
+
+        placed.x =
+            remain * g_LevelModifierDamDrivableBoatEnterStartPos.x
+            + (1.0f - remain) * target.x;
+        placed.y =
+            remain * g_LevelModifierDamDrivableBoatEnterStartPos.y
+            + (1.0f - remain) * target.y;
+        placed.z =
+            remain * g_LevelModifierDamDrivableBoatEnterStartPos.z
+            + (1.0f - remain) * target.z;
+    }
+
+    g_CurrentPlayer->field_70 = placed.y;
+    g_CurrentPlayer->stanHeight = placed.y;
+    g_CurrentPlayer->field_7C = 0.0f;
+
+    g_CurrentPlayer->field_488.collision_position.x = placed.x;
+    g_CurrentPlayer->field_488.collision_position.y =
+        placed.y + eyeOffset;
+    g_CurrentPlayer->field_488.collision_position.z = placed.z;
+
+    g_CurrentPlayer->prop->pos =
+        g_CurrentPlayer->field_488.collision_position;
+
+    bbmin.x = placed.x - 40.0f;
+    bbmin.y = placed.y - 40.0f;
+    bbmin.z = placed.z - 40.0f;
+    bbmax.x = placed.x + 40.0f;
+    bbmax.y = placed.y + 100.0f;
+    bbmax.z = placed.z + 40.0f;
+
+    chrpropDeregisterRooms(g_CurrentPlayer->prop);
+    chrpropUpdateRoomList(g_CurrentPlayer->prop, &bbmin, &bbmax, 50.0f);
+    chrpropRegisterRooms(g_CurrentPlayer->prop);
+}
+
+static void propLevelModifierFreeDamDrivableBoat(void)
+{
+    propLevelModifierDamDrivableBoatStopAudio();
+    g_LevelModifierDamDrivableBoatDriver = -1;
+    g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+    g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+    g_LevelModifierDamDrivableBoatSteering = 0.0f;
+    g_LevelModifierDamDrivableBoatEnterBlend = 1.0f;
+    g_LevelModifierDamDrivableBoatEnterStartYaw = 0.0f;
+    g_LevelModifierDamDrivableBoatUseWaterEnvelope = FALSE;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop != NULL)
+        objFreePermanently(&g_LevelModifierDamDrivableBoatRuntime, TRUE);
+
+    g_LevelModifierDamDrivableBoatRuntime.prop = NULL;
+}
+
+static void propLevelModifierFreeDamDoor(s32 index)
+{
+    if (index >= 0 && index < 2 && g_LevelModifierDamDoorRuntime[index].prop != NULL)
+        objFreePermanently((ObjectRecord *)&g_LevelModifierDamDoorRuntime[index], TRUE);
+}
+
+static void propLevelModifierFreeDamBoat(void)
+{
+    if (g_LevelModifierDamBoatRuntime.prop != NULL)
+        objFreePermanently(&g_LevelModifierDamBoatRuntime, TRUE);
+}
+
+s32 propLevelModifierPrepareDamRestorations(enum LEVELID stageId)
+{
+    PropDefHeaderRecord *phead;
+    s32 pdefIndex;
+    s32 foundBoat;
+    s32 foundDoor0;
+    s32 foundDoor1;
+    ObjectRecord *obj;
+    DoorRecord *door;
+
+    g_LevelModifierDamRestorePrepared = FALSE;
+    g_LevelModifierDamBoatRuntime.prop = NULL;
+    g_LevelModifierDamDrivableBoatRuntime.prop = NULL;
+    g_LevelModifierDamDrivableBoatDriver = -1;
+    g_LevelModifierDamDrivableBoatHeading = DAM_DRIVABLE_BOAT_START_HEADING;
+    g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+    g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+    g_LevelModifierDamDrivableBoatSteering = 0.0f;
+    propLevelModifierDamDrivableBoatStopAudio();
+    g_LevelModifierDamDoorRuntime[0].prop = NULL;
+    g_LevelModifierDamDoorRuntime[1].prop = NULL;
+    g_LevelModifierDamBoatCommandIndex = -1;
+    g_LevelModifierDamDoorCommandIndex[0] = -1;
+    g_LevelModifierDamDoorCommandIndex[1] = -1;
+
+    if (stageId != LEVELID_DAM
+        || g_CurrentSetup.propDefs == NULL
+        || g_CurrentSetup.pads == NULL)
+    {
+        return FALSE;
+    }
+
+    foundBoat = FALSE;
+    foundDoor0 = FALSE;
+    foundDoor1 = FALSE;
+    phead = g_CurrentSetup.propDefs;
+    pdefIndex = 0;
+
+    while (phead->type != PROPDEF_END)
+    {
+        if (phead->type == PROPDEF_PROP)
+        {
+            obj = (ObjectRecord *)phead;
+
+            if (!foundBoat
+                && obj->obj == PROP_OIL_DRUM7
+                && obj->pad == 359)
+            {
+                g_LevelModifierDamBoatTemplate = *obj;
+                g_LevelModifierDamBoatCommandIndex = pdefIndex;
+                foundBoat = TRUE;
+            }
+        }
+        else if (phead->type == PROPDEF_DOOR)
+        {
+            door = (DoorRecord *)phead;
+
+            if (!foundDoor0
+                && door->obj == PROP_GAS_PLANT_MET1_DO1
+                && door->pad == 65)
+            {
+                g_LevelModifierDamDoorTemplate[0] = *door;
+                g_LevelModifierDamDoorCommandIndex[0] = pdefIndex;
+                foundDoor0 = TRUE;
+            }
+            else if (!foundDoor1
+                && door->obj == PROP_GAS_PLANT_MET1_DO1
+                && door->pad == 68)
+            {
+                g_LevelModifierDamDoorTemplate[1] = *door;
+                g_LevelModifierDamDoorCommandIndex[1] = pdefIndex;
+                foundDoor1 = TRUE;
+            }
+        }
+
+        phead = (PropDefHeaderRecord *)(((u32 *)phead) + sizepropdef(phead));
+        pdefIndex++;
+    }
+
+    if (!foundBoat || !foundDoor0 || !foundDoor1)
+        return FALSE;
+
+    /*
+     * Dam pad 111 is the intact authored boat placement:
+     *   pos  = (424, -130, -1626)
+     *   look ~= (0, 0, -1)
+     * Its plink string is intentionally empty in retail, leaving stan == NULL.
+     * The old cheat wrote the live STAN pointer used by the dock tile. Pads
+     * 64/65/66/236 all resolve to that same tile; copy pad 64's resolved STAN
+     * symbolically instead of hard-coding the old 0x801CD0F8 address.
+     */
+    if (g_CurrentSetup.pads[64].stan == NULL)
+        return FALSE;
+
+    g_CurrentSetup.pads[111].stan = g_CurrentSetup.pads[64].stan;
+
+    /* R27R_R14_R1_STATIC_PROP_RUNTIME_Y768
+     *
+     * Keep pad 111's authored position/orientation intact. The restored
+     * static speedboat's exact Y is applied to its LIVE ObjectRecord after
+     * domakedefaultobj(), so X/Z/orientation still come from the original
+     * authored placement while runtime Y matches the drivable boat.
+     */
+
+    /* Preserve every other authored field from the donor records. */
+    g_LevelModifierDamBoatTemplate.obj = PROP_SPEEDBOAT;
+    g_LevelModifierDamBoatTemplate.pad = 111;
+
+    g_LevelModifierDamDoorTemplate[0].pad = 66;
+    g_LevelModifierDamDoorTemplate[1].pad = 69;
+
+    /* R27Q_R6_DAM_RESTORED_DOOR_PORTAL_VISIBILITY
+     *
+     * The retail donor doors at pads 65/68 use CULL_BEHIND_DOOR so their
+     * portal is disabled while fully closed.  At the restored lower dock
+     * placements (66/69), that culls the exterior-side doorway/wall geometry
+     * until the door begins opening.  Keep the restored clones registered
+     * across both rooms, but leave their portals visible at all times.
+     *
+     * Original retail doors are not modified.
+     */
+    g_LevelModifierDamDoorTemplate[0].flags &= ~PROPFLAG_CULL_BEHIND_DOOR;
+    g_LevelModifierDamDoorTemplate[0].flags |= PROPFLAG_NO_PORTAL_CLOSE;
+    g_LevelModifierDamDoorTemplate[1].flags &= ~PROPFLAG_CULL_BEHIND_DOOR;
+    g_LevelModifierDamDoorTemplate[1].flags |= PROPFLAG_NO_PORTAL_CLOSE;
+
+    g_LevelModifierDamRestorePrepared = TRUE;
+    return TRUE;
+}
+
+s32 propLevelModifierSetDamDoors(s32 enabled)
+{
+    if (!g_LevelModifierDamRestorePrepared)
+        return FALSE;
+
+    if (!enabled)
+    {
+        propLevelModifierFreeDamDoor(0);
+        propLevelModifierFreeDamDoor(1);
+        return TRUE;
+    }
+
+    if (g_LevelModifierDamDoorRuntime[0].prop != NULL
+        && g_LevelModifierDamDoorRuntime[1].prop != NULL)
+    {
+        return TRUE;
+    }
+
+    propLevelModifierFreeDamDoor(0);
+    propLevelModifierFreeDamDoor(1);
+
+    g_LevelModifierDamDoorRuntime[0] = g_LevelModifierDamDoorTemplate[0];
+    setupDoor(LEVELID_DAM,
+        &g_LevelModifierDamDoorRuntime[0],
+        g_LevelModifierDamDoorCommandIndex[0]);
+
+    if (g_LevelModifierDamDoorRuntime[0].prop == NULL)
+        return FALSE;
+
+    g_LevelModifierDamDoorRuntime[1] = g_LevelModifierDamDoorTemplate[1];
+    setupDoor(LEVELID_DAM,
+        &g_LevelModifierDamDoorRuntime[1],
+        g_LevelModifierDamDoorCommandIndex[1]);
+
+    if (g_LevelModifierDamDoorRuntime[1].prop == NULL)
+    {
+        propLevelModifierFreeDamDoor(0);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+s32 propLevelModifierSetDamSpeedboat(s32 enabled)
+{
+    if (!g_LevelModifierDamRestorePrepared)
+        return FALSE;
+
+    if (!enabled)
+    {
+        propLevelModifierFreeDamBoat();
+        return TRUE;
+    }
+
+    if (g_LevelModifierDamBoatRuntime.prop != NULL)
+        return TRUE;
+
+    g_LevelModifierDamBoatRuntime = g_LevelModifierDamBoatTemplate;
+
+    /*
+     * Let the normal setup path preserve the authored pad-111 X/Z/orientation.
+     * Then override ONLY the live object's Y. This is the same coordinate
+     * domain used by the drivable speedboat's prop->pos, so -768 is exact.
+     */
+    domakedefaultobj(LEVELID_DAM,
+        &g_LevelModifierDamBoatRuntime,
+        g_LevelModifierDamBoatCommandIndex);
+
+    if (g_LevelModifierDamBoatRuntime.prop == NULL)
+        return FALSE;
+
+    g_LevelModifierDamBoatRuntime.prop->pos.y = -768.0f;
+
+    /*
+     * Keep ObjectRecord runtime_pos and room/collision bookkeeping in sync
+     * with the live PropRecord. The previous R14 only changed pad data and
+     * therefore did not force the rendered/runtime boat to this Y.
+     */
+    g_LevelModifierDamBoatRuntime.runtime_pos =
+        g_LevelModifierDamBoatRuntime.prop->pos;
+    setupUpdateObjectRoomPosition(&g_LevelModifierDamBoatRuntime);
+    chrobjCollisionRelated(&g_LevelModifierDamBoatRuntime);
+
+    return TRUE;
+}
+
+s32 propLevelModifierActivateDamDrivableSpeedboat(void)
+{
+    if (!g_LevelModifierDamRestorePrepared)
+        return FALSE;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop != NULL)
+        return TRUE;
+
+    g_LevelModifierDamDrivableBoatRuntime = g_LevelModifierDamBoatTemplate;
+
+    g_LevelModifierDamDrivableBoatRuntime.flags |= PROPFLAG_INVINCIBLE;
+    g_LevelModifierDamDrivableBoatRuntime.flags2 |=
+        PROPFLAG2_00004000 | PROPFLAG2_00200000;
+
+    domakedefaultobj(LEVELID_DAM,
+        &g_LevelModifierDamDrivableBoatRuntime,
+        g_LevelModifierDamBoatCommandIndex);
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL)
+        return FALSE;
+
+    g_LevelModifierDamDrivableBoatRuntime.flags |= PROPFLAG_INVINCIBLE;
+    g_LevelModifierDamDrivableBoatRuntime.flags2 |=
+        PROPFLAG2_00004000 | PROPFLAG2_00200000;
+
+    g_LevelModifierDamDrivableBoatRuntime.state |= PROPSTATE_20;
+
+    g_LevelModifierDamDrivableBoatHeading = DAM_DRIVABLE_BOAT_START_HEADING;
+    g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+    g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+    g_LevelModifierDamDrivableBoatSteering = 0.0f;
+    g_LevelModifierDamDrivableBoatDriver = -1;
+    g_LevelModifierDamDrivableBoatEnterBlend = 1.0f;
+    g_LevelModifierDamDrivableBoatEnterStartYaw = 0.0f;
+
+    g_LevelModifierDamDrivableBoatRuntime.prop->pos.x = DAM_DRIVABLE_BOAT_START_X;
+    g_LevelModifierDamDrivableBoatRuntime.prop->pos.y = DAM_DRIVABLE_BOAT_START_Y;
+    g_LevelModifierDamDrivableBoatRuntime.prop->pos.z = DAM_DRIVABLE_BOAT_START_Z;
+
+    propLevelModifierDamDrivableBoatApplyTransform();
+
+    g_LevelModifierDamDrivableBoatUseWaterEnvelope =
+        propLevelModifierDamDrivableBoatWaterSurfacePresent(
+            &g_LevelModifierDamDrivableBoatRuntime.prop->pos);
+
+    return TRUE;
+}
+
+s32 propLevelModifierDamDrivableBoatCurrentPlayerDriving(void)
+{
+    return g_LevelModifierDamDrivableBoatRuntime.prop != NULL
+        && g_LevelModifierDamDrivableBoatDriver == get_cur_playernum();
+}
+
+s32 propLevelModifierDamDrivableBoatEntering(void)
+{
+    return propLevelModifierDamDrivableBoatCurrentPlayerDriving()
+        && g_LevelModifierDamDrivableBoatEnterBlend < 1.0f;
+}
+
+
+s32 propLevelModifierDamDrivableBoatCanCurrentPlayerEnter(void)
+{
+    f32 dx;
+    f32 dy;
+    f32 dz;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL
+        || g_LevelModifierDamDrivableBoatDriver >= 0
+        || g_CurrentPlayer == NULL)
+    {
+        return FALSE;
+    }
+
+    dx = g_CurrentPlayer->field_488.collision_position.x
+        - g_LevelModifierDamDrivableBoatRuntime.prop->pos.x;
+    dy = g_CurrentPlayer->field_488.collision_position.y
+        - (g_LevelModifierDamDrivableBoatRuntime.prop->pos.y
+            + DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET);
+    dz = g_CurrentPlayer->field_488.collision_position.z
+        - g_LevelModifierDamDrivableBoatRuntime.prop->pos.z;
+
+    if (propLevelModifierDamDrivableBoatAbs(dy)
+        > DAM_DRIVABLE_BOAT_ENTRY_Y_RANGE)
+    {
+        return FALSE;
+    }
+
+    return (dx * dx + dz * dz)
+        <= DAM_DRIVABLE_BOAT_ENTRY_RADIUS * DAM_DRIVABLE_BOAT_ENTRY_RADIUS;
+}
+
+void propLevelModifierDamDrivableBoatEnterCurrentPlayer(void)
+{
+    if (!propLevelModifierDamDrivableBoatCanCurrentPlayerEnter())
+        return;
+
+    propLevelModifierDamDrivableBoatStopAudio();
+
+    g_LevelModifierDamDrivableBoatDriver = get_cur_playernum();
+    g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+    g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+    g_LevelModifierDamDrivableBoatSteering = 0.0f;
+    g_LevelModifierDamDrivableBoatSteeringApplied = 0.0f;
+    g_LevelModifierDamDrivableBoatEnterBlend = 0.0f;
+    g_LevelModifierDamDrivableBoatEnterStartYaw = g_CurrentPlayer->vv_theta;
+    g_LevelModifierDamDrivableBoatEnterStartPos =
+        g_CurrentPlayer->field_488.collision_position;
+
+    /*
+     * X/Z begin at Bond's collision position, but Y must begin at his
+     * body/floor/base Y. Do not mix first-person eye Y with driver-floor Y.
+     */
+    g_LevelModifierDamDrivableBoatEnterStartPos.y =
+        g_CurrentPlayer->field_70;
+
+    g_CurrentPlayer->speedsideways = 0.0f;
+    g_CurrentPlayer->speedforwards = 0.0f;
+    g_CurrentPlayer->speedtheta = 0.0f;
+    g_CurrentPlayer->crouchpos = CROUCH_STAND;
+    g_CurrentPlayer->field_7C = 0.0f;
+
+    /* Do not place the driver here. Tick() performs the same 45-tick
+     * cosine-style position blend used for the entry yaw. */
+    propLevelModifierDamDrivableBoatUpdateAudio();
+}
+
+void propLevelModifierDamDrivableBoatExitCurrentPlayer(void)
+{
+    if (!propLevelModifierDamDrivableBoatCurrentPlayerDriving())
+        return;
+
+    g_LevelModifierDamDrivableBoatDriver = -1;
+    g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+    g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+    g_LevelModifierDamDrivableBoatSteering = 0.0f;
+    g_LevelModifierDamDrivableBoatSteeringApplied = 0.0f;
+    g_LevelModifierDamDrivableBoatEnterBlend = 1.0f;
+
+    g_CurrentPlayer->speedsideways = 0.0f;
+    g_CurrentPlayer->speedforwards = 0.0f;
+    g_CurrentPlayer->speedtheta = 0.0f;
+
+    /* Bond remains at the helm/deck position. The object is latched and is
+     * deliberately not destroyed when the driver exits. */
+    propLevelModifierDamDrivableBoatStopAudio();
+}
+
+void propLevelModifierDamDrivableBoatSetControls(f32 throttle, f32 steering)
+{
+    if (!propLevelModifierDamDrivableBoatCurrentPlayerDriving())
+        return;
+
+    if (throttle > 1.0f) throttle = 1.0f;
+    if (throttle < -1.0f) throttle = -1.0f;
+    if (steering > 1.0f) steering = 1.0f;
+    if (steering < -1.0f) steering = -1.0f;
+
+    g_LevelModifierDamDrivableBoatThrottle = throttle;
+    g_LevelModifierDamDrivableBoatSteering = steering;
+}
+
+f32 propLevelModifierDamDrivableBoatDriverY(void)
+{
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL)
+        return 0.0f;
+
+    return g_LevelModifierDamDrivableBoatRuntime.prop->pos.y
+        + DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET;
+}
+
+static void propLevelModifierDamDrivableBoatWorldToLocal(
+    const coord3d *world, f32 *localx, f32 *localz)
+{
+    f32 dx;
+    f32 dz;
+    f32 c;
+    f32 s;
+
+    dx = world->x - g_LevelModifierDamDrivableBoatRuntime.prop->pos.x;
+    dz = world->z - g_LevelModifierDamDrivableBoatRuntime.prop->pos.z;
+
+    c = cosf(g_LevelModifierDamDrivableBoatHeading
+        + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET);
+    s = sinf(g_LevelModifierDamDrivableBoatHeading
+        + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET);
+
+    *localx = dx * c + dz * s;
+    *localz = -dx * s + dz * c;
+}
+
+static void propLevelModifierDamDrivableBoatLocalToWorld(
+    f32 localx, f32 localz, coord3d *world)
+{
+    f32 c;
+    f32 s;
+
+    c = cosf(g_LevelModifierDamDrivableBoatHeading
+        + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET);
+    s = sinf(g_LevelModifierDamDrivableBoatHeading
+        + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET);
+
+    world->x = g_LevelModifierDamDrivableBoatRuntime.prop->pos.x
+        + localx * c - localz * s;
+    world->z = g_LevelModifierDamDrivableBoatRuntime.prop->pos.z
+        + localx * s + localz * c;
+}
+
+static s32 propLevelModifierDamDrivableBoatTryLandTransfer(
+    const coord3d *candidate, const coord3d *moveOffset)
+{
+    StandTile *tile;
+    f32 groundY;
+    f32 currentFloor;
+
+    (void)moveOffset;
+
+    if (g_CurrentPlayer == NULL)
+        return FALSE;
+
+    currentFloor = g_CurrentPlayer->field_70;
+
+    if (!propLevelModifierDamDrivableBoatWorldLandAt(
+            candidate, &tile, &groundY))
+    {
+        return FALSE;
+    }
+
+    if (groundY > currentFloor + DAM_DRIVABLE_BOAT_LAND_STEP_UP
+        || groundY < currentFloor - DAM_DRIVABLE_BOAT_LAND_STEP_DOWN)
+    {
+        return FALSE;
+    }
+
+    g_CurrentPlayer->field_488.collision_position.x = candidate->x;
+    g_CurrentPlayer->field_488.collision_position.z = candidate->z;
+    g_CurrentPlayer->field_488.current_tile_ptr = tile;
+    g_CurrentPlayer->field_488.current_tile_ptr_for_portals = tile;
+    g_CurrentPlayer->prop->stan = tile;
+    g_CurrentPlayer->stanHeight = groundY;
+
+    return TRUE;
+}
+
+/* R27R_R21_R2_REVERT_TO_PRE_STAN_Y_BASELINE_R16 */
+static s32 propLevelModifierDamDrivableBoatDeckFloorAtLocal(
+    f32 localx, f32 localz, f32 margin, f32 *floorY)
+{
+    f32 absx;
+    f32 absz;
+    f32 shapez;
+    f32 halfx;
+    f32 t;
+    f32 smooth;
+    f32 yoff;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL)
+        return FALSE;
+
+    absx = propLevelModifierDamDrivableBoatAbs(localx);
+    absz = propLevelModifierDamDrivableBoatAbs(localz);
+
+    if (absz > DAM_DRIVABLE_BOAT_DECK_HALF_Z + margin)
+        return FALSE;
+
+    shapez = absz;
+
+    if (shapez > DAM_DRIVABLE_BOAT_DECK_HALF_Z)
+        shapez = DAM_DRIVABLE_BOAT_DECK_HALF_Z;
+
+    halfx = DAM_DRIVABLE_BOAT_DECK_HALF_X;
+
+    if (shapez > DAM_DRIVABLE_BOAT_DECK_TAPER_START_Z)
+    {
+        t = (shapez - DAM_DRIVABLE_BOAT_DECK_TAPER_START_Z)
+            / (DAM_DRIVABLE_BOAT_DECK_HALF_Z
+                - DAM_DRIVABLE_BOAT_DECK_TAPER_START_Z);
+
+        if (t > 1.0f)
+            t = 1.0f;
+
+        halfx += (DAM_DRIVABLE_BOAT_DECK_TIP_HALF_X
+            - DAM_DRIVABLE_BOAT_DECK_HALF_X) * t;
+    }
+
+    if (absx > halfx + margin)
+        return FALSE;
+
+    yoff = DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET;
+
+    if (shapez > DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z)
+    {
+        t = (shapez - DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z)
+            / (DAM_DRIVABLE_BOAT_DECK_RAISE_FULL_Z
+                - DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z);
+
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
+
+        smooth = t * t * (3.0f - 2.0f * t);
+
+        yoff += (DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET
+            - DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET) * smooth;
+    }
+
+    if (floorY != NULL)
+        *floorY = g_LevelModifierDamDrivableBoatRuntime.prop->pos.y + yoff;
+
+    return TRUE;
+}
+
+static s32 propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+    const coord3d *world, f32 margin, f32 *floorY)
+{
+    f32 localx;
+    f32 localz;
+
+    if (world == NULL)
+        return FALSE;
+
+    propLevelModifierDamDrivableBoatWorldToLocal(world, &localx, &localz);
+
+    return propLevelModifierDamDrivableBoatDeckFloorAtLocal(
+        localx, localz, margin, floorY);
+}
+
+static s32 propLevelModifierDamDrivableBoatWorldLandAt(
+    const coord3d *world, StandTile **tileOut, f32 *groundYOut)
+{
+    coord3d probe;
+    StandTile *tile;
+    f32 groundY;
+
+    if (world == NULL || g_CurrentPlayer == NULL)
+        return FALSE;
+
+    probe = *world;
+    probe.y = g_CurrentPlayer->field_70 + DAM_DRIVABLE_BOAT_LAND_STEP_UP;
+
+    tile = stanFindGroundAtCyl(
+        &probe, DAM_DRIVABLE_BOAT_DECK_LAND_RADIUS, NULL, &groundY);
+
+    if (tile == NULL || groundY <= DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y)
+        return FALSE;
+
+    if (tileOut != NULL)
+        *tileOut = tile;
+
+    if (groundYOut != NULL)
+        *groundYOut = groundY;
+
+    return TRUE;
+}
+
+static void propLevelModifierDamDrivableBoatSetPlayerBaseY(f32 baseY)
+{
+    f32 eyeOffset;
+
+    if (g_CurrentPlayer == NULL)
+        return;
+
+    eyeOffset = g_CurrentPlayer->field_488.collision_position.y
+        - g_CurrentPlayer->field_70;
+
+    g_CurrentPlayer->field_70 = baseY;
+    g_CurrentPlayer->stanHeight = baseY;
+    g_CurrentPlayer->field_7C = 0.0f;
+    g_CurrentPlayer->field_488.collision_position.y =
+        baseY + eyeOffset;
+
+    if (g_CurrentPlayer->prop != NULL)
+        g_CurrentPlayer->prop->pos.y =
+            g_CurrentPlayer->field_488.collision_position.y;
+}
+
+
+static s32 propLevelModifierDamDrivableBoatNearbyValidStan(
+    const coord3d *world, f32 *groundYOut)
+{
+    coord3d probe;
+    StandTile *tile;
+    f32 groundY;
+    f32 radius;
+    f32 diag;
+    s32 ring;
+    s32 sample;
+    f32 ox[8];
+    f32 oz[8];
+
+    if (world == NULL || g_CurrentPlayer == NULL)
+        return FALSE;
+
+    for (ring = 1; ring <= DAM_DRIVABLE_BOAT_STAN_SAMPLE_RINGS; ring++)
+    {
+        radius = DAM_DRIVABLE_BOAT_STAN_SAMPLE_STEP * ring;
+        diag = radius * 0.70710678f;
+
+        ox[0] =  radius; oz[0] = 0.0f;
+        ox[1] = -radius; oz[1] = 0.0f;
+        ox[2] = 0.0f;    oz[2] =  radius;
+        ox[3] = 0.0f;    oz[3] = -radius;
+        ox[4] =  diag;    oz[4] =  diag;
+        ox[5] = -diag;    oz[5] =  diag;
+        ox[6] =  diag;    oz[6] = -diag;
+        ox[7] = -diag;    oz[7] = -diag;
+
+        for (sample = 0; sample < 8; sample++)
+        {
+            probe = *world;
+            probe.x += ox[sample];
+            probe.z += oz[sample];
+            probe.y = g_CurrentPlayer->field_70
+                + DAM_DRIVABLE_BOAT_LAND_STEP_UP;
+
+            tile = stanFindGroundAtCyl(
+                &probe, DAM_DRIVABLE_BOAT_STAN_SAMPLE_RADIUS,
+                NULL, &groundY);
+
+            if (tile != NULL
+                && groundY > DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y)
+            {
+                if (groundYOut != NULL)
+                    *groundYOut = groundY;
+
+                return TRUE;
+            }
+        }
+    }
+
+    return FALSE;
+}
+
+static s32 propLevelModifierDamDrivableBoatTransitionRectAtWorld(
+    const coord3d *world, f32 *floorY)
+{
+    f32 localx;
+    f32 localz;
+    f32 samplez;
+    f32 t;
+    f32 smooth;
+    f32 yoff;
+
+    if (world == NULL || g_LevelModifierDamDrivableBoatRuntime.prop == NULL)
+        return FALSE;
+
+    propLevelModifierDamDrivableBoatWorldToLocal(world, &localx, &localz);
+
+    if (propLevelModifierDamDrivableBoatAbs(localx)
+            > DAM_DRIVABLE_BOAT_TRANSITION_HALF_X
+        || propLevelModifierDamDrivableBoatAbs(localz)
+            > DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z)
+    {
+        return FALSE;
+    }
+
+    /*
+     * The transition volume is rectangular, but its support Y follows the
+     * boat's longitudinal deck profile. Clamp Z to the real hull length so
+     * the extra rectangle beyond bow/stern does not invent taller geometry.
+     */
+    samplez = propLevelModifierDamDrivableBoatAbs(localz);
+
+    if (samplez > DAM_DRIVABLE_BOAT_DECK_HALF_Z)
+        samplez = DAM_DRIVABLE_BOAT_DECK_HALF_Z;
+
+    yoff = DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET;
+
+    if (samplez > DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z)
+    {
+        t = (samplez - DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z)
+            / (DAM_DRIVABLE_BOAT_DECK_RAISE_FULL_Z
+                - DAM_DRIVABLE_BOAT_DECK_RAISE_START_Z);
+
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
+
+        smooth = t * t * (3.0f - 2.0f * t);
+
+        yoff += (DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET
+            - DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET) * smooth;
+    }
+
+    if (floorY != NULL)
+        *floorY = g_LevelModifierDamDrivableBoatRuntime.prop->pos.y + yoff;
+
+    return TRUE;
+}
+
+static s32 propLevelModifierDamDrivableBoatTransitionClipHaloAtWorld(
+    const coord3d *world, f32 *floorY)
+{
+    coord3d clamped;
+    f32 localx;
+    f32 localz;
+    f32 extra;
+
+    if (world == NULL
+        || g_CurrentPlayer == NULL
+        || g_LevelModifierDamDrivableBoatRuntime.prop == NULL)
+    {
+        return FALSE;
+    }
+
+    extra = g_CurrentPlayer->field_488.collision_radius
+        + DAM_DRIVABLE_BOAT_CLIP_RELAX_EXTRA;
+
+    if (extra < 30.0f)
+        extra = 30.0f;
+    if (extra > 72.0f)
+        extra = 72.0f;
+
+    propLevelModifierDamDrivableBoatWorldToLocal(world, &localx, &localz);
+
+    if (propLevelModifierDamDrivableBoatAbs(localx)
+            > DAM_DRIVABLE_BOAT_TRANSITION_HALF_X + extra
+        || propLevelModifierDamDrivableBoatAbs(localz)
+            > DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z + extra)
+    {
+        return FALSE;
+    }
+
+    if (localx > DAM_DRIVABLE_BOAT_TRANSITION_HALF_X)
+        localx = DAM_DRIVABLE_BOAT_TRANSITION_HALF_X;
+    if (localx < -DAM_DRIVABLE_BOAT_TRANSITION_HALF_X)
+        localx = -DAM_DRIVABLE_BOAT_TRANSITION_HALF_X;
+    if (localz > DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z)
+        localz = DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z;
+    if (localz < -DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z)
+        localz = -DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z;
+
+    clamped = *world;
+    propLevelModifierDamDrivableBoatLocalToWorld(
+        localx, localz, &clamped);
+
+    return propLevelModifierDamDrivableBoatTransitionRectAtWorld(
+        &clamped, floorY);
+}
+
+s32 propLevelModifierDamDrivableBoatGetWalkFloor(f32 *floorY)
+{
+    coord3d pos;
+    f32 deckY;
+    f32 nearbyGroundY;
+    s32 inTransitionRect;
+    s32 inClipHalo;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL
+        || g_CurrentPlayer == NULL
+        || propLevelModifierDamDrivableBoatCurrentPlayerDriving())
+    {
+        return FALSE;
+    }
+
+    pos = g_CurrentPlayer->field_488.collision_position;
+
+    if (propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+            &pos, 0.0f, &deckY))
+    {
+        if (floorY != NULL)
+            *floorY = deckY;
+        return TRUE;
+    }
+
+    inTransitionRect =
+        propLevelModifierDamDrivableBoatTransitionRectAtWorld(
+            &pos, &deckY);
+
+    inClipHalo = FALSE;
+
+    if (!inTransitionRect)
+    {
+        inClipHalo =
+            propLevelModifierDamDrivableBoatTransitionClipHaloAtWorld(
+                &pos, &deckY);
+    }
+
+    if (!inTransitionRect && !inClipHalo)
+        return FALSE;
+
+    if (propLevelModifierDamDrivableBoatWorldLandAt(&pos, NULL, NULL))
+        return FALSE;
+
+    if (!propLevelModifierDamDrivableBoatNearbyValidStan(
+            &pos, &nearbyGroundY))
+    {
+        return FALSE;
+    }
+
+    if (floorY != NULL)
+        *floorY = deckY;
+
+    return TRUE;
+}
+
+/* R27R_R13_DECK_EDGE_WALL_SLIDE
+ *
+ * When a diagonal movement step would leave the boat into unsupported water,
+ * do not consume the entire step. Preserve whichever boat-local axis can
+ * still move on the real deck. This gives Bond a wall-slide effect along the
+ * bow/stern/sides instead of feeling glued in place at the edge.
+ *
+ * No speed/velocity fields are cleared here; only the blocked outward
+ * component is discarded for this frame.
+ */
+static s32 propLevelModifierDamDrivableBoatTryDeckWallSlide(
+    const coord3d *current, const coord3d *moveOffset)
+{
+    coord3d full;
+    coord3d xcandidate;
+    coord3d zcandidate;
+    f32 currentLocalX;
+    f32 currentLocalZ;
+    f32 fullLocalX;
+    f32 fullLocalZ;
+    f32 dx;
+    f32 dz;
+    f32 xFloor;
+    f32 zFloor;
+    s32 xValid;
+    s32 zValid;
+
+    if (current == NULL || moveOffset == NULL)
+        return FALSE;
+
+    full = *current;
+    full.x += moveOffset->x;
+    full.z += moveOffset->z;
+
+    propLevelModifierDamDrivableBoatWorldToLocal(
+        current, &currentLocalX, &currentLocalZ);
+    propLevelModifierDamDrivableBoatWorldToLocal(
+        &full, &fullLocalX, &fullLocalZ);
+
+    dx = fullLocalX - currentLocalX;
+    dz = fullLocalZ - currentLocalZ;
+
+    xcandidate = *current;
+    zcandidate = *current;
+
+    propLevelModifierDamDrivableBoatLocalToWorld(
+        currentLocalX + dx, currentLocalZ, &xcandidate);
+    propLevelModifierDamDrivableBoatLocalToWorld(
+        currentLocalX, currentLocalZ + dz, &zcandidate);
+
+    xValid = propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+        &xcandidate, 0.0f, &xFloor);
+    zValid = propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+        &zcandidate, 0.0f, &zFloor);
+
+    if (!xValid && !zValid)
+        return FALSE;
+
+    if (xValid && (!zValid
+        || propLevelModifierDamDrivableBoatAbs(dx)
+            >= propLevelModifierDamDrivableBoatAbs(dz)))
+    {
+        g_CurrentPlayer->field_488.collision_position.x = xcandidate.x;
+        g_CurrentPlayer->field_488.collision_position.z = xcandidate.z;
+        g_CurrentPlayer->stanHeight = xFloor;
+        return TRUE;
+    }
+
+    g_CurrentPlayer->field_488.collision_position.x = zcandidate.x;
+    g_CurrentPlayer->field_488.collision_position.z = zcandidate.z;
+    g_CurrentPlayer->stanHeight = zFloor;
+    return TRUE;
+}
+
+s32 propLevelModifierDamDrivableBoatHandleFootMovement(
+    struct coord3d *moveOffset)
+{
+    coord3d current;
+    coord3d candidate;
+    f32 currentFloor;
+    f32 candidateFloor;
+    f32 nearbyGroundY;
+    s32 currentOnDeck;
+    s32 currentInShell;
+    s32 currentInClipHalo;
+    s32 candidateOnDeck;
+    s32 candidateInShell;
+    s32 candidateInClipHalo;
+    s32 candidateTouchesStan;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL
+        || g_CurrentPlayer == NULL
+        || moveOffset == NULL
+        || propLevelModifierDamDrivableBoatCurrentPlayerDriving())
+    {
+        return FALSE;
+    }
+
+    current = g_CurrentPlayer->field_488.collision_position;
+    candidate = current;
+    candidate.x += moveOffset->x;
+    candidate.z += moveOffset->z;
+
+    currentOnDeck = propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+        &current, 0.0f, &currentFloor);
+    currentInShell = propLevelModifierDamDrivableBoatTransitionRectAtWorld(
+        &current, &currentFloor);
+    currentInClipHalo =
+        propLevelModifierDamDrivableBoatTransitionClipHaloAtWorld(
+            &current, &currentFloor);
+
+    candidateOnDeck = propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+        &candidate, 0.0f, &candidateFloor);
+    candidateInShell = propLevelModifierDamDrivableBoatTransitionRectAtWorld(
+        &candidate, &candidateFloor);
+    candidateInClipHalo =
+        propLevelModifierDamDrivableBoatTransitionClipHaloAtWorld(
+            &candidate, &candidateFloor);
+
+    if (candidateOnDeck)
+    {
+        g_CurrentPlayer->field_488.collision_position.x = candidate.x;
+        g_CurrentPlayer->field_488.collision_position.z = candidate.z;
+        g_CurrentPlayer->stanHeight = candidateFloor;
+        return TRUE;
+    }
+
+    if (candidateInShell)
+    {
+        if (propLevelModifierDamDrivableBoatTryLandTransfer(
+                &candidate, moveOffset))
+        {
+            return TRUE;
+        }
+
+        candidateTouchesStan =
+            propLevelModifierDamDrivableBoatNearbyValidStan(
+                &candidate, &nearbyGroundY);
+
+        if (candidateTouchesStan)
+        {
+            g_CurrentPlayer->field_488.collision_position.x = candidate.x;
+            g_CurrentPlayer->field_488.collision_position.z = candidate.z;
+            g_CurrentPlayer->stanHeight = candidateFloor;
+            return TRUE;
+        }
+
+        if (currentOnDeck
+            && propLevelModifierDamDrivableBoatTryDeckWallSlide(
+                &current, moveOffset))
+        {
+            return TRUE;
+        }
+
+        if (currentOnDeck || currentInShell || currentInClipHalo)
+            return TRUE;
+
+        return FALSE;
+    }
+
+    if (candidateInClipHalo)
+    {
+        if (propLevelModifierDamDrivableBoatTryLandTransfer(
+                &candidate, moveOffset))
+        {
+            return TRUE;
+        }
+
+        candidateTouchesStan =
+            propLevelModifierDamDrivableBoatNearbyValidStan(
+                &candidate, &nearbyGroundY);
+
+        if (candidateTouchesStan)
+        {
+            g_CurrentPlayer->field_488.collision_position.x = candidate.x;
+            g_CurrentPlayer->field_488.collision_position.z = candidate.z;
+            g_CurrentPlayer->stanHeight = candidateFloor;
+            return TRUE;
+        }
+
+        if (currentOnDeck
+            && propLevelModifierDamDrivableBoatTryDeckWallSlide(
+                &current, moveOffset))
+        {
+            return TRUE;
+        }
+
+        if (currentOnDeck || currentInShell || currentInClipHalo)
+            return TRUE;
+
+        return FALSE;
+    }
+
+    if (currentOnDeck || currentInShell || currentInClipHalo)
+    {
+        if (propLevelModifierDamDrivableBoatTryLandTransfer(
+                &candidate, moveOffset))
+        {
+            return TRUE;
+        }
+
+        if (currentOnDeck
+            && propLevelModifierDamDrivableBoatTryDeckWallSlide(
+                &current, moveOffset))
+        {
+            return TRUE;
+        }
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+s32 propLevelModifierDamDrivableBoatCurrentPlayerSupported(void)
+{
+    coord3d pos;
+    f32 deckY;
+
+    if (g_LevelModifierDamDrivableBoatRuntime.prop == NULL
+        || g_CurrentPlayer == NULL)
+    {
+        return FALSE;
+    }
+
+    pos = g_CurrentPlayer->field_488.collision_position;
+
+    if (!propLevelModifierDamDrivableBoatDeckFloorAtWorld(
+            &pos, DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN, &deckY))
+    {
+        return FALSE;
+    }
+
+    return propLevelModifierDamDrivableBoatAbs(
+        g_CurrentPlayer->field_70 - deckY) <= 160.0f;
+}
+
+void propLevelModifierDamDrivableBoatTick(void)
+{
+    f32 target;
+    f32 step;
+    f32 oldHeading;
+    f32 candidateHeading;
+    f32 headingdeg;
+    f32 oldHeadingDeg;
+    f32 headingDeltaDeg;
+    f32 speedScale;
+    f32 steeringTarget;
+    f32 steeringStep;
+    f32 remain;
+    f32 angleDiff;
+    f32 targetForBlend;
+    coord3d oldpos;
+    coord3d candidatePos;
+    ObjectRecord *obj;
+
+    if (!propLevelModifierDamDrivableBoatCurrentPlayerDriving())
+    {
+        propLevelModifierDamDrivableBoatStopAudio();
+        return;
+    }
+
+    if (g_CurrentPlayer->bonddead)
+    {
+        propLevelModifierDamDrivableBoatExitCurrentPlayer();
+        return;
+    }
+
+    obj = &g_LevelModifierDamDrivableBoatRuntime;
+
+    if (obj->prop == NULL)
+    {
+        propLevelModifierDamDrivableBoatStopAudio();
+        return;
+    }
+
+    if (propLevelModifierDamDrivableBoatEntering())
+        target = 0.0f;
+    else
+        target = g_LevelModifierDamDrivableBoatThrottle
+            * DAM_DRIVABLE_BOAT_MAX_SPEED;
+
+    if (g_LevelModifierDamDrivableBoatSpeed < target)
+    {
+        step = DAM_DRIVABLE_BOAT_ACCEL * g_GlobalTimerDelta;
+        g_LevelModifierDamDrivableBoatSpeed += step;
+
+        if (g_LevelModifierDamDrivableBoatSpeed > target)
+            g_LevelModifierDamDrivableBoatSpeed = target;
+    }
+    else if (g_LevelModifierDamDrivableBoatSpeed > target)
+    {
+        step = DAM_DRIVABLE_BOAT_DECEL * g_GlobalTimerDelta;
+        g_LevelModifierDamDrivableBoatSpeed -= step;
+
+        if (g_LevelModifierDamDrivableBoatSpeed < target)
+            g_LevelModifierDamDrivableBoatSpeed = target;
+    }
+
+    oldpos = obj->prop->pos;
+    candidatePos = oldpos;
+    oldHeading = g_LevelModifierDamDrivableBoatHeading;
+    candidateHeading = oldHeading;
+
+    steeringTarget = g_LevelModifierDamDrivableBoatSteering;
+
+    if (propLevelModifierDamDrivableBoatEntering())
+        steeringTarget = 0.0f;
+
+    steeringStep =
+        DAM_DRIVABLE_BOAT_STEER_RESPONSE * g_GlobalTimerDelta;
+
+    if (g_LevelModifierDamDrivableBoatSteeringApplied < steeringTarget)
+    {
+        g_LevelModifierDamDrivableBoatSteeringApplied += steeringStep;
+
+        if (g_LevelModifierDamDrivableBoatSteeringApplied > steeringTarget)
+            g_LevelModifierDamDrivableBoatSteeringApplied = steeringTarget;
+    }
+    else if (g_LevelModifierDamDrivableBoatSteeringApplied > steeringTarget)
+    {
+        g_LevelModifierDamDrivableBoatSteeringApplied -= steeringStep;
+
+        if (g_LevelModifierDamDrivableBoatSteeringApplied < steeringTarget)
+            g_LevelModifierDamDrivableBoatSteeringApplied = steeringTarget;
+    }
+
+    speedScale = propLevelModifierDamDrivableBoatAbs(
+        g_LevelModifierDamDrivableBoatSpeed)
+        / DAM_DRIVABLE_BOAT_MAX_SPEED;
+
+    if (propLevelModifierDamDrivableBoatAbs(
+            g_LevelModifierDamDrivableBoatSpeed) <= 0.05f)
+    {
+        /*
+         * R16: the rudder/helm may slowly rotate the boat in place. This is
+         * deliberately much weaker than the moving minimum-turn authority.
+         */
+        speedScale = DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE;
+    }
+    else if (speedScale < 0.25f)
+    {
+        speedScale = 0.25f;
+    }
+
+    candidateHeading +=
+        g_LevelModifierDamDrivableBoatSteeringApplied
+        * DegToRad1Fact(DAM_DRIVABLE_BOAT_TURN_DEG)
+        * g_GlobalTimerDelta * speedScale;
+
+    while (candidateHeading >= M_TAU_F)
+        candidateHeading -= M_TAU_F;
+    while (candidateHeading < 0.0f)
+        candidateHeading += M_TAU_F;
+
+    candidatePos.x += g_LevelModifierDamDrivableBoatSpeed
+        * sinf(M_TAU_F - candidateHeading)
+        * g_GlobalTimerDelta;
+    candidatePos.z += g_LevelModifierDamDrivableBoatSpeed
+        * cosf(M_TAU_F - candidateHeading)
+        * g_GlobalTimerDelta;
+    candidatePos.y = DAM_DRIVABLE_BOAT_START_Y;
+
+    /*
+     * R27R R12: do NOT gate vehicle movement on STAN room 0x23.
+     * The known Dam lake Room 0x23 is a BG room; treating it as guaranteed
+     * STAN support can return NULL/another STAN room and reject every movement
+     * tick. Keep the existing water envelope + hard hull/background collision
+     * as the movement authority until a true BG-room boundary test is added.
+     */
+    if (!propLevelModifierDamDrivableBoatHullBlocked(
+            &oldpos, oldHeading, &candidatePos, candidateHeading))
+    {
+        g_LevelModifierDamDrivableBoatHeading = candidateHeading;
+        obj->prop->pos = candidatePos;
+    }
+    else
+    {
+        g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+        g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+    }
+
+    obj->prop->pos.y = DAM_DRIVABLE_BOAT_START_Y;
+    propLevelModifierDamDrivableBoatApplyTransform();
+
+    headingdeg = g_LevelModifierDamDrivableBoatHeading * 360.0f / M_TAU_F;
+    oldHeadingDeg = oldHeading * 360.0f / M_TAU_F;
+
+    while (headingdeg < 0.0f) headingdeg += 360.0f;
+    while (headingdeg >= 360.0f) headingdeg -= 360.0f;
+
+    if (g_LevelModifierDamDrivableBoatEnterBlend < 1.0f)
+    {
+        g_LevelModifierDamDrivableBoatEnterBlend +=
+            g_GlobalTimerDelta / DAM_DRIVABLE_BOAT_ENTER_TICKS;
+
+        if (g_LevelModifierDamDrivableBoatEnterBlend > 1.0f)
+            g_LevelModifierDamDrivableBoatEnterBlend = 1.0f;
+
+        remain = (cosf(g_LevelModifierDamDrivableBoatEnterBlend
+            * M_PI_F) + 1.0f) * 0.5f;
+
+        targetForBlend = headingdeg;
+        angleDiff = targetForBlend - g_LevelModifierDamDrivableBoatEnterStartYaw;
+
+        if (angleDiff > 180.0f)
+            targetForBlend -= 360.0f;
+        else if (angleDiff < -180.0f)
+            targetForBlend += 360.0f;
+
+        g_CurrentPlayer->vv_theta =
+            remain * g_LevelModifierDamDrivableBoatEnterStartYaw
+            + (1.0f - remain) * targetForBlend;
+    }
+    else
+    {
+        headingDeltaDeg = headingdeg - oldHeadingDeg;
+
+        if (headingDeltaDeg > 180.0f) headingDeltaDeg -= 360.0f;
+        if (headingDeltaDeg < -180.0f) headingDeltaDeg += 360.0f;
+
+        g_CurrentPlayer->vv_theta += headingDeltaDeg;
+    }
+
+    while (g_CurrentPlayer->vv_theta < 0.0f)
+        g_CurrentPlayer->vv_theta += 360.0f;
+    while (g_CurrentPlayer->vv_theta >= 360.0f)
+        g_CurrentPlayer->vv_theta -= 360.0f;
+
+    g_CurrentPlayer->speedtheta = 0.0f;
+    g_CurrentPlayer->vv_costheta =
+        cosf(g_CurrentPlayer->vv_theta * DegToRad1Fact(1));
+    g_CurrentPlayer->vv_sintheta =
+        sinf(g_CurrentPlayer->vv_theta * DegToRad1Fact(1));
+    g_CurrentPlayer->field_488.theta_transform.x =
+        -g_CurrentPlayer->vv_sintheta;
+    g_CurrentPlayer->field_488.theta_transform.y = 0.0f;
+    g_CurrentPlayer->field_488.theta_transform.z =
+        g_CurrentPlayer->vv_costheta;
+
+    propLevelModifierDamDrivableBoatPlaceDriver();
+    propLevelModifierDamDrivableBoatUpdateAudio();
+}
+
+void propLevelModifierCleanupDamRestorations(void)
+{
+    propLevelModifierFreeDamDoor(0);
+    propLevelModifierFreeDamDoor(1);
+    propLevelModifierFreeDamBoat();
+    propLevelModifierFreeDamDrivableBoat();
+    g_LevelModifierDamRestorePrepared = FALSE;
+}
+
 /* V90: Zoinkity Citadel multiplayer runtime pad/intro handoff.
  *
  * The 2005 restoration loaded its Citadel setup normally, then redirected
@@ -185,6 +2036,40 @@ static void citadelApplyMultiplayerSetupOverrides(enum LEVELID stageId)
 }
 #endif
 
+
+#ifdef GE_MODDED_CHEATS
+void modSyncBodyArmorPickups(void)
+{
+    PropDefHeaderRecord *pdef = (PropDefHeaderRecord *)g_CurrentSetup.propDefs;
+
+    while (pdef != NULL && pdef->type != PROPDEF_END)
+    {
+        if (pdef->type == PROPDEF_ARMOUR)
+        {
+            ObjectRecord *obj = (ObjectRecord *)pdef;
+
+            /* Collected solo armour has obj->prop == NULL. Regenerating MP
+             * armour retains its prop with a positive timetoregen. */
+            if (obj->prop != NULL)
+            {
+                if (g_ModDisableBodyArmorEnabled)
+                {
+                    chrpropDisable(obj->prop);
+                }
+                else if (obj->prop->timetoregen <= 0)
+                {
+                    chrpropEnable(obj->prop);
+
+                    if (obj->prop->rooms[0] == 0xff)
+                        sub_GAME_7F03E134(obj->prop);
+                }
+            }
+        }
+
+        pdef = &pdef[sizepropdef(pdef)];
+    }
+}
+#endif
 
 s32 load_proptype(PROPDEF_TYPE type)
 {
@@ -1598,6 +3483,10 @@ void proplvreset2(enum LEVELID stageId)
         // PD rejoins here
 
 #ifdef GE_MODDED_CHEATS
+        /* R27Q: capture pristine Dam donor records and repair preserved pad 111
+         * after normal STAN resolution, before any props are instantiated. */
+        levelModifiersOnSetupReady(stageId);
+
         /* V90: reproduce Zoinkity's original Citadel runtime handoff using
          * symbols and STAN names rather than 2005-era absolute RAM hooks. */
         citadelApplyMultiplayerSetupOverrides(stageId);
@@ -1643,6 +3532,17 @@ void proplvreset2(enum LEVELID stageId)
             numObjects += load_proptype(PROPDEF_TANK);
             numAnimatedObjects += load_proptype(PROPDEF_AIRCRAFT);
         }
+
+#ifdef GE_MODDED_CHEATS
+        if (withobjs)
+            numObjects += levelModifiersGetReservedObjectCount(stageId);
+
+        /* Reserve one animated-model slot per configured Simulant. P10
+         * primes these slots during level-reset allocation so each receives
+         * exact-size rwdata that can be reused by live spawn and respawn. */
+        if (gamemode == GAMEMODE_MULTI && get_scenario() != SCENARIO_COOP)
+            numAnimatedObjects += modMpBotsGetCount();
+#endif
 
         modelmgrAllocateModelSlots(numObjects);
         modelmgrAllocateAnimModelSlots(numAnimatedObjects);
@@ -1780,6 +3680,10 @@ void proplvreset2(enum LEVELID stageId)
                             pdef_ba->initialamount = (*((s32 *) (&pdef_ba->initialamount))) / M_U16_MAX_VALUE_F;
                             pdef_ba->amount = pdef_ba->initialamount;
                             domakedefaultobj(stageId, (struct ObjectRecord *) phead, pdefIndex);
+#ifdef GE_MODDED_CHEATS
+                            if (g_ModDisableBodyArmorEnabled && pdef_ba->prop != NULL)
+                                chrpropDisable(pdef_ba->prop);
+#endif
                         }
                         break;
                     }
@@ -2181,6 +4085,11 @@ void proplvreset2(enum LEVELID stageId)
                 pdefIndex += 1;
             }
         }
+
+#ifdef GE_MODDED_CHEATS
+        if (withobjs)
+            levelModifiersOnPropsLoaded(stageId);
+#endif
     }
     else
     {

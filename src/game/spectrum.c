@@ -9022,7 +9022,7 @@ void fileUnlockEverythingInFolder(s32 foldernum)
  */
 char *frontModGetOptionLabel(s32 index)
 {
-    static u32 text[4][9];
+    static u32 text[4][10];
     static u32 slot;
     u32 *buf = text[slot++ & 3];
 
@@ -9110,8 +9110,8 @@ char *frontModGetOptionLabel(s32 index)
         buf[0]=0x436F6D70; buf[1]=0x6C657465; buf[2]=0x204D6973; buf[3]=0x73696F6E; buf[4]=0;
     } else if (index == 45) { /* Kill Count Message */
         buf[0]=0x4B696C6C; buf[1]=0x20436F75; buf[2]=0x6E74204D; buf[3]=0x65737361; buf[4]=0x67650000;
-    } else if (index == 46) { /* Micro-optimizations */
-        buf[0]=0x4D696372; buf[1]=0x6F2D6F70; buf[2]=0x74696D69; buf[3]=0x7A617469; buf[4]=0x6F6E7300;
+    } else if (index == 46) { /* Micro-Optimizations */
+        buf[0]=0x4D696372; buf[1]=0x6F2D4F70; buf[2]=0x74696D69; buf[3]=0x7A617469; buf[4]=0x6F6E7300;
     } else if (index == 47) { /* Stay In TP On Death */
         buf[0]=0x53746179; buf[1]=0x20496E20; buf[2]=0x5450204F; buf[3]=0x6E204465; buf[4]=0x61746800;
     } else if (index == 48) { /* TP Crouch Cam */
@@ -9124,10 +9124,98 @@ char *frontModGetOptionLabel(s32 index)
     } else if (index == 51) { /* TP Sight Translucency */
         buf[0]=0x54502053; buf[1]=0x69676874; buf[2]=0x20547261; buf[3]=0x6E736C75;
         buf[4]=0x63656E63; buf[5]=0x79000000;
+    } else if (index == 52) { /* Enemy Bullet Holes */
+        buf[0]=0x456E656D; buf[1]=0x79204275; buf[2]=0x6C6C6574;
+        buf[3]=0x20486F6C; buf[4]=0x65730000;
+    } else if (index == 53) { /* Patches */
+        buf[0]=0x50617463; buf[1]=0x68657300;
+    } else if (index == 54) { /* Third-Person Options */
+        buf[0]=0x54686972; buf[1]=0x642D5065; buf[2]=0x72736F6E;
+        buf[3]=0x204F7074; buf[4]=0x696F6E73; buf[5]=0;
+    } else if (index == 55) { /* TP Corner Shooting Fix */
+        buf[0]=0x54502043; buf[1]=0x6F726E65; buf[2]=0x72205368;
+        buf[3]=0x6F6F7469; buf[4]=0x6E672046; buf[5]=0x69780000;
+    } else if (index == 56) { /* TP Cam Distance */
+        buf[0]=0x54502043; buf[1]=0x616D2044; buf[2]=0x69737461; buf[3]=0x6E636500;
+    } else if (index == 57) { /* TP Cam Height */
+        buf[0]=0x54502043; buf[1]=0x616D2048; buf[2]=0x65696768; buf[3]=0x74000000;
+    } else if (index == 58) { /* TP Cam Horizontal */
+        buf[0]=0x54502043; buf[1]=0x616D2048; buf[2]=0x6F72697A;
+        buf[3]=0x6F6E7461; buf[4]=0x6C000000;
+    } else if (index == 59) { /* TP Cam Down Frame */
+        buf[0]=0x54502043; buf[1]=0x616D2044; buf[2]=0x6F776E20;
+        buf[3]=0x4672616D; buf[4]=0x65000000;
+    } else if (index == 60) { /* TP Crouched Cam Height */
+        buf[0]=0x54502043; buf[1]=0x726F7563; buf[2]=0x68656420;
+        buf[3]=0x43616D20; buf[4]=0x48656967; buf[5]=0x68740000;
+    } else if (index == 61) { /* TP Crosshair Range */
+        buf[0]=0x54502043; buf[1]=0x726F7373; buf[2]=0x68616972;
+        buf[3]=0x2052616E; buf[4]=0x67650000;
+    } else if (index == 62) { /* TP World-Space Crosshair */
+        buf[0]=0x54502057; buf[1]=0x6F726C64; buf[2]=0x2D537061;
+        buf[3]=0x63652043; buf[4]=0x726F7373; buf[5]=0x68616972; buf[6]=0;
+    } else if (index == 63) { /* Map Maker */
+        buf[0]=0x4D617020; buf[1]=0x4D616B65; buf[2]=0x72000000;
+    } else if (index == 64) { /* Level Modifiers */
+        buf[0]=0x4C657665; buf[1]=0x6C204D6F; buf[2]=0x64696669; buf[3]=0x65727300;
+    } else if (index == 65) { /* In-Game Cheats */
+        buf[0]=0x496E2D47; buf[1]=0x616D6520; buf[2]=0x43686561; buf[3]=0x74730000;
+    } else if (index == 66) { /* Single-Player Options */
+        buf[0]=0x53696E67; buf[1]=0x6C652D50; buf[2]=0x6C617965;
+        buf[3]=0x72204F70; buf[4]=0x74696F6E; buf[5]=0x73000000;
+    } else if (index == 67) { /* Character Modifier */
+        buf[0]=0x43686172; buf[1]=0x61637465; buf[2]=0x72204D6F;
+        buf[3]=0x64696669; buf[4]=0x65720000;
+    } else if (index == 68) { /* Match View Height */
+        buf[0]=0x4D617463; buf[1]=0x68205669; buf[2]=0x65772048;
+        buf[3]=0x65696768; buf[4]=0x74000000;
+    } else if (index == 69) { /* Disabled */
+        buf[0]=0x44697361; buf[1]=0x626C6564; buf[2]=0;
+    } else if (index == 70) { /* Unlimited Explosions */
+        buf[0]=0x556E6C69; buf[1]=0x6D697465; buf[2]=0x64204578;
+        buf[3]=0x706C6F73; buf[4]=0x696F6E73; buf[5]=0;
+    } else if (index == 71) { /* Debug */
+        buf[0]=0x44656275; buf[1]=0x67000000;
+    } else if (index == 72) { /* Master Control Debug Menu */
+        buf[0]=0x4D617374; buf[1]=0x65722043; buf[2]=0x6F6E7472;
+        buf[3]=0x6F6C2044; buf[4]=0x65627567; buf[5]=0x204D656E;
+        buf[6]=0x75000000;
+    } else if (index == 73) { /* Melee Quick-Swap */
+        buf[0]=0x4D656C65; buf[1]=0x65205175; buf[2]=0x69636B2D; buf[3]=0x53776170; buf[4]=0;
+    } else if (index == 74) { /* Experimental */
+        buf[0]=0x45787065; buf[1]=0x72696D65; buf[2]=0x6E74616C; buf[3]=0;
+    } else if (index == 75) { /* Jumping (Press L) */
+        buf[0]=0x4A756D70; buf[1]=0x696E6720; buf[2]=0x28507265;
+        buf[3]=0x7373204C; buf[4]=0x29000000;
+    } else if (index == 76) { /* Enhancements */
+        buf[0]=0x456E6861; buf[1]=0x6E63656D; buf[2]=0x656E7473; buf[3]=0;
+    } else if (index == 77) { /* Additional Death Animations For Player */
+        buf[0]=0x41646469; buf[1]=0x74696F6E; buf[2]=0x616C2044; buf[3]=0x65617468;
+        buf[4]=0x20416E69; buf[5]=0x6D617469; buf[6]=0x6F6E7320; buf[7]=0x466F7220;
+        buf[8]=0x506C6179; buf[9]=0x65720000;
+    } else if (index == 78) { /* Always Show Crosshair */
+        buf[0]=0x416C7761; buf[1]=0x79732053; buf[2]=0x686F7720;
+        buf[3]=0x43726F73; buf[4]=0x73686169; buf[5]=0x72000000;
+    } else if (index == 79) { /* Disable Body Armor */
+        buf[0]=0x44697361; buf[1]=0x626C6520; buf[2]=0x426F6479;
+        buf[3]=0x2041726D; buf[4]=0x6F720000;
+    } else if (index == 80) { /* Silo X Music Loop Fix */
+        buf[0]=0x53696C6F; buf[1]=0x2058204D; buf[2]=0x75736963;
+        buf[3]=0x204C6F6F; buf[4]=(((u32)0x7020 << 16) | 0x4669); buf[5]=0x78000000;
+    } else if (index == 81) { /* AR33 Prop Fix (MP) */
+        buf[0]=0x41523333; buf[1]=0x2050726F; buf[2]=(((u32)0x7020 << 16) | 0x4669);
+        buf[3]=0x7820284D; buf[4]=0x50290000;
+    } else if (index == 82) { /* Facility Gas Leak Death */
+        buf[0]=0x46616369; buf[1]=0x6C697479; buf[2]=0x20476173; buf[3]=0x204C6561; buf[4]=0x6B204465; buf[5]=0x61746800;
+    } else if (index == 83) { /* Staggering Backwards Death */
+        buf[0]=0x53746167; buf[1]=0x67657269; buf[2]=0x6E672042; buf[3]=0x61636B77; buf[4]=0x61726473; buf[5]=0x20446561; buf[6]=0x74680000;
+    } else if (index == 84) { /* Additional Death Animations > */
+        buf[0]=0x41646469; buf[1]=0x74696F6E; buf[2]=0x616C2044; buf[3]=0x65617468; buf[4]=0x20416E69; buf[5]=0x6D617469; buf[6]=0x6F6E7320; buf[7]=0x3E000000;
     } else {
         buf[0]=0;
     }
 
     return (char *)buf;
 }
+
 #endif

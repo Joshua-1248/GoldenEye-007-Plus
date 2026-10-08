@@ -5,11 +5,20 @@
 #include "propobj.h"
 #include "cleanup_objects.h"
 #include "loadobjectmodel.h"
+#ifdef GE_MODDED_CHEATS
+#include "levelmodifiers.h"
+#endif
 
 
 void cleanupObjects(s32 stage)
 {
     u32 *obj = (u32)g_CurrentSetup.propDefs;
+
+#ifdef GE_MODDED_CHEATS
+    /* R27Q: synthetic Dam objects are not members of propDefs, so release
+     * them explicitly before the ordinary setup-object cleanup pass. */
+    levelModifiersOnStageCleanup(stage);
+#endif
     
     if (obj)
     {

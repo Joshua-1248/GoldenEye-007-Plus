@@ -12,7 +12,7 @@ ck("destructive cinematic body handoff occurs only on first POSEND entry", "if (
 ck("POSEND still uses stock solo_char_load", "solo_char_load();" in BV)
 ck("Co-Op cinematic Bond resolves explicitly to P1", "g_playerPointers[PLAYER_1]->prop->chr->chrnum" in CA)
 ck("Co-Op Bond-relative target context pins to P1", "if (lvlIsCoopEndCutscene())" in CH and "return PLAYER_1;" in CH)
-ck("Co-Op character full tick pins to P1", "|| (lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)" in CH)
+ck("Co-Op character full tick pins to P1", "(coopMode && lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1)" in CH)
 ck("Co-Op object and weapon simulation pin to P1", PO.count("lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1") >= 2)
 ck("Co-Op character-prop housekeeping pins to P1", "lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1" in CP)
 ck("Co-Op room housekeeping pins to P1", "lvlIsCoopEndCutscene() && get_cur_playernum() == PLAYER_1" in BG)

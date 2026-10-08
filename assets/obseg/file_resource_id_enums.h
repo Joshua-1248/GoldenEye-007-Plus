@@ -876,6 +876,11 @@ typedef enum FILEINDEXID
 #endif
     /* V90: appended after all existing resources so no prior ID moves. */
     MP_SETUPCAT,
+#ifdef GE_MODDED_CHEATS
+    BG_COURTYARD_ALL_P,
+    BG_COURTYARD_ALL_P_STAN,
+    MP_SETUPCOURTYARD,
+#endif
     OBENDSEG
 } FILEINDEXID;
 

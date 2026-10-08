@@ -483,20 +483,62 @@ def audit_stale_pointer_words(elf: Elf32, audit: Audit) -> None:
                         blob[off - 4:off] == bytes.fromhex("7f5f7f34")
                         and blob[off + 4:off + 8] == bytes.fromhex("7e977e58")
                     )
-                # libultra's gu sine table also contains adjacent signed-16
-                # entries 0x7F0E,0x7F14.  In a physical build those four bytes
-                # can numerically equal the retail virtual address of
-                # mpFindMaxInt (0x7F0E7F14).  Require the exact neighboring
-                # sine coefficients so a genuine stale pointer with the same
-                # value is still rejected everywhere else.
+                # libultra's gu sine table contains adjacent signed-16
+                # coefficient pairs which can numerically equal retail virtual
+                # addresses. Require exact neighboring coefficients before
+                # suppressing them so a genuine stale function pointer with the
+                # same 32-bit value is still rejected.
+                #
+                # R27Q_R9_SINTABLE_7F017F08_FALSE_POSITIVE:
+                #   ... 7EF5 7EFB | 7F01 7F08 | 7F0E 7F14 ...
+                # 0x7F017F08 happens to equal the retail address of
+                # interface_menu0A_briefing.
                 is_sintable_coeff_pair = False
-                if sec.name == ".csegment" and word == 0x7F0E7F14 and off >= 4 and off + 8 <= len(blob):
-                    is_sintable_coeff_pair = (
-                        blob[off - 4:off] == bytes.fromhex("7f017f08")
-                        and blob[off + 4:off + 8] == bytes.fromhex("7f1a7f20")
+                if sec.name == ".csegment" and off >= 4 and off + 8 <= len(blob):
+                    if word == 0x7F017F08:
+                        is_sintable_coeff_pair = (
+                            blob[off - 4:off] == bytes.fromhex("7ef57efb")
+                            and blob[off + 4:off + 8] == bytes.fromhex("7f0e7f14")
+                        )
+                    elif word == 0x7F0E7F14:
+                        is_sintable_coeff_pair = (
+                            blob[off - 4:off] == bytes.fromhex("7f017f08")
+                            and blob[off + 4:off + 8] == bytes.fromhex("7f1a7f20")
+                        )
+
+                # R27M R1: m_AttackBond is an AI bytecode array in .csegment.
+                # One aligned four-byte window in that byte stream is
+                # 7f 0b 14 00, which numerically equals the retail virtual
+                # address of bondviewGetThirdPersonVisibilityCamera.
+                #
+                # Suppress only when BOTH:
+                #   1) the runtime word lies inside the m_AttackBond symbol, and
+                #   2) the exact neighboring AI-bytecode signature matches.
+                #
+                # A genuine 0x7F0B1400 pointer anywhere else still fails.
+                is_attackbond_ai_bytecode = False
+                attackbond = syms_by_name.get("m_AttackBond")
+
+                if (
+                    sec.name == ".csegment"
+                    and word == 0x7F0B1400
+                    and attackbond is not None
+                    and attackbond.shndx == sec.index
+                    and attackbond.size > 0
+                    and attackbond.value <= runtime_addr < attackbond.value + attackbond.size
+                    and off >= 8
+                    and off + 12 <= len(blob)
+                ):
+                    is_attackbond_ai_bytecode = (
+                        blob[off - 8:off] == bytes.fromhex("7f03120202033335")
+                        and blob[off + 4:off + 12] == bytes.fromhex("01000002020b1500")
                     )
 
-                if not is_eqpower_coeff_pair and not is_sintable_coeff_pair:
+                if (
+                    not is_eqpower_coeff_pair
+                    and not is_sintable_coeff_pair
+                    and not is_attackbond_ai_bytecode
+                ):
                     names = ", ".join(sorted(set(old_to_symbols[word]))[:4])
                     hits.append((sec, off, word, names))
             if word in LEGACY_EXACT_WORDS:

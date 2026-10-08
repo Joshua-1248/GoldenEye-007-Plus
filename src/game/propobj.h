@@ -79,6 +79,9 @@ Gfx                 *weaponRenderTracers(Gfx *gdl);
 void                 set_color_shading_from_tile(PropRecord *prop, u8 col[4]);
 void                 propobjSetDropped(PropRecord *prop, DROPTYPE droptype);
 void                 sub_GAME_7F04E9BC(PropRecord *prop, struct ShotData *shotdata);
+#ifdef GE_MODDED_CHEATS
+void                 objCreateBulletImpactVisual(struct ShotData *shotdata, struct BulletHit *hit);
+#endif
 void                 objDropRecursively(PropRecord *prop);
 void                 chrobjSndCreatePostEventDefault(ALSoundState *, coord3d *);
 void                 alarmActivate(void);

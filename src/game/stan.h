@@ -94,6 +94,14 @@ void copy_tile_RGB_as_24bit(StandTile *tile, f32 p_x, f32 p_z, u8 *rtn);
 s32 stanTileDistanceRelated(struct StandTile **arg0, f32 arg1, f32 arg2, f32 arg3, struct StandTileLocusCallbackRecord *arg4);
 s32 stanGetLocusField0(struct StandTileLocusCallbackRecord *arg0);
 s32 stanGetLocusCount(struct StandTileLocusCallbackRecord *arg0);
+
+/* Simulant navigation helpers: expose STAN's existing linked walk-surface graph
+ * without making the bot backend duplicate STAN encoding/mirroring rules. */
+void getTileMidPoint(StandTile *tile, coord3d *out);
+s32 stanGetTilePointCount(StandTile *tile);
+StandTile *stanGetLinkedTileAtEdge(StandTile *tile, s32 edgeIndex);
+s32 stanGetEdgeMidPointWorld(StandTile *tile, s32 edgeIndex, coord3d *out, f32 *width);
+f32 stanGetTileCenterClearanceWorld(StandTile *tile);
 f32 distBetweenPoints2d(f32 o_x,f32 o_z,f32 p_x,f32 p_z);
 bool stanPointProjectsOntoEdge(f32 x1, f32 z1, f32 x2, f32 z2, f32 x3, f32 z3);
 f32 stanGetSignedPointLineDistance(f32 x1, f32 z1, f32 x2, f32 z2, f32 x3, f32 z3);
@@ -105,6 +113,7 @@ s32 isPointInsideTriStandTileUnscaled_Maybe(struct StandTile *tile, f32 p_x, f32
 s32 sub_GAME_7F0B21B0(StandTile **tileStack, f32 target_x, f32 target_z, f32 radius, s32 *rooms, s32 *count_rtn, s32 bufMax);
 StandTile *stanFindTileBelowPos(coord3d *pos, u8 *rooms, f32 *yRtn);
 #ifdef GE_MODDED_CHEATS
+bool stanTestPointWithinTileFullBounds(StandTile *tile, f32 p_x, f32 p_z);
 StandTile *stanFindGroundAtCyl(coord3d *pos, f32 radius, u8 *rooms, f32 *yRtn);
 void stanMirrorLevelsSetEnabled(s32 enabled);
 s32 stanMirrorLevelsIsEnabled(void);

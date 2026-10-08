@@ -353,6 +353,7 @@ void gunClearThirdPersonResolvedBeam(enum GUNHAND hand);
 void gunSetThirdPersonResolvedBeam(enum GUNHAND hand, const coord3d *origin, const coord3d *target);
 #endif
 void CapBeamLengthAndDecideIfRendered(struct BeamRecord *arg0, ITEM_IDS item, coord3d *arg2, coord3d *arg3);
+void gunCreateBeamForHand(enum GUNHAND hand);
 void sub_GAME_7F068190(coord3d *arg0, coord3d *arg1);
 
 void inc_curplayer_hitcount_with_weapon(ITEM_IDS item, SHOT_REGISTER shot_register);

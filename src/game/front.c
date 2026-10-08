@@ -1,3 +1,8 @@
+/* R27P R4: R27E deferred-save helper is called before its later
+ * implementation in this translation unit. Declare it up front
+ * so IDO/cfe never creates an implicit-int declaration. */
+static void frontModCommitDeferredSubmenuSettings(void);
+
 #include <os_extension.h>
 #include <assets/oddtextures.h>
 #include "assets/image_externs.h"
@@ -48,6 +53,7 @@
 #include "model.h"
 #ifdef GE_MODDED_CHEATS
 #include "levelmodifiers.h"
+#include "mpbots.h"
 #endif
 #ifdef GE_MAP_MAKER
 #include "mapmaker.h"
@@ -286,6 +292,8 @@ s32 highlight_controlstyle;
 s32 highlight_aimadjustment;
 #ifdef GE_MODDED_CHEATS
 s32 highlight_settings;
+s32 highlight_bots;
+s32 highlight_botsettings;
 s32 highlight_noradar;
 #ifdef GE_MODDED_CHEATS
 s32 highlight_viewportlock;
@@ -293,6 +301,17 @@ s32 highlight_killcount;
 #endif
 s32 mp_player_options_player;
 s32 mp_player_options_highlight;
+static s32 g_ModMpBotSettingsChoice;
+static s32 g_ModMpBotEditSlot;
+static s32 g_ModMpBotEditChoice;
+static s32 g_ModMpBotTraitChoice;
+static s32 g_ModMpBotTraitScroll;
+static s32 g_ModMpBotRenameRow;
+static s32 g_ModMpBotRenameCol;
+static s32 g_ModMpBotRenameMode;
+static s32 g_ModMpBotRenameCaret;
+static s32 g_ModMpBotRenameDpad;
+static char g_ModMpBotRenameOriginal[MOD_MP_BOT_NAME_LEN];
 #endif
 //CODE.bss:800697EC                     .align 4
 
@@ -610,7 +629,8 @@ struct mp_stage_setup multi_stage_setups[] = {
 #ifdef GE_MODDED_CHEATS
     {getStringID(LTITLE, TITLE_STR_178_STAT), getStringID(LTITLE, TITLE_STR_179_STAT2), IMG_MP_STATUE, LEVELID_STATUE, SP_LEVEL_STATUE, 1, 4},
     {getStringID(LTITLE, TITLE_STR_180_CRAD), getStringID(LTITLE, TITLE_STR_181_CRADLE2), IMG_MP_CRADLE, LEVELID_CRADLE, SP_LEVEL_CRADLE, 1, 4},
-    {getStringID(LTITLE, TITLE_STR_174_CITADEL), getStringID(LTITLE, TITLE_STR_175_CITADEL2), IMG_MP_CITADEL, LEVELID_CITADEL, -1, 1, 4}
+    {getStringID(LTITLE, TITLE_STR_174_CITADEL), getStringID(LTITLE, TITLE_STR_175_CITADEL2), IMG_MP_CITADEL, LEVELID_CITADEL, -1, 1, 4},
+    {getStringID(LTITLE, TITLE_STR_176_DEST), getStringID(LTITLE, TITLE_STR_177_DEST2), IMG_MP_COURTYARD, LEVELID_COURTYARD, -1, 1, 4}
 #endif
   // Citadel restored for multiplayer in GoldenEye Plus using Zoinkity's hand-reclipped collision/setup work.
   //{getStringID(LTITLE, TITLE_STR_176_DEST), getStringID(LTITLE, TITLE_STR_177_DEST2), IMG_MP_FRIGATE, LEVELID_FRIGATE, SP_LEVEL_FRIGATE, 1, 4}, //dest (has xbla setup)
@@ -689,7 +709,8 @@ struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_223_SALLY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Sally, 1.0446},
     {getStringID(LTITLE, TITLE_STR_224_MARION), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Marion_Rosika, 1.0446},
     {getStringID(LTITLE, TITLE_STR_225_MANDY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Mandy, 1.0446},
-    {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446}
+    {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446},
+    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, HEAD_Male_Dwayne, 1.0}
 };
 #else
 struct MP_selectable_chars mp_chr_setup[] = {
@@ -756,7 +777,8 @@ struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_223_SALLY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Sally, 1.0446},
     {getStringID(LTITLE, TITLE_STR_224_MARION), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Marion_Rosika, 1.0446},
     {getStringID(LTITLE, TITLE_STR_225_MANDY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Mandy, 1.0446},
-    {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446}
+    {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446},
+    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, HEAD_Male_Dwayne, 1.0}
 };
 #endif
 
@@ -813,7 +835,7 @@ static s32 frontMpScenarioAllowedForCount(s32 scenarioid, s32 playercount)
 {
     if (scenarioid == SCENARIO_COOP)
     {
-        return playercount >= 2 && playercount <= 4;
+        return playercount >= 1 && playercount <= 4;
     }
 
     if (playercount == 1)
@@ -2983,9 +3005,191 @@ void update_menu06_modesel(void)
 }
 
 
+
+
+#ifdef GE_MODDED_CHEATS
+/*
+ * R27H: one-shot developer convenience preset.
+ *
+ * This is deliberately wired only from MENU_MODE_SELECT, the folder's main
+ * Bond-portrait menu. It is not polled by gameplay, Watch menus, MP menus,
+ * file select, or any other frontend page.
+ *
+ * Combo: L + R + C-Up + C-Down + C-Left + C-Right.
+ *
+ * The final button that completes the held chord supplies the
+ * "PressedThisFrame" edge, so holding the chord does not repeatedly write
+ * EEPROM every frame.
+ */
+#define MOD_QUICK_SETTINGS_COMBO \
+    (L_TRIG | R_TRIG | U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS)
+
+static s32 g_ModQuickSettingsPresetDirty;
+static void frontModCommitQuickSettingsPresetIfDirty(void);
+
+static void frontModApplyQuickSettingsPreset(void)
+{
+    save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+    s32 i;
+
+    if (save == NULL)
+    {
+        return;
+    }
+
+    /*
+     * Main Options:
+     * Music 0%, FX 100%, 1.2 Solitaire, Reverse, Auto Aim Off,
+     * Aim Control Hold, Sight On Screen On, Look Ahead Off,
+     * Ammo On Screen On, Full, 4:3.
+     *
+     * Special Options:
+     * Head Roll On, Endless Death Cam On, Real-Time Collapse On,
+     * Damage Hitstun Off, Damage Knockback Off, Damage Flash Off,
+     * Crosshair On, Taking Damage Sound Off, Enemy Bullet Holes On.
+     */
+    save->music_vol = 0;
+    save->sfx_vol = 255;
+
+    save->options =
+        OPTION_SIGHTONSCREEN
+        | OPTION_DISPLAYAMMO
+        | OPTION_HEADROLL
+        | OPTION_CROSSHAIR
+        | OPTION_R21_MIGRATED
+        | (((u16)CONTROLLER_CONFIG_SOLITARE << 8) & OPTION_CONTROLTYPE);
+
+    g_ModGameplayOptions2 =
+        MODOPT2_ENDLESS_DEATHCAM
+        | MODOPT2_REALTIME_COLLAPSE
+        | MODOPT2_DISABLE_HITSTUN
+        | MODOPT2_REVERSE_DEFAULT
+        | MODOPT2_DISABLE_DAMAGE_SFX
+        | MODOPT2_DISABLE_KNOCKBACK
+        | MODOPT2_DISABLE_NOISE_DITHER;
+    save->mod_options2 = g_ModGameplayOptions2;
+
+    /*
+     * Patches:
+     * Micro-Optimizations On, Noise Dithering Off (above),
+     * Anti-Aliasing Off, TP Corner Shooting Fix Off.
+     *
+     * Preserve camera-pack payload bits 1..3 until the canonical pack below
+     * rewrites them; only replace live option and signature bits here.
+     */
+    g_ModGameplayOptions3 &=
+        ~(MODOPT3_SIGNATURE_MASK
+            | MODOPT3_DIRECTIONAL_SHOULDER
+            | MODOPT3_TP_CROUCH_CAM
+            | MODOPT3_ENABLE_MICROOPT);
+    g_ModGameplayOptions3 |=
+        MODOPT3_SIGNATURE
+        | MODOPT3_TP_CROUCH_CAM
+        | MODOPT3_ENABLE_MICROOPT;
+    save->mod_options3 = g_ModGameplayOptions3;
+
+    g_ModAntiAliasingEnabled = FALSE;
+    g_ModEnemyBulletHolesEnabled = TRUE;
+    g_ModTpCornerShootingFixEnabled = FALSE;
+    g_ModUnlimitedExplosionsEnabled = FALSE;
+    g_ModMasterControlDebugMenuEnabled = FALSE;
+
+    /*
+     * Third-Person Options:
+     * Stay In TP On Death On, TP Crouch Cam On, Directional Shoulder Off,
+     * TP Sight Translucency On, 310 / -12 / -24 / 24 / 46,
+     * TP Crosshair Range 500, TP World-Space Crosshair Off.
+     */
+    g_ModStayInTpOnDeathDefault = TRUE;
+    g_ModTpSightTranslucencyEnabled = TRUE;
+    g_ModTpWorldSpaceCrosshairEnabled = FALSE;
+    g_ModThirdPersonCameraDistanceAdjust = 310 - TP_CAM_DISTANCE_DEFAULT;
+    g_ModThirdPersonCameraHeightAdjust = -12 - TP_CAM_HEIGHT_DEFAULT;
+    g_ModThirdPersonCameraHorizontalAdjust = -24 - TP_CAM_HORIZONTAL_DEFAULT;
+    g_ModThirdPersonCameraDownFrameAdjust = 24 - TP_CAM_DOWN_FRAME_DEFAULT;
+    g_ModThirdPersonCrouchCameraHeightAdjust = 46 - TP_CROUCH_CAM_HEIGHT_DEFAULT;
+    g_ModThirdPersonCrosshairRange = 500;
+
+    for (i = 0; i < MAX_PLAYER_COUNT; i++)
+    {
+        g_PlayerStayInTpOnDeath[i] = TRUE;
+    }
+
+    /*
+     * Repack the legacy TP-camera mirror before writing the 0x60-byte save.
+     * The extension journal written just after this remains authoritative.
+     */
+    fileStoreThirdPersonCameraSettings(save);
+
+    /*
+     * R27H R1: do not write EEPROM/extension state from the chord handler.
+     * The live values are already active. Commit the selected folder once,
+     * when MODE SELECT is actually exited, matching the existing V39
+     * deferred-write policy used by the frontend Options menus.
+     */
+    g_ModQuickSettingsPresetDirty = TRUE;
+
+    frontModApplyMusicVolume(save);
+    frontModApplySfxVolume(save);
+
+    /*
+     * Multiplayer settings from the supplied screenshots.
+     * All four: 1.2 Solitaire, Reverse, Auto Aim Off, Hold,
+     * Sight On, Look Ahead Off, Ammo On, Head Roll On,
+     * Crosshair On, Third Person Off.
+     *
+     * Taking Damage Sound is intentionally asymmetric:
+     * P1 Off, P2/P3/P4 On.
+     */
+    for (i = 0; i < MAX_PLAYER_COUNT; i++)
+    {
+        controlstyle_player[i] = CONTROLLER_CONFIG_SOLITARE;
+        g_MpPlayerOptions[i] =
+            MP_PLAYEROPT_SIGHT
+            | MP_PLAYEROPT_AMMO
+            | MP_PLAYEROPT_HEADROLL;
+
+        if (i != PLAYER_1)
+        {
+            g_MpPlayerOptions[i] |= MP_PLAYEROPT_DAMAGE_SFX;
+        }
+
+        g_MpPlayerCrosshair[i] = TRUE;
+        g_PlayerThirdPerson[i] = FALSE;
+        g_PlayerStayInTpOnDeath[i] = TRUE;
+    }
+
+    /* MP Settings: No Radar Off, Lock Viewport None, Kill Count Message Off. */
+    g_CheatActivated[CHEAT_NO_RADAR_MP] = FALSE;
+    g_MpViewportLock = 0;
+    g_MpKillCountMessageEnabled = FALSE;
+
+    /* FX is now 100%, so this gives immediate audible confirmation. */
+    sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+}
+
+static s32 frontModCheckQuickSettingsPresetCombo(void)
+{
+    const u16 combo = MOD_QUICK_SETTINGS_COMBO;
+
+    if (joyGetButtons(PLAYER_1, combo) == combo
+        && joyGetButtonsPressedThisFrame(PLAYER_1, combo) != 0)
+    {
+        frontModApplyQuickSettingsPreset();
+        return TRUE;
+    }
+
+    return FALSE;
+}
+#endif
+
 void interface_menu06_modesel(void)
 {
     u32 i;
+
+#ifdef GE_MODDED_CHEATS
+    frontModCheckQuickSettingsPresetCombo();
+#endif
 
     is_cheat_menu_available = FALSE;
 #ifdef GE_MODDED_CHEATS
@@ -3042,6 +3246,7 @@ void interface_menu06_modesel(void)
         if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
         {
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
+            frontModCommitQuickSettingsPresetIfDirty();
             frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
             return;
         }
@@ -3056,11 +3261,20 @@ void interface_menu06_modesel(void)
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
         }
     }
+#ifdef GE_MODDED_CHEATS
+    else if ((238.0f <= cursor_v_pos) && (joyGetControllerCount() >= 1))
+#else
     else if ((238.0f <= cursor_v_pos) && (joyGetControllerCount() >= 2))
+#endif
     {
         mission_difficulty_highlighted = DIFFICULTY_SECRET;
         if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
         {
+            /*
+             * R27Z/R29: Multiplayer is a game mode, not a synonym for
+             * "two or more human controllers". One human remains genuine
+             * GAMEMODE_MULTI, with or without bots.
+             */
             gamemode = GAMEMODE_MULTI;
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
         }
@@ -3081,6 +3295,20 @@ void interface_menu06_modesel(void)
         sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, 0);
     }
     frontUpdateControlStickPosition();
+
+#ifdef GE_MODDED_CHEATS
+    /* Any navigation out of MODE SELECT commits the one-shot preset exactly
+     * once. Remaining on this screen performs no EEPROM write. */
+    if (g_ModQuickSettingsPresetDirty
+        && (gamemode == GAMEMODE_SOLO
+            || gamemode == GAMEMODE_MULTI
+            || gamemode == GAMEMODE_CHEATS
+            || tab_prev_selected))
+    {
+        frontModCommitQuickSettingsPresetIfDirty();
+    }
+#endif
+
     if (gamemode == GAMEMODE_SOLO)
     {
         frontChangeMenu(MENU_MISSION_SELECT, FALSE);
@@ -3881,7 +4109,7 @@ void interface_menu08_difficulty(void)
         {
             tab_prev_selected = TRUE;
 
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else
         {
@@ -4569,8 +4797,54 @@ void advance_aim_settings_selection(void)
 #endif
 
 
+#ifdef GE_MODDED_CHEATS
+s32 frontGetMpCharacterCount(void)
+{
+    return (s32)(sizeof(mp_chr_setup) / sizeof(mp_chr_setup[0]));
+}
+
+s32 frontGetMpCharacterData(s32 index, s32 *body, s32 *head, f32 *pov)
+{
+    s32 count = frontGetMpCharacterCount();
+
+    if (index < 0 || index >= count)
+        return FALSE;
+
+    if (body != NULL) *body = mp_chr_setup[index].body;
+    if (head != NULL) *head = mp_chr_setup[index].head;
+    if (pov != NULL) *pov = mp_chr_setup[index].pov;
+    return TRUE;
+}
+
+const char *frontGetMpCharacterName(s32 index)
+{
+    if (index < 0 || index >= frontGetMpCharacterCount())
+        return "";
+
+    return (const char *)langGet(mp_chr_setup[index].text_preset);
+}
+
+s32 frontGetSinglePlayerCharacterOverride(s32 *body, s32 *head, f32 *pov)
+{
+    s32 index;
+    s32 count = frontGetMpCharacterCount();
+
+    if (g_ModSinglePlayerCharacter == 0)
+        return FALSE;
+
+    index = (s32)g_ModSinglePlayerCharacter - 1;
+    if (index < 0 || index >= count)
+        return FALSE;
+
+    if (body != NULL) *body = mp_chr_setup[index].body;
+    if (head != NULL) *head = mp_chr_setup[index].head;
+    if (pov != NULL) *pov = mp_chr_setup[index].pov;
+    return TRUE;
+}
+#endif
+
 void unlock_all_mp_chars(void) {
-    num_chars_selectable_mp = 0x40;
+    num_chars_selectable_mp = (s32)(sizeof(mp_chr_setup) / sizeof(mp_chr_setup[0]));
 }
 
 
@@ -4724,13 +4998,6 @@ void init_mp_options_for_scenario(s32 numplayers)
 {
     s32 i;
 
-#ifdef GE_MODDED_CHEATS
-    if (scenario == SCENARIO_COOP && numplayers < 2)
-    {
-        numplayers = 2;
-    }
-#endif
-
     if (numplayers < 1)
     {
         numplayers = 1;
@@ -4816,7 +5083,9 @@ void init_menu0E_mpoptions(void)
     highlight_character = FALSE;
     highlight_weaponselect = FALSE;
 #ifdef GE_MODDED_CHEATS
+    highlight_bots = FALSE;
     highlight_settings = FALSE;
+    highlight_botsettings = FALSE;
 #else
     highlight_health = FALSE;
     highlight_controlstyle = FALSE;
@@ -4844,7 +5113,9 @@ void interface_menu0E_mpoptions(void)
     s32 character_selected = 0;
     s32 weapon_selected = 0;
 #ifdef GE_MODDED_CHEATS
+    s32 bots_selected = 0;
     s32 settings_selected = 0;
+    s32 botsettings_selected = 0;
 #else
     s32 health_selected = 0;
     s32 controlstyle_selected = 0;
@@ -4873,7 +5144,9 @@ void interface_menu0E_mpoptions(void)
         highlight_character = 0;
         highlight_weaponselect = 0;
 #ifdef GE_MODDED_CHEATS
+        highlight_bots = 0;
         highlight_settings = 0;
+        highlight_botsettings = 0;
 #else
         highlight_health = 0;
         highlight_controlstyle = 0;
@@ -4892,11 +5165,15 @@ void interface_menu0E_mpoptions(void)
         {
             s32 temp_f6 = cursor_v_pos;
 #ifdef GE_MODDED_CHEATS
-            if (temp_f6 >= 0xF1)
+            if (temp_f6 >= 0x119)
+            {
+                highlight_botsettings = 1;
+            }
+            else if (temp_f6 >= 0x105)
             {
                 highlight_settings = 1;
             }
-            else if ((temp_f6 >= 0xDD) && (unlock_chars))
+            else if ((temp_f6 >= 0xF1) && (unlock_chars))
 #else
             if ((temp_f6 >= 0x119) && (unlock_aim_sight))
             {
@@ -4916,7 +5193,7 @@ void interface_menu0E_mpoptions(void)
                 highlight_character = 1;
             }
 #ifdef GE_MODDED_CHEATS
-            else if ((temp_f6 >= 0xC9) && (unlock_weapon_select))
+            else if ((temp_f6 >= 0xDD) && (unlock_weapon_select))
 #else
             else if ((temp_f6 >= 0xC9) && (unlock_weapon_select))
 #endif
@@ -4924,7 +5201,7 @@ void interface_menu0E_mpoptions(void)
                 highlight_weaponselect = 1;
             }
 #ifdef GE_MODDED_CHEATS
-            else if ((temp_f6 >= 0xB5) && (unlock_game_length))
+            else if ((temp_f6 >= 0xC9) && (unlock_game_length))
 #else
             else if ((temp_f6 >= 0xB5) && (unlock_game_length))
 #endif
@@ -4932,7 +5209,7 @@ void interface_menu0E_mpoptions(void)
                 highlight_gamelength = 1;
             }
 #ifdef GE_MODDED_CHEATS
-            else if ((temp_f6 >= 0xA1) && (unlock_stage_select))
+            else if ((temp_f6 >= 0xB5) && (unlock_stage_select))
 #else
             else if ((temp_f6 >= 0xA1) && (unlock_stage_select))
 #endif
@@ -4940,13 +5217,19 @@ void interface_menu0E_mpoptions(void)
                 highlight_gameselect = 1;
             }
 #ifdef GE_MODDED_CHEATS
-            else if (temp_f6 >= 0x8D)
+            else if (temp_f6 >= 0xA1)
 #else
             else if (temp_f6 >= 0x8D)
 #endif
             {
                 highlight_scenario = 1;
             }
+#ifdef GE_MODDED_CHEATS
+            else if (temp_f6 >= 0x8D)
+            {
+                highlight_bots = 1;
+            }
+#endif
             else
             {
                 highlight_players = 1;
@@ -4995,9 +5278,17 @@ void interface_menu0E_mpoptions(void)
             weapon_selected = 1;
         }
 #ifdef GE_MODDED_CHEATS
+        else if (highlight_bots)
+        {
+            bots_selected = 1;
+        }
         else if (highlight_settings)
         {
             settings_selected = 1;
+        }
+        else if (highlight_botsettings)
+        {
+            botsettings_selected = 1;
         }
 #else
         else if (highlight_health)
@@ -5014,7 +5305,13 @@ void interface_menu0E_mpoptions(void)
         }
 #endif
 
-        sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+#ifdef GE_MODDED_CHEATS
+        sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr,
+            (bots_selected || botsettings_selected) ? OPTION_CHOOSE_SFX : DOOR_METAL_CLOSE2_SFX,
+            NULL);
+#else
+        sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+#endif
     }
     else if (joyGetButtonsPressedThisFrame(PLAYER_1, B_BUTTON))
     {
@@ -5081,7 +5378,7 @@ void interface_menu0E_mpoptions(void)
             tmpNumPlayers = selected_num_players + 1;
             if (tmpNumPlayers > connected || tmpNumPlayers > MAX_PLAYER_COUNT)
             {
-                tmpNumPlayers = 2;
+                tmpNumPlayers = 1;
             }
         }
         else
@@ -5098,6 +5395,13 @@ void interface_menu0E_mpoptions(void)
 
         return;
     }
+#ifdef GE_MODDED_CHEATS
+    if (bots_selected)
+    {
+        modMpBotsCycleCount();
+        return;
+    }
+#endif
     if (scenario_selected)
     {
         frontChangeMenu(MENU_MP_SCENARIO_SELECT, 0);
@@ -5127,6 +5431,11 @@ void interface_menu0E_mpoptions(void)
     if (settings_selected)
     {
         frontChangeMenu(MENU_MP_SETTINGS, 0);
+        return;
+    }
+    if (botsettings_selected)
+    {
+        frontChangeMenu(MENU_MP_BOT_SETTINGS, 0);
         return;
     }
 #else
@@ -5184,13 +5493,25 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   }
   DL = frontPrintText(DL,&x,&y,text,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
 
+#ifdef GE_MODDED_CHEATS
+  text = (u8 *)"Bots";
+  textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+  x = 0x39;
+  y = 0x8d;
+  if (highlight_bots) {
+    DL = microcode_constructor_related_to_menus(DL,0x37,0x8c,iStack28 + 0x3c,0x9b,0x32);
+  }
+  DL = frontPrintText(DL,&x,&y,text,ptrFontZurichBoldChars,ptrFontZurichBold,
+      0xff,viGetX(),viGetY(),0,0);
+#endif
+
   text = langGet(getStringID(LTITLE, TITLE_STR_78_SCENARIO));
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
   x = 0x39;
 #ifdef GE_MODDED_CHEATS
-  y = 0x8d;
+  y = 0xa1;
   if (highlight_scenario) {
-    DL = microcode_constructor_related_to_menus(DL,0x37,0x8c,iStack28 + 0x3c,0x9b,0x32);
+    DL = microcode_constructor_related_to_menus(DL,0x37,0xa0,iStack28 + 0x3c,0xaf,0x32);
   }
 #else
   y = 0x8d;
@@ -5204,9 +5525,9 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
   x = 0x39;
 #ifdef GE_MODDED_CHEATS
-  y = 0xa1;
+  y = 0xb5;
   if (highlight_gameselect) {
-    DL = microcode_constructor_related_to_menus(DL,0x37,0xa0,iStack28 + 0x3c,0xaf,0x32);
+    DL = microcode_constructor_related_to_menus(DL,0x37,0xb4,iStack28 + 0x3c,0xc3,0x32);
   }
 #else
   y = 0xa1;
@@ -5226,9 +5547,9 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
   x = 0x39;
 #ifdef GE_MODDED_CHEATS
-  y = 0xb5;
+  y = 0xc9;
   if (highlight_gamelength) {
-    DL = microcode_constructor_related_to_menus(DL,0x37,0xb4,iStack28 + 0x3c,0xc3,0x32);
+    DL = microcode_constructor_related_to_menus(DL,0x37,0xc8,iStack28 + 0x3c,0xd7,0x32);
   }
 #else
   y = 0xb5;
@@ -5248,9 +5569,9 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
   x = 0x39;
 #ifdef GE_MODDED_CHEATS
-  y = 0xc9;
+  y = 0xdd;
   if (highlight_weaponselect) {
-    DL = microcode_constructor_related_to_menus(DL,0x37,0xc8,iStack28 + 0x3c,0xd7,0x32);
+    DL = microcode_constructor_related_to_menus(DL,0x37,0xdc,iStack28 + 0x3c,0xeb,0x32);
   }
 #else
   y = 0xc9;
@@ -5270,9 +5591,9 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
   x = 0x39;
 #ifdef GE_MODDED_CHEATS
-  y = 0xdd;
+  y = 0xf1;
   if (highlight_character) {
-    DL = microcode_constructor_related_to_menus(DL,0x37,0xdc,iStack28 + 0x3c,0xeb,0x32);
+    DL = microcode_constructor_related_to_menus(DL,0x37,0xf0,iStack28 + 0x3c,0xff,0x32);
   }
 #else
   y = 0xdd;
@@ -5292,11 +5613,21 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   text = (u8 *)"Settings";
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
   x = 0x39;
-  y = 0xf1;
+  y = 0x105;
   if (highlight_settings) {
-    DL = microcode_constructor_related_to_menus(DL,0x37,0xf0,iStack28 + 0x3c,0xff,0x32);
+    DL = microcode_constructor_related_to_menus(DL,0x37,0x104,iStack28 + 0x3c,0x113,0x32);
   }
   DL = frontPrintText(DL,&x,&y,text,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+
+  text = (u8 *)"Bot Settings";
+  textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+  x = 0x39;
+  y = 0x119;
+  if (highlight_botsettings) {
+    DL = microcode_constructor_related_to_menus(DL,0x37,0x118,iStack28 + 0x3c,0x127,0x32);
+  }
+  DL = frontPrintText(DL,&x,&y,text,ptrFontZurichBoldChars,ptrFontZurichBold,
+      0xff,viGetX(),viGetY(),0,0);
 #else
   text = langGet(getStringID(LTITLE, TITLE_STR_83_HEALTH));
   textMeasure(&iStack24,&iStack28,text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
@@ -5350,13 +5681,20 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   DL = frontPrintText(DL, &x, &y, acStack12, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
 
 #ifdef GE_MODDED_CHEATS
+  sprintf(acStack12, "%d", modMpBotsGetCount());
+  text = (u8 *)acStack12;
+  x = 0xa0;
+  y = 0x8d;
+  DL = frontPrintText(DL,&x,&y,text,ptrFontZurichBoldChars,ptrFontZurichBold,
+      0xff,viGetX(),viGetY(),0,0);
+
   text = frontGetMpScenarioText(scenario);
 #else
   text = langGet(mp_player_counts[scenario].stage);
 #endif
   x = 0xa0;
 #ifdef GE_MODDED_CHEATS
-  y = 0x8d;
+  y = 0xa1;
 #else
   y = 0x8d;
 #endif
@@ -5365,7 +5703,7 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   text = langGet(multi_stage_setups[MP_stage_selected].folder_text_preset);
   x = 0xa0;
 #ifdef GE_MODDED_CHEATS
-  y = 0xa1;
+  y = 0xb5;
 #else
   y = 0xa1;
 #endif
@@ -5380,7 +5718,7 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   text = langGet(multi_game_lengths[game_length].text_preset);
   x = 0xa0;
 #ifdef GE_MODDED_CHEATS
-  y = 0xb5;
+  y = 0xc9;
 #else
   y = 0xb5;
 #endif
@@ -5395,7 +5733,7 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   text = langGet(*(getPtrMPWeaponSetTextID()));
   x = 0xa0;
 #ifdef GE_MODDED_CHEATS
-  y = 0xc9;
+  y = 0xdd;
 #else
   y = 0xc9;
 #endif
@@ -5610,6 +5948,337 @@ Gfx *constructor_menu_mp_settings(Gfx *DL)
     DL = frontAddPreviousTabText(DL);
     DL = frontDrawCursor(DL);
     return DL;
+}
+
+/* Perfect Dark-derived bot configuration.  These are frontend-only controls;
+ * the bot runtime is kept separate from GoldenEye's fixed four human slots. */
+void init_menu_mp_bot_settings(void)
+{
+    tab_prev_selected = FALSE;
+    tab_prev_highlight = FALSE;
+    g_ModMpBotSettingsChoice = -1;
+    load_walletbond();
+}
+
+void update_menu_mp_bot_settings(void)
+{
+    return;
+}
+
+void interface_menu_mp_bot_settings(void)
+{
+    u16 pressed = joyGetButtonsPressedThisFrame(PLAYER_1,
+        A_BUTTON | B_BUTTON | Z_TRIG | START_BUTTON);
+    s32 row = -1;
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(0);
+
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    g_ModMpBotSettingsChoice = -1;
+
+    if (!tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 0x79 && cursor_v_pos < 0x115)
+    {
+        row = ((s32)cursor_v_pos - 0x79) / 0x14;
+        if (row >= 0 && row < MOD_MP_BOT_MAX)
+            g_ModMpBotSettingsChoice = row;
+    }
+
+    if (pressed & B_BUTTON)
+    {
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        frontChangeMenu(MENU_MP_OPTIONS, FALSE);
+        return;
+    }
+
+    if (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        frontChangeMenu(MENU_MP_OPTIONS, FALSE);
+        return;
+    }
+
+    if (g_ModMpBotSettingsChoice >= 0
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        g_ModMpBotEditSlot = g_ModMpBotSettingsChoice;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        frontChangeMenu(MENU_MP_BOT_EDIT, FALSE);
+        return;
+    }
+
+    disable_all_switches(walletinst[0]);
+    set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_PAPER, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_OHMSS, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_CONFIDENTIAL2, 1);
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_mp_bot_settings(Gfx *DL)
+{
+    char label[16];
+    const char *name;
+    s32 i;
+    s32 x;
+    s32 y;
+    s32 th;
+    s32 tw;
+
+    DL = viSetFillColor(DL, 0, 0, 0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+
+    x = 0x37;
+    y = 0x68;
+    DL = frontPrintText(DL, &x, &y, (u8 *)"Bot Settings",
+        ptrFontZurichBoldChars, ptrFontZurichBold, 0xff,
+        viGetX(), viGetY(), 0, 0);
+
+    for (i = 0; i < MOD_MP_BOT_MAX; i++)
+    {
+        sprintf(label, "Bot %d", i + 1);
+        textMeasure(&th, &tw, (u8 *)label,
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        y = 0x7a + i * 0x14;
+
+        if (g_ModMpBotSettingsChoice == i)
+        {
+            DL = microcode_constructor_related_to_menus(DL,
+                0x37, y - 1, tw + 0x3c, y + 0xe, 0x32);
+        }
+
+        x = 0x39;
+        DL = frontPrintText(DL, &x, &y, (u8 *)label,
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xff,
+            viGetX(), viGetY(), 0, 0);
+
+        name = modMpBotGetDisplayName(i);
+        x = 0x120;
+        DL = frontPrintText(DL, &x, &y, (u8 *)name,
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            i < modMpBotsGetCount() ? 0xff : 0x90,
+            viGetX(), viGetY(), 0, 0);
+    }
+
+    DL = frontAddPreviousTabText(DL);
+    DL = frontDrawCursor(DL);
+    return DL;
+}
+
+void init_menu_mp_bot_edit(void)
+{
+    tab_prev_selected = FALSE;
+    tab_prev_highlight = FALSE;
+    g_ModMpBotEditChoice = -1;
+    if ((u32)g_ModMpBotEditSlot >= MOD_MP_BOT_MAX) g_ModMpBotEditSlot = 0;
+    load_walletbond();
+}
+
+void update_menu_mp_bot_edit(void) { return; }
+
+void interface_menu_mp_bot_edit(void)
+{
+    u16 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, A_BUTTON|B_BUTTON|Z_TRIG|START_BUTTON);
+    s32 row = -1;
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f,10000.0f); viSetUseZBuf(0);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    g_ModMpBotEditChoice = -1;
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f && cursor_v_pos >= 0x7d && cursor_v_pos < 0xcd)
+    {
+        row = ((s32)cursor_v_pos - 0x7d) / 0x14;
+        if (row >= 0 && row < 4) g_ModMpBotEditChoice = row;
+    }
+    if (pressed & B_BUTTON) { sndPlaySfx(g_musicSfxBufferPtr,DOOR_METAL_CLOSE2_SFX,NULL); frontChangeMenu(MENU_MP_BOT_SETTINGS,FALSE); return; }
+    if (tab_prev_highlight && (pressed & (A_BUTTON|Z_TRIG|START_BUTTON))) { frontChangeMenu(MENU_MP_BOT_SETTINGS,FALSE); return; }
+    if (g_ModMpBotEditChoice >= 0 && (pressed & (A_BUTTON|Z_TRIG|START_BUTTON)))
+    {
+        if (g_ModMpBotEditChoice == 0) frontChangeMenu(MENU_MP_BOT_RENAME,FALSE);
+        else if (g_ModMpBotEditChoice == 1)
+        {
+            /* Character arrows are separate crosshair targets; no D-pad cycling. */
+            if (cursor_h_pos >= 226.0f && cursor_h_pos < 250.0f) modMpBotCycleCharacter(g_ModMpBotEditSlot,-1);
+            else if (cursor_h_pos > 354.0f && cursor_h_pos <= 382.0f) modMpBotCycleCharacter(g_ModMpBotEditSlot,1);
+            else return;
+        }
+        else if (g_ModMpBotEditChoice == 2) modMpBotCycleDifficulty(g_ModMpBotEditSlot,1);
+        else frontChangeMenu(MENU_MP_BOT_TRAITS,FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);
+        return;
+    }
+    disable_all_switches(walletinst[0]); set_item_visibility_in_objinstance(walletinst[0],SW_TABS,1); set_item_visibility_in_objinstance(walletinst[0],SW_PAPER,1); set_item_visibility_in_objinstance(walletinst[0],SW_OHMSS,1); set_item_visibility_in_objinstance(walletinst[0],SW_CONFIDENTIAL2,1); frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_mp_bot_edit(Gfx *DL)
+{
+    char title[40]; const char *value; s32 x,y,th,tw,row;
+    static const char *labels[4] = {"Rename Bot", "Character", "Difficulty", "Personality Traits"};
+    DL=viSetFillColor(DL,0,0,0); DL=viFillScreen(DL); DL=frontSetupMenuBackground(DL); DL=microcode_constructor(DL);
+    sprintf(title,"%s Settings",modMpBotGetDisplayName(g_ModMpBotEditSlot)); x=0x37; y=0x68;
+    DL=frontPrintText(DL,&x,&y,(u8*)title,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+    for(row=0;row<4;row++)
+    {
+        y=0x7e+row*0x14; textMeasure(&th,&tw,(u8*)labels[row],ptrFontZurichBoldChars,ptrFontZurichBold,0);
+        if(g_ModMpBotEditChoice==row) DL=microcode_constructor_related_to_menus(DL,0x37,y-1,tw+0x3c,y+0xe,0x32);
+        x=0x39; DL=frontPrintText(DL,&x,&y,(u8*)labels[row],ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+        if(row==0) value=modMpBotGetDisplayName(g_ModMpBotEditSlot);
+        else if(row==1)
+        {
+            value=frontGetMpCharacterName(g_ModMpBotConfigs[g_ModMpBotEditSlot].character);
+            if(g_ModMpBotEditChoice==1 && cursor_v_pos>=0x91 && cursor_v_pos<0xa5)
+            {
+                if(cursor_h_pos>=226.0f && cursor_h_pos<250.0f) DL=microcode_constructor_related_to_menus(DL,0xe1,y-1,0xf5,y+0xe,0x32);
+                else if(cursor_h_pos>354.0f && cursor_h_pos<=382.0f) DL=microcode_constructor_related_to_menus(DL,0x16a,y-1,0x17e,y+0xe,0x32);
+            }
+            x=0xe5; DL=frontPrintText(DL,&x,&y,(u8*)"<",ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+            x=0x170; DL=frontPrintText(DL,&x,&y,(u8*)">",ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+            textMeasure(&th,&tw,(u8*)value,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+            x=0x130-(tw>>1); DL=frontPrintText(DL,&x,&y,(u8*)value,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+            continue;
+        }
+        else if(row==2) value=modMpBotGetDifficultyName(g_ModMpBotConfigs[g_ModMpBotEditSlot].difficulty);
+        else continue;
+        x=0x120; DL=frontPrintText(DL,&x,&y,(u8*)value,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+    }
+    DL=frontAddPreviousTabText(DL); DL=frontDrawCursor(DL); return DL;
+}
+
+void init_menu_mp_bot_traits(void)
+{
+    tab_prev_selected=FALSE; tab_prev_highlight=FALSE; g_ModMpBotTraitChoice=0; g_ModMpBotTraitScroll=0; load_walletbond();
+}
+void update_menu_mp_bot_traits(void) { return; }
+void interface_menu_mp_bot_traits(void)
+{
+    u16 pressed=joyGetButtonsPressedThisFrame(PLAYER_1,A_BUTTON|B_BUTTON|Z_TRIG|START_BUTTON);
+    s32 row;
+    s32 choice=-1;
+    viSetFovY(FOV_Y_F);viSetAspect(ASPECT_RATIO_SD);viSetZRange(100.0f,10000.0f);viSetUseZBuf(0);
+    tab_prev_highlight=frontCheckCursorOnPreviousTab();
+    if(!tab_prev_highlight && cursor_v_pos>=0x70 && cursor_v_pos<0xd2)
+    {
+        row=((s32)cursor_v_pos-0x70)/0x0e;
+        if(row>=0 && row<7)
+        {
+            if(cursor_h_pos>=0x35 && cursor_h_pos<0xc8) choice=row;
+            else if(cursor_h_pos>=0xd8 && cursor_h_pos<0x18c && row<6) choice=7+row;
+        }
+    }
+    if(choice>=0 && choice<MODBOT_TRAIT_COUNT) g_ModMpBotTraitChoice=choice;
+    if(pressed&B_BUTTON){frontChangeMenu(MENU_MP_BOT_EDIT,FALSE);return;}
+    if(tab_prev_highlight&&(pressed&(A_BUTTON|Z_TRIG|START_BUTTON))){frontChangeMenu(MENU_MP_BOT_EDIT,FALSE);return;}
+    if((pressed&(A_BUTTON|Z_TRIG|START_BUTTON))&&!tab_prev_highlight&&choice>=0)
+    {
+        modMpBotToggleTrait(g_ModMpBotEditSlot,g_ModMpBotTraitChoice);sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);
+    }
+    disable_all_switches(walletinst[0]);set_item_visibility_in_objinstance(walletinst[0],SW_TABS,1);set_item_visibility_in_objinstance(walletinst[0],SW_PAPER,1);set_item_visibility_in_objinstance(walletinst[0],SW_OHMSS,1);set_item_visibility_in_objinstance(walletinst[0],SW_CONFIDENTIAL2,1);frontUpdateControlStickPosition();
+}
+Gfx *constructor_menu_mp_bot_traits(Gfx *DL)
+{
+    s32 x,y,th,tw,i,row;const char *text;u16 bit;char wrapped[192];
+    DL=viSetFillColor(DL,0,0,0);DL=viFillScreen(DL);DL=frontSetupMenuBackground(DL);DL=microcode_constructor(DL);
+    x=0x37;y=0x55;DL=frontPrintText(DL,&x,&y,(u8*)"PERSONALITY TRAITS",ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+    for(i=0;i<MODBOT_TRAIT_COUNT;i++)
+    {
+        row=i<7?i:i-7;x=i<7?0x37:0xdc;y=0x70+row*0x0e;text=modMpBotGetTraitName(i);
+        textMeasure(&th,&tw,(u8*)text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+        if(i==g_ModMpBotTraitChoice&&!frontCheckCursorOnPreviousTab())DL=microcode_constructor_related_to_menus(DL,x-2,y-1,x+tw+5,y+0xd,0x32);
+        DL=frontPrintText(DL,&x,&y,(u8*)text,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+        bit=(u16)(1U<<i);x=i<7?0xb3:0x158;text=(g_ModMpBotConfigs[g_ModMpBotEditSlot].traits&bit)?"Yes":"No";
+        DL=frontPrintText(DL,&x,&y,(u8*)text,ptrFontZurichBoldChars,ptrFontZurichBold,(g_ModMpBotConfigs[g_ModMpBotEditSlot].traits&bit)?0xA00000FF:0xff,viGetX(),viGetY(),0,0);
+    }
+    text=langGet(getStringID(LTITLE,TITLE_STR_BOTTRAIT_PACIFIST_DESC+g_ModMpBotTraitChoice));textWrap(0x140,(u8*)text,(u8*)wrapped,ptrFontBankGothicChars,ptrFontBankGothic);
+    x=0x39;y=0xd3;DL=frontPrintText(DL,&x,&y,(u8*)wrapped,ptrFontBankGothicChars,ptrFontBankGothic,0xff,viGetX(),viGetY(),0,0);
+    DL=frontAddPreviousTabText(DL);DL=frontDrawCursor(DL);return DL;
+}
+
+static const char *modMpBotRenameChars(s32 mode)
+{
+    if(mode==1) return "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    if(mode==2) return "0123456789.,!?-+=/\\:;()@&#";
+    return "abcdefghijklmnopqrstuvwxyz";
+}
+void init_menu_mp_bot_rename(void)
+{
+    s32 len=0; tab_prev_selected=FALSE; tab_prev_highlight=FALSE; g_ModMpBotRenameMode=0; g_ModMpBotRenameRow=0; g_ModMpBotRenameCol=0; g_ModMpBotRenameDpad=FALSE;
+    strcpy(g_ModMpBotRenameOriginal,g_ModMpBotConfigs[g_ModMpBotEditSlot].name);
+    while(len<MOD_MP_BOT_NAME_LEN-1 && g_ModMpBotConfigs[g_ModMpBotEditSlot].name[len]) len++; g_ModMpBotRenameCaret=len; load_walletbond();
+}
+void update_menu_mp_bot_rename(void) { return; }
+static void modMpBotRenameDelete(void)
+{
+    char *name=g_ModMpBotConfigs[g_ModMpBotEditSlot].name; s32 i;
+    if(g_ModMpBotRenameCaret<=0) return; g_ModMpBotRenameCaret--;
+    for(i=g_ModMpBotRenameCaret;i<MOD_MP_BOT_NAME_LEN-1;i++){ name[i]=name[i+1]; if(name[i]=='\0') break; }
+}
+static void modMpBotRenameInsert(char ch)
+{
+    char *name=g_ModMpBotConfigs[g_ModMpBotEditSlot].name; s32 len=0,i;
+    while(len<MOD_MP_BOT_NAME_LEN-1 && name[len]) len++; if(len>=MOD_MP_BOT_NAME_LEN-1) return;
+    for(i=len;i>=g_ModMpBotRenameCaret;i--) name[i+1]=name[i]; name[g_ModMpBotRenameCaret++]=ch;
+}
+void interface_menu_mp_bot_rename(void)
+{
+    u16 pressed=joyGetButtonsPressedThisFrame(PLAYER_1,A_BUTTON|B_BUTTON|Z_TRIG|START_BUTTON|L_TRIG|R_TRIG|U_JPAD|D_JPAD|L_JPAD|R_JPAD);
+    s32 col,row,idx;const char *keys=modMpBotRenameChars(g_ModMpBotRenameMode);
+    viSetFovY(FOV_Y_F);viSetAspect(ASPECT_RATIO_SD);viSetZRange(100.0f,10000.0f);viSetUseZBuf(0);
+    if(pressed&Z_TRIG){g_ModMpBotRenameMode=(g_ModMpBotRenameMode+1)%3;sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);}
+    if(pressed&L_TRIG){if(g_ModMpBotRenameCaret>0)g_ModMpBotRenameCaret--;}
+    if(pressed&R_TRIG){if(g_ModMpBotRenameCaret<(s32)strlen(g_ModMpBotConfigs[g_ModMpBotEditSlot].name))g_ModMpBotRenameCaret++;}
+    if(joyGetStickX(PLAYER_1)>20||joyGetStickX(PLAYER_1)<-20||joyGetStickY(PLAYER_1)>20||joyGetStickY(PLAYER_1)<-20)g_ModMpBotRenameDpad=FALSE;
+    if(pressed&(U_JPAD|D_JPAD|L_JPAD|R_JPAD))
+    {
+        g_ModMpBotRenameDpad=TRUE;
+        if((pressed&U_JPAD)&&g_ModMpBotRenameRow>0)g_ModMpBotRenameRow--;
+        if((pressed&D_JPAD)&&g_ModMpBotRenameRow<5)g_ModMpBotRenameRow++;
+        if((pressed&L_JPAD)&&g_ModMpBotRenameCol>0)g_ModMpBotRenameCol--;
+        if((pressed&R_JPAD)&&g_ModMpBotRenameCol<4)g_ModMpBotRenameCol++;
+    }
+    if(!g_ModMpBotRenameDpad)
+    {
+        col=((s32)cursor_h_pos-58)/60;row=((s32)cursor_v_pos-0x78)/0x13;if(col<0)col=0;if(col>4)col=4;if(row<0)row=0;if(row>5)row=5;g_ModMpBotRenameCol=col;g_ModMpBotRenameRow=row;
+    }else{col=g_ModMpBotRenameCol;row=g_ModMpBotRenameRow;}
+    if(pressed&B_BUTTON)
+    {
+        if(g_ModMpBotConfigs[g_ModMpBotEditSlot].name[0]) modMpBotRenameDelete();
+        else { strcpy(g_ModMpBotConfigs[g_ModMpBotEditSlot].name,g_ModMpBotRenameOriginal); frontChangeMenu(MENU_MP_BOT_EDIT,FALSE); return; }
+    }
+    if(pressed&START_BUTTON){frontChangeMenu(MENU_MP_BOT_EDIT,FALSE);return;}
+    if(pressed&A_BUTTON)
+    {
+        if(row<5){idx=row*5+col;if(idx<25)modMpBotRenameInsert(keys[idx]);}
+        else if(col==0){if(keys[25])modMpBotRenameInsert(keys[25]);}
+        else if(col==1)modMpBotRenameDelete();else if(col==2)modMpBotRenameInsert(' ');else if(col>=3){frontChangeMenu(MENU_MP_BOT_EDIT,FALSE);return;}
+        sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);
+    }
+    disable_all_switches(walletinst[0]);set_item_visibility_in_objinstance(walletinst[0],SW_TABS,1);set_item_visibility_in_objinstance(walletinst[0],SW_PAPER,1);set_item_visibility_in_objinstance(walletinst[0],SW_OHMSS,1);set_item_visibility_in_objinstance(walletinst[0],SW_CONFIDENTIAL2,1);frontUpdateControlStickPosition();
+}
+Gfx *constructor_menu_mp_bot_rename(Gfx *DL)
+{
+    char before[MOD_MP_BOT_NAME_LEN];char key[2];const char *name=g_ModMpBotConfigs[g_ModMpBotEditSlot].name;const char *keys=modMpBotRenameChars(g_ModMpBotRenameMode);
+    s32 x,y,r,c,len,i,th,tw; s32 hx1,hx2,hy1,hy2;
+    len=strlen(name);if(g_ModMpBotRenameCaret>len)g_ModMpBotRenameCaret=len;for(i=0;i<g_ModMpBotRenameCaret;i++)before[i]=name[i];before[i]='\0';
+    DL=viSetFillColor(DL,0,0,0);DL=viFillScreen(DL);DL=frontSetupMenuBackground(DL);DL=microcode_constructor(DL);
+    x=0x37;y=0x55;DL=frontPrintText(DL,&x,&y,(u8*)"Rename Bot",ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+    textMeasure(&th,&tw,(u8*)name,ptrFontZurichBoldChars,ptrFontZurichBold,0);x=0xa0-(tw>>1);y=0x68;DL=frontPrintText(DL,&x,&y,(u8*)before,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+    DL=frontPrintText(DL,&x,&y,(u8*)"|",ptrFontZurichBoldChars,ptrFontZurichBold,(g_GlobalTimer&16)?0xff:0x70,viGetX(),viGetY(),0,0);DL=frontPrintText(DL,&x,&y,(u8*)(name+g_ModMpBotRenameCaret),ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);key[1]='\0';
+    if(g_ModMpBotRenameDpad || (g_ModMpBotRenameRow<5
+        ? cursor_h_pos>=70+g_ModMpBotRenameCol*60 && cursor_h_pos<100+g_ModMpBotRenameCol*60 && cursor_v_pos>=0x7f+g_ModMpBotRenameRow*0x13 && cursor_v_pos<0x8f+g_ModMpBotRenameRow*0x13
+        : cursor_v_pos>=0xda && cursor_v_pos<0xeb))
+    {
+        if(g_ModMpBotRenameRow<5){hx1=70+g_ModMpBotRenameCol*60;hx2=hx1+30;hy1=0x7f+g_ModMpBotRenameRow*0x13;hy2=hy1+0x10;}
+        else{static const s16 bx1[5]={70,117,210,285,285};static const s16 bx2[5]={100,195,260,335,335};hx1=bx1[g_ModMpBotRenameCol];hx2=bx2[g_ModMpBotRenameCol];hy1=0xda;hy2=0xeb;}
+        if(g_ModMpBotRenameDpad || (cursor_h_pos>=hx1 && cursor_h_pos<hx2)) DL=microcode_constructor_related_to_menus(DL,hx1,hy1,hx2,hy2,0x32);
+    }
+    for(r=0;r<5;r++)for(c=0;c<5;c++){i=r*5+c;key[0]=keys[i];x=82+c*60;y=0x80+r*0x13;DL=frontPrintText(DL,&x,&y,(u8*)key,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);}
+    x=82;y=0xdc;if(keys[25]){key[0]=keys[25];DL=frontPrintText(DL,&x,&y,(u8*)key,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);}
+    x=122;DL=frontPrintText(DL,&x,&y,(u8*)"Backspace",ptrFontBankGothicChars,ptrFontBankGothic,0xff,viGetX(),viGetY(),0,0);x=215;DL=frontPrintText(DL,&x,&y,(u8*)"Space",ptrFontBankGothicChars,ptrFontBankGothic,0xff,viGetX(),viGetY(),0,0);x=290;DL=frontPrintText(DL,&x,&y,(u8*)"Done",ptrFontBankGothicChars,ptrFontBankGothic,0xff,viGetX(),viGetY(),0,0);
+    DL=frontDrawCursor(DL);return DL;
 }
 
 /* R21 per-player multiplayer options.  A on the Player row cycles only the
@@ -5877,7 +6546,7 @@ void init_menu0f_mpcharsel(void)
     tab_next_highlight = 0;
     tab_start_highlight = 0;
 
-    for ( i = 0; i < 64; i += 1)
+    for ( i = 0; i < (s32)(sizeof(mp_chr_setup) / sizeof(mp_chr_setup[0])); i += 1)
     {
         s32 selected_photo = mp_chr_setup[i].select_photo;
 
@@ -5917,7 +6586,7 @@ void init_menu0f_mpcharsel(void)
      * old 0x40 side effect stuck in frontend state. */
     if (g_CheatActivated[CHEAT_EXTRA_MP_CHARS])
     {
-        num_chars_selectable_mp = 0x40;
+        num_chars_selectable_mp = (s32)(sizeof(mp_chr_setup) / sizeof(mp_chr_setup[0]));
     }
     else
 #endif
@@ -6047,7 +6716,7 @@ void interface_menu0F_mpcharsel(void)
                     sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
                 }
             }
-            else if (joyGetStickXInRange(i, -2, 1) > 0)
+            else if (joyGetStickX(i) > 30)
             {
                 if (mp_char_select_scroll_offset[i] == 0)
                 {
@@ -6057,7 +6726,7 @@ void interface_menu0F_mpcharsel(void)
                     }
                 }
             }
-            else if ((joyGetStickXInRange(i, -2, 1) < -1) && (mp_char_select_scroll_offset[i] == 0))
+            else if ((joyGetStickX(i) < -30) && (mp_char_select_scroll_offset[i] == 0))
             {
                 if (mp_char_cur_select_player[i] > 0)
                 {
@@ -6515,7 +7184,7 @@ void interface_menu10_mphandicap(void)
         if (player_has_selected_char[i] == 0)
         {
             // 0x202
-            if (joyGetButtonsPressedThisFrame(i, L_JPAD|L_CBUTTONS) || ((joyGetStickXInRange(i, -2, 1) < -1) && dword_CODE_bss_80069760[i] != 0))
+            if (joyGetButtonsPressedThisFrame(i, L_JPAD|L_CBUTTONS) || ((joyGetStickX(i) < -30) && dword_CODE_bss_80069760[i] != 0))
             {
                 if (player_handicap[i] > 0)
                 {
@@ -6523,7 +7192,7 @@ void interface_menu10_mphandicap(void)
                 }
             }
             // 0x101
-            else if (joyGetButtonsPressedThisFrame(i, R_JPAD|R_CBUTTONS) || ((joyGetStickXInRange(i, -2, 1) > 0) && dword_CODE_bss_80069760[i] != 0))
+            else if (joyGetButtonsPressedThisFrame(i, R_JPAD|R_CBUTTONS) || ((joyGetStickX(i) > 30) && dword_CODE_bss_80069760[i] != 0))
             {
                 if (player_handicap[i] < 0xA)
                 {
@@ -6536,7 +7205,7 @@ void interface_menu10_mphandicap(void)
                 sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
             }
 
-            if ((joyGetStickXInRange(i, -2, 1) == -1) || (joyGetStickXInRange(i, -2, 1) == 0))
+            if (joyGetStickX(i) >= -20 && joyGetStickX(i) <= 20)
             {
                 dword_CODE_bss_80069760[i] = 1;
             }
@@ -6740,7 +7409,7 @@ void interface_menu11_mpcontrols(void)
         if (player_has_selected_char[i] == 0)
         {
             // 0x202
-            if (joyGetButtonsPressedThisFrame(i, L_JPAD|L_CBUTTONS) || ((joyGetStickXInRange(i, -2, 1) < -1) && dword_CODE_bss_80069760[i] != 0))
+            if (joyGetButtonsPressedThisFrame(i, L_JPAD|L_CBUTTONS) || ((joyGetStickX(i) < -30) && dword_CODE_bss_80069760[i] != 0))
             {
                 // if greater than 0
                 if (controlstyle_player[i] > CONTROLLER_CONFIG_HONEY)
@@ -6760,7 +7429,7 @@ void interface_menu11_mpcontrols(void)
                 }
             }
             // 0x101
-            else if (joyGetButtonsPressedThisFrame(i, R_JPAD|R_CBUTTONS) || ((joyGetStickXInRange(i, -2, 1) > 0) && dword_CODE_bss_80069760[i] != 0))
+            else if (joyGetButtonsPressedThisFrame(i, R_JPAD|R_CBUTTONS) || ((joyGetStickX(i) > 30) && dword_CODE_bss_80069760[i] != 0))
             {
                 // ... controlstyle_player[i] is 2.x
                 if (((sp44 == 2) && (i == PLAYER_1) MAYBE_AND_JOYCOUNT_4) || controlstyle_player[i] >= CONTROLLER_CONFIG_PLENTY)
@@ -6806,7 +7475,7 @@ void interface_menu11_mpcontrols(void)
             }
 #endif
 
-            if ((joyGetStickXInRange(i, -2, 1) == -1) || (joyGetStickXInRange(i, -2, 1) == 0))
+            if (joyGetStickX(i) >= -20 && joyGetStickX(i) <= 20)
             {
                 dword_CODE_bss_80069760[i] = 1;
             }
@@ -7541,7 +8210,7 @@ void interface_menu14_mpteams(void)
     D_8002B560 = (s32) (D_8002B560 + 1) % 20;
 
     // 0x101
-    if ((joyGetButtonsPressedThisFrame(0, R_JPAD|R_CBUTTONS)) || (joyGetStickXInRange(0, -2, 1) > 0))
+    if ((joyGetButtonsPressedThisFrame(0, R_JPAD|R_CBUTTONS)) || (joyGetStickX(0) > 30))
     {
         if (scenario == SCENARIO_2v1)
         {
@@ -7575,7 +8244,7 @@ void interface_menu14_mpteams(void)
         }
     }
     // 0x202
-    else if ((joyGetButtonsPressedThisFrame(0, L_JPAD|L_CBUTTONS)) || (joyGetStickXInRange(0, -2, 1) < -1))
+    else if ((joyGetButtonsPressedThisFrame(0, L_JPAD|L_CBUTTONS)) || (joyGetStickX(0) < -30))
     {
         if (scenario == SCENARIO_2v2)
         {
@@ -9010,7 +9679,7 @@ u8 *frontModGetCheatMenuText(s32 cheat)
 {
     switch (cheat)
     {
-        case CHEAT_EXTRA_MP_CHARS: return (u8 *)"Extra MP Characters";
+        case CHEAT_EXTRA_MP_CHARS: return (u8 *)"All MP Characters";
         case CHEAT_MAXAMMO: return (u8 *)"Max Ammo";
         case CHEAT_DEBUG_UNK5: return (u8 *)"Debug Unk5";
         case CHEAT_DEACTIVATE_INVINCIBILITY: return (u8 *)"Deactivate Invincibility";
@@ -9243,10 +9912,22 @@ void interface_menu15_cheat(void)
 
         sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
     }
-    else if (joyGetButtonsPressedThisFrame(0, 0x4000U) != 0)
+    else if (joyGetButtonsPressedThisFrame(PLAYER_1, B_BUTTON) != 0)
     {
-        tab_prev_selected = 1;
-        sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+#ifdef GE_MODDED_CHEATS
+        /* R27P R15: B on Cheat Page 2 returns to Page 1;
+         * B on Page 1 retains the normal exit-to-Mode-Select behavior. */
+        if (tab_start_selected != 0)
+        {
+            frontModBuildCheatPage(0);
+        }
+        else
+#endif
+        {
+            tab_prev_selected = 1;
+        }
+        sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr,
+                DOOR_METAL_CLOSE2_SFX, NULL);
     }
 
     disable_all_switches(walletinst[0]);
@@ -9389,14 +10070,24 @@ static s32 g_ModOptionsUnlockHover;
 static s32 g_ModOptionsUnlockConfirm;
 static s32 g_ModOptionsUnlockChoice;
 static s32 g_ModOptionsLevelModifiersHover;
+static s32 g_ModOptionsPatchesHover;
+static s32 g_ModOptionsThirdPersonHover;
+static s32 g_ModOptionsSinglePlayerCharacterHover;
+static s32 g_ModOptionsDebugHover;
+static s32 g_ModOptionsStartPage2;
+static s32 g_PatchesMenuChoice;
+static s32 g_ThirdPersonOptionsMenuChoice;
+static s32 g_SinglePlayerCharacterMenuChoice;
 static s32 g_LevelModifiersCategoryChoice;
 static s32 g_LevelModifiersLevelChoice;
 static s32 g_LevelModifiersListTop;
+static s32 g_LevelModifiersDetailChoice;
 #ifdef GE_MAP_MAKER
 static s32 g_ModOptionsMapMakerHover;
-static s32 g_ModOptionsStartPage2;
 static s32 g_MapMakerMenuChoice;
 #endif
+
+static void frontModStoreCurrentSettings(void);
 
 #define MOD_OPTIONS_TITLE_Y       42
 #define MOD_OPTIONS_FIRST_ROW_Y   66
@@ -9414,12 +10105,10 @@ void init_menu_mod_options(void)
     tab_prev_selected = FALSE;
     tab_prev_highlight = FALSE;
     tab_next_highlight = FALSE;
-#ifdef GE_MAP_MAKER
     g_ModOptionsPage = g_ModOptionsStartPage2 ? 1 : 0;
     g_ModOptionsStartPage2 = 0;
+#ifdef GE_MAP_MAKER
     g_ModOptionsMapMakerHover = FALSE;
-#else
-    g_ModOptionsPage = 0;
 #endif
     g_ModOptionsHighlighted = 0;
     g_ModOptionsDirty = FALSE;
@@ -9427,6 +10116,10 @@ void init_menu_mod_options(void)
     g_ModOptionsUnlockConfirm = FALSE;
     g_ModOptionsUnlockChoice = 0;
     g_ModOptionsLevelModifiersHover = FALSE;
+    g_ModOptionsPatchesHover = FALSE;
+    g_ModOptionsThirdPersonHover = FALSE;
+    g_ModOptionsSinglePlayerCharacterHover = FALSE;
+    g_ModOptionsDebugHover = FALSE;
 
     if (save && !(save->options & OPTION_R21_MIGRATED))
     {
@@ -9469,13 +10162,24 @@ void init_menu_mod_options(void)
         {
             g_ModGameplayOptions2 = save->mod_options2;
             g_ModGameplayOptions3 = save->mod_options3;
+            g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;
             g_ModTpSightTranslucencyEnabled = TRUE;
+            g_ModEnemyBulletHolesEnabled = FALSE;
+        modMeleeQuickSwapSetEnabled(FALSE);
+            modMeleeQuickSwapSetEnabled(FALSE);
+            g_ModTpCornerShootingFixEnabled = FALSE;
+            g_ModTpWorldSpaceCrosshairEnabled = FALSE;
             fileLoadThirdPersonCameraSettings(save);
         }
 #else
         g_ModGameplayOptions2 = save->mod_options2;
         g_ModGameplayOptions3 = save->mod_options3;
+            g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;
         g_ModTpSightTranslucencyEnabled = TRUE;
+        g_ModEnemyBulletHolesEnabled = FALSE;
+        modMeleeQuickSwapSetEnabled(FALSE);
+        g_ModSinglePlayerCharacter = 0;
+        g_ModSinglePlayerMatchViewHeight = FALSE;
         fileLoadThirdPersonCameraSettings(save);
 #endif
     }
@@ -9497,62 +10201,39 @@ static void frontModOptionsChange(s32 direction)
 
     if (g_ModOptionsPage)
     {
+        if (g_ModOptionsHighlighted >= 8)
+        {
+            return;
+        }
         if (g_ModOptionsHighlighted == 0) save->options = (opt ^ OPTION_HEADROLL) | OPTION_R21_MIGRATED;
         else if (g_ModOptionsHighlighted == 1) save->mod_options2 ^= MODOPT2_ENDLESS_DEATHCAM;
         else if (g_ModOptionsHighlighted == 2) save->mod_options2 ^= MODOPT2_REALTIME_COLLAPSE;
         else if (g_ModOptionsHighlighted == 3) save->mod_options2 ^= MODOPT2_DISABLE_HITSTUN;
         else if (g_ModOptionsHighlighted == 4) save->mod_options2 ^= MODOPT2_DISABLE_KNOCKBACK;
-        else if (g_ModOptionsHighlighted == 5) save->mod_options2 ^= MODOPT2_DISABLE_NOISE_DITHER;
-        else if (g_ModOptionsHighlighted == 6) save->mod_options2 ^= MODOPT2_DAMAGE_FLASH;
+        else if (g_ModOptionsHighlighted == 5) save->mod_options2 ^= MODOPT2_DAMAGE_FLASH;
 
-        /* Page-2 gameplay toggles are live runtime options as well as save
-         * fields.  Keep the active state synchronized immediately so SP
-         * Disable Knockback / Damage Flash and related effects do not wait
-         * for the save to be reloaded before taking effect. */
-        if (g_ModOptionsHighlighted >= 1 && g_ModOptionsHighlighted <= 6)
+        if (g_ModOptionsHighlighted >= 1 && g_ModOptionsHighlighted <= 5)
         {
             g_ModGameplayOptions2 = save->mod_options2;
         }
-
-        else if (g_ModOptionsHighlighted == 7) save->options = (opt ^ OPTION_CROSSHAIR) | OPTION_R21_MIGRATED;
-        else if (g_ModOptionsHighlighted == 8)
+        else if (g_ModOptionsHighlighted == 6)
+        {
+            save->options = (opt ^ OPTION_CROSSHAIR) | OPTION_R21_MIGRATED;
+        }
+        else if (g_ModOptionsHighlighted == 7)
         {
             save->mod_options2 ^= MODOPT2_DISABLE_DAMAGE_SFX;
             g_ModGameplayOptions2 = save->mod_options2;
         }
+        else if (g_ModOptionsHighlighted == 8)
+        {
+            g_ModEnemyBulletHolesEnabled ^= 1;
+        }
         else if (g_ModOptionsHighlighted == 9)
         {
-            modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
-            save->mod_options3 = g_ModGameplayOptions3;
+            modMeleeQuickSwapSetEnabled(!g_ModMeleeQuickSwapEnabled);
         }
-        else if (g_ModOptionsHighlighted == 10)
-        {
-            s32 i;
-            g_ModStayInTpOnDeathDefault ^= 1;
-            for (i = 0; i < MAX_PLAYER_COUNT; i++)
-                g_PlayerStayInTpOnDeath[i] = g_ModStayInTpOnDeathDefault;
-            fileStoreThirdPersonCameraSettings(save);
-        }
-        else if (g_ModOptionsHighlighted == 11)
-        {
-            g_ModGameplayOptions3 ^= MODOPT3_TP_CROUCH_CAM;
-            g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
-            save->mod_options3 = g_ModGameplayOptions3;
-        }
-        else if (g_ModOptionsHighlighted == 12)
-        {
-            g_ModGameplayOptions3 ^= MODOPT3_DIRECTIONAL_SHOULDER;
-            g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
-            save->mod_options3 = g_ModGameplayOptions3;
-        }
-        else if (g_ModOptionsHighlighted == 13)
-        {
-            g_ModTpSightTranslucencyEnabled ^= 1;
-        }
-        else if (g_ModOptionsHighlighted == 14)
-        {
-            g_ModAntiAliasingEnabled ^= 1;
-        }
+
         g_ModOptionsDirty = TRUE;
         return;
     }
@@ -9610,15 +10291,14 @@ static void frontModOptionsChange(s32 direction)
 void interface_menu_mod_options(void)
 {
     s32 row;
-    s32 maxrow = g_ModOptionsPage ? 14 : 10;
+    s32 maxrow = g_ModOptionsPage ? 9 : 10;
     u32 pressed;
 
     viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
     tab_prev_highlight = frontCheckCursorOnPreviousTab();
     tab_next_highlight = !g_ModOptionsPage && frontCheckCursorOnNextTab();
     pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xFFFF);
-
-    if (g_ModOptionsUnlockConfirm)
+if (g_ModOptionsUnlockConfirm)
     {
         /* Confirmation page: No on the left, Yes on the right. */
         if (cursor_v_pos >= 136.0f && cursor_v_pos <= 164.0f)
@@ -9630,7 +10310,7 @@ void interface_menu_mod_options(void)
         {
             g_ModOptionsUnlockConfirm = FALSE;
             g_ModOptionsUnlockChoice = 0;
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else if (pressed & (START_BUTTON | Z_TRIG | A_BUTTON))
         {
@@ -9692,19 +10372,39 @@ void interface_menu_mod_options(void)
     if (!tab_prev_highlight && !tab_next_highlight)
     {
         g_ModOptionsUnlockHover = g_ModOptionsPage
-            && cursor_h_pos >= 250.0f && cursor_h_pos <= 382.0f
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 378.0f
             && cursor_v_pos >= 63.0f && cursor_v_pos <= 82.0f;
 #ifdef GE_MAP_MAKER
         g_ModOptionsMapMakerHover = g_ModOptionsPage
-            && cursor_h_pos >= 250.0f && cursor_h_pos <= 382.0f
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 378.0f
             && cursor_v_pos >= 83.0f && cursor_v_pos <= 101.0f;
         g_ModOptionsLevelModifiersHover = g_ModOptionsPage
-            && cursor_h_pos >= 250.0f && cursor_h_pos <= 412.0f
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 408.0f
             && cursor_v_pos >= 102.0f && cursor_v_pos <= 121.0f;
+        g_ModOptionsPatchesHover = g_ModOptionsPage
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 408.0f
+            && cursor_v_pos >= 121.0f && cursor_v_pos <= 140.0f;
+        g_ModOptionsThirdPersonHover = FALSE;
+        g_ModOptionsSinglePlayerCharacterHover = g_ModOptionsPage
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 414.0f
+            && cursor_v_pos >= 140.0f && cursor_v_pos <= 159.0f;
+        g_ModOptionsDebugHover = g_ModOptionsPage
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 414.0f
+            && cursor_v_pos >= 159.0f && cursor_v_pos <= 178.0f;
 #else
         g_ModOptionsLevelModifiersHover = g_ModOptionsPage
-            && cursor_h_pos >= 250.0f && cursor_h_pos <= 412.0f
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 408.0f
             && cursor_v_pos >= 83.0f && cursor_v_pos <= 102.0f;
+        g_ModOptionsPatchesHover = g_ModOptionsPage
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 408.0f
+            && cursor_v_pos >= 102.0f && cursor_v_pos <= 121.0f;
+        g_ModOptionsThirdPersonHover = FALSE;
+        g_ModOptionsSinglePlayerCharacterHover = g_ModOptionsPage
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 414.0f
+            && cursor_v_pos >= 121.0f && cursor_v_pos <= 140.0f;
+        g_ModOptionsDebugHover = g_ModOptionsPage
+            && cursor_h_pos >= 246.0f && cursor_h_pos <= 414.0f
+            && cursor_v_pos >= 140.0f && cursor_v_pos <= 159.0f;
 #endif
 
         /* Special Options is rendered at a tighter 16-pixel row pitch than
@@ -9713,10 +10413,26 @@ void interface_menu_mod_options(void)
         row = ((s32)cursor_v_pos - MOD_OPTIONS_FIRST_ROW_Y) /
             (g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT);
         if (row < 0) row = 0; if (row > maxrow) row = maxrow;
+        if (g_ModOptionsPage && row == 8
+            && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | R_JPAD | R_CBUTTONS)))
+        {
+            frontModCommitDeferredSubmenuSettings();
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            frontChangeMenu(MENU_EXPERIMENTAL_OPTIONS, FALSE);
+            return;
+        }
+        if (g_ModOptionsPage && row == 9
+            && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | R_JPAD | R_CBUTTONS)))
+        {
+            frontModCommitDeferredSubmenuSettings();
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            frontChangeMenu(MENU_ENHANCEMENTS_OPTIONS, FALSE);
+            return;
+        }
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover)
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover)
 #else
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover)
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover)
 #endif
         {
             g_ModOptionsHighlighted = row;
@@ -9771,11 +10487,65 @@ void interface_menu_mod_options(void)
             frontChangeMenu(MENU_LEVEL_MODIFIERS, FALSE);
             return;
         }
+        if (g_ModOptionsPatchesHover && (pressed & (START_BUTTON|Z_TRIG|A_BUTTON)))
+        {
+            if (g_ModOptionsDirty)
+            {
+                save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+                if (save)
+                {
+                    fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+                    fileStoreExtendedSettings(save);
+#endif
+                }
+                g_ModOptionsDirty = FALSE;
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            frontChangeMenu(MENU_PATCHES, FALSE);
+            return;
+        }
+        if (g_ModOptionsThirdPersonHover && (pressed & (START_BUTTON|Z_TRIG|A_BUTTON)))
+        {
+            if (g_ModOptionsDirty)
+            {
+                save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+                if (save)
+                {
+                    fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+                    fileStoreExtendedSettings(save);
+#endif
+                }
+                g_ModOptionsDirty = FALSE;
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            frontChangeMenu(MENU_THIRD_PERSON_OPTIONS, FALSE);
+            return;
+        }
+        if (g_ModOptionsSinglePlayerCharacterHover && (pressed & (START_BUTTON|Z_TRIG|A_BUTTON)))
+        {
+            if (g_ModOptionsDirty)
+            {
+                frontModStoreCurrentSettings();
+                g_ModOptionsDirty = FALSE;
+            }
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            frontChangeMenu(MENU_SINGLE_PLAYER_CHARACTER, FALSE);
+            return;
+        }
+        if (g_ModOptionsDebugHover && (pressed & (START_BUTTON|Z_TRIG|A_BUTTON)))
+        {
+            frontModCommitDeferredSubmenuSettings();
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            frontChangeMenu(MENU_DEBUG_OPTIONS, FALSE);
+            return;
+        }
 
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
 #else
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && !g_ModOptionsPage && (row == 0 || row == 1) && joyGetButtons(PLAYER_1, Z_TRIG|A_BUTTON))
 #endif
         {
             save_data *save = fileGetSaveForFoldernum(selected_folder_num);
@@ -9805,22 +10575,22 @@ void interface_menu_mod_options(void)
         }
 
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && (pressed & (L_JPAD|L_CBUTTONS)))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && (pressed & (L_JPAD|L_CBUTTONS)))
 #else
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && (pressed & (L_JPAD|L_CBUTTONS)))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && (pressed & (L_JPAD|L_CBUTTONS)))
 #endif
         {
             frontModOptionsChange(-1);
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
 #ifdef GE_MAP_MAKER
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
 #else
-        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
+        if (!g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && ((pressed & (R_JPAD|R_CBUTTONS)) || ((g_ModOptionsPage || row >= 2) && (pressed & (A_BUTTON|Z_TRIG)))))
 #endif
         {
             frontModOptionsChange(1);
-            sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
     }
 
@@ -9828,11 +10598,36 @@ void interface_menu_mod_options(void)
     frontUpdateControlStickPosition();
 }
 
+static void frontModCommitQuickSettingsPresetIfDirty(void)
+{
+    save_data *save;
+
+    if (!g_ModQuickSettingsPresetDirty)
+    {
+        return;
+    }
+
+    save = fileGetSaveForFoldernum(selected_folder_num);
+
+    if (save != NULL)
+    {
+        /* One legacy save write plus one authoritative extension-journal
+         * commit, deferred until MODE SELECT is exited. */
+        fileWriteSave(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+        fileStoreExtendedSettings(save);
+#endif
+    }
+
+    g_ModQuickSettingsPresetDirty = FALSE;
+}
+
+
 Gfx *constructor_menu_mod_options(Gfx *DL)
 {
     save_data *save = fileGetSaveForFoldernum(selected_folder_num);
     s32 i, x, y, value;
-    s32 count = g_ModOptionsPage ? 15 : 11;
+    s32 count = g_ModOptionsPage ? 10 : 11;
     s32 sliderfill;
     s32 percent;
     char percenttext[8];
@@ -9879,50 +10674,80 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
 
     if (g_ModOptionsPage)
     {
-        x = 252;
+        x = 248;
         y = 66;
         if (g_ModOptionsUnlockHover && !tab_prev_highlight && !tab_next_highlight)
         {
             s32 uh, uw;
             textMeasure(&uh, &uw, frontModGetOptionLabel(17), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-            DL = microcode_constructor_related_to_menus(DL,250,65,252 + uw + 2,81,0x32);
+            DL = microcode_constructor_related_to_menus(DL,246,65,248 + uw + 2,81,0x32);
         }
         DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(17),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
 #ifdef GE_MAP_MAKER
-        x = 252;
+        x = 248;
         y = 84;
         if (g_ModOptionsMapMakerHover && !tab_prev_highlight && !tab_next_highlight)
         {
             s32 mh, mw;
-            textMeasure(&mh, &mw, "Map Maker", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-            DL = microcode_constructor_related_to_menus(DL,250,83,252 + mw + 2,100,0x32);
+            textMeasure(&mh, &mw, frontModGetOptionLabel(63), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,246,83,248 + mw + 2,100,0x32);
         }
-        DL = frontPrintText(DL,&x,&y,"Map Maker",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
-        x = 252;
+        DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(63),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+        x = 248;
         y = 103;
 #else
-        x = 252;
+        x = 248;
         y = 84;
 #endif
         if (g_ModOptionsLevelModifiersHover && !tab_prev_highlight && !tab_next_highlight)
         {
             s32 lh, lw;
-            textMeasure(&lh, &lw, "Level Modifiers", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-            DL = microcode_constructor_related_to_menus(DL,250,y-1,252 + lw + 2,y+16,0x32);
+            textMeasure(&lh, &lw, frontModGetOptionLabel(64), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,246,y-1,248 + lw + 2,y+16,0x32);
         }
-        DL = frontPrintText(DL,&x,&y,"Level Modifiers",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
-    }
+        DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(64),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+        y += 19;
+        if (g_ModOptionsPatchesHover && !tab_prev_highlight && !tab_next_highlight)
+        {
+            s32 ph, pw;
+            textMeasure(&ph, &pw, frontModGetOptionLabel(53), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,246,y-1,248 + pw + 2,y+16,0x32);
+        }
+        x = 248;
+        DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(53),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+        y += 19;
+        if (g_ModOptionsSinglePlayerCharacterHover && !tab_prev_highlight && !tab_next_highlight)
+        {
+            s32 sh, sw;
+            textMeasure(&sh, &sw, frontModGetOptionLabel(66), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,246,y-1,248 + sw + 2,y+16,0x32);
+        }
+        x = 248;
+        DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(66),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+        y += 19;
+        if (g_ModOptionsDebugHover && !tab_prev_highlight && !tab_next_highlight)
+        {
+            s32 dh, dw;
+            textMeasure(&dh, &dw, frontModGetOptionLabel(71), ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+            DL = microcode_constructor_related_to_menus(DL,246,y-1,248 + dw + 2,y+16,0x32);
+        }
+        x = 248;
+        DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(71),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+}
 
     for (i=0;i<count;i++)
     {
         static const u8 page1labels[11] = {0,1,2,3,4,5,6,7,9,10,11};
-        static const u8 page2labels[15] = {12,13,14,15,30,31,16,8,29,46,47,48,49,51,50};
+        static const u8 page2labels[10] = {12,13,14,15,30,16,8,29,74,76};
         char *label = frontModGetOptionLabel(g_ModOptionsPage ? page2labels[i] : page1labels[i]);
         y=MOD_OPTIONS_FIRST_ROW_Y+i*(g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT); x=55;
 #ifdef GE_MAP_MAKER
-        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !tab_prev_highlight && !tab_next_highlight)
+        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && !tab_prev_highlight && !tab_next_highlight)
 #else
-        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !tab_prev_highlight && !tab_next_highlight)
+        if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && !tab_prev_highlight && !tab_next_highlight)
 #endif
         {
             s32 lh, lw;
@@ -9945,23 +10770,22 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
         }
 
         valueptr="Off";
-        if (g_ModOptionsPage)
+        if (g_ModOptionsPage && i >= 8)
+        {
+            valueptr = ">";
+        }
+        else if (g_ModOptionsPage)
         {
             if (i == 0) value = opt & OPTION_HEADROLL;
             else if (i == 1) value = opt2 & MODOPT2_ENDLESS_DEATHCAM;
             else if (i == 2) value = opt2 & MODOPT2_REALTIME_COLLAPSE;
             else if (i == 3) value = !(opt2 & MODOPT2_DISABLE_HITSTUN);
             else if (i == 4) value = !(opt2 & MODOPT2_DISABLE_KNOCKBACK);
-            else if (i == 5) value = !(opt2 & MODOPT2_DISABLE_NOISE_DITHER);
-            else if (i == 6) value = opt2 & MODOPT2_DAMAGE_FLASH;
-            else if (i == 7) value = opt & OPTION_CROSSHAIR;
-            else if (i == 8) { value = opt2 & MODOPT2_DISABLE_DAMAGE_SFX; value = !value; }
-            else if (i == 9) value = opt3 & MODOPT3_ENABLE_MICROOPT;
-            else if (i == 10) value = g_ModStayInTpOnDeathDefault;
-            else if (i == 11) value = opt3 & MODOPT3_TP_CROUCH_CAM;
-            else if (i == 12) value = opt3 & MODOPT3_DIRECTIONAL_SHOULDER;
-            else if (i == 13) value = g_ModTpSightTranslucencyEnabled;
-            else value = g_ModAntiAliasingEnabled;
+            else if (i == 5) value = opt2 & MODOPT2_DAMAGE_FLASH;
+            else if (i == 6) value = opt & OPTION_CROSSHAIR;
+            else if (i == 7) { value = opt2 & MODOPT2_DISABLE_DAMAGE_SFX; value = !value; }
+            else if (i == 8) value = g_ModEnemyBulletHolesEnabled;
+            else value = g_ModMeleeQuickSwapEnabled;
             valueptr = value ? "On" : "Off";
         }
         else if (i==2) { value=(opt&OPTION_CONTROLTYPE)>>8; if(value>7)value=0; valueptr=frontModGetOptionLabel(21 + value); }
@@ -9982,26 +10806,882 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
     if (!g_ModOptionsPage) DL=frontAddNextTabText(DL);
     DL=frontDrawCursor(DL); return DL;
 }
+
+/* R27C: compact Special Options submenus.  These keep the crowded main
+ * Special Options page focused on gameplay toggles while preserving every
+ * existing implementation behind an explicit category. */
+static void frontModStoreCurrentSettings(void)
+{
+    save_data *save = fileGetSaveForFoldernum(selected_folder_num);
+
+    if (save == NULL) return;
+
+    save->mod_options2 = g_ModGameplayOptions2;
+    save->mod_options3 = g_ModGameplayOptions3;
+    fileStoreThirdPersonCameraSettings(save);
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+    fileStoreExtendedSettings(save);
+#endif
+    fileWriteSave(save);
+}
+
+/* R27E: submenu edits are live in RAM, but EEPROM is committed only once
+ * when the player leaves the submenu.  Reuse the frontend's existing dirty
+ * latch so no extra persistent state is needed. */
+static void frontModCommitDeferredSubmenuSettings(void)
+{
+    if (!g_ModOptionsDirty)
+        return;
+
+    frontModStoreCurrentSettings();
+    g_ModOptionsDirty = FALSE;
+}
+
+static void frontPatchesChange(s32 row)
+{
+    if (row == 0)
+    {
+        g_ModTpCornerShootingFixEnabled ^= 1;
+    }
+    else if (row == 1)
+    {
+        g_ModSiloXMusicLoopFixEnabled ^= 1;
+    }
+    else if (row == 2)
+    {
+        g_ModAr33PropFixMpEnabled ^= 1;
+    }
+
+    g_ModOptionsDirty = TRUE;
+}
+
+static void frontThirdPersonOptionsChange(s32 row, s32 direction)
+{
+    if (direction == 0) direction = 1;
+
+    if (row == 0)
+    {
+        g_PlayerThirdPerson[0] ^= 1;
+    }
+    else if (row == 1)
+    {
+        s32 i;
+        g_ModStayInTpOnDeathDefault ^= 1;
+        for (i = 0; i < MAX_PLAYER_COUNT; i++)
+            g_PlayerStayInTpOnDeath[i] = g_ModStayInTpOnDeathDefault;
+    }
+    else if (row == 2)
+    {
+        g_ModGameplayOptions3 ^= MODOPT3_TP_CROUCH_CAM;
+        g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+    }
+    else if (row == 3)
+    {
+        g_ModGameplayOptions3 ^= MODOPT3_DIRECTIONAL_SHOULDER;
+        g_ModGameplayOptions3 = (g_ModGameplayOptions3 & ~MODOPT3_SIGNATURE_MASK) | MODOPT3_SIGNATURE;
+    }
+    else if (row == 4)
+    {
+        g_ModTpSightTranslucencyEnabled ^= 1;
+    }
+    else if (row == 5)
+    {
+        s32 actual = TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust
+            + direction * TP_CAM_DISTANCE_STEP;
+        if (actual < TP_CAM_DISTANCE_MIN) actual = TP_CAM_DISTANCE_MIN;
+        if (actual > TP_CAM_DISTANCE_MAX) actual = TP_CAM_DISTANCE_MAX;
+        g_ModThirdPersonCameraDistanceAdjust = actual - TP_CAM_DISTANCE_DEFAULT;
+    }
+    else if (row == 6)
+    {
+        s32 value = g_ModThirdPersonCameraHeightAdjust + direction * 2;
+        if (value < -48) value = -48;
+        if (value > 72) value = 72;
+        g_ModThirdPersonCameraHeightAdjust = value;
+    }
+    else if (row == 7)
+    {
+        s32 value = g_ModThirdPersonCameraHorizontalAdjust + direction * 2;
+        if (value < -60) value = -60;
+        if (value > 100) value = 100;
+        g_ModThirdPersonCameraHorizontalAdjust = value;
+    }
+    else if (row == 8)
+    {
+        s32 value = g_ModThirdPersonCameraDownFrameAdjust + direction;
+        if (value < -24) value = -24;
+        if (value > 72) value = 72;
+        g_ModThirdPersonCameraDownFrameAdjust = value;
+    }
+    else if (row == 9)
+    {
+        s32 height = TP_CROUCH_CAM_HEIGHT_DEFAULT
+            + g_ModThirdPersonCrouchCameraHeightAdjust + direction * 2;
+        if (height < 0) height = 0;
+        if (height > 96) height = 96;
+        g_ModThirdPersonCrouchCameraHeightAdjust = height - TP_CROUCH_CAM_HEIGHT_DEFAULT;
+    }
+    else if (row == 10)
+    {
+        s32 value = g_ModThirdPersonCrosshairRange + direction * TP_CROSSHAIR_RANGE_STEP;
+        if (value < TP_CROSSHAIR_RANGE_MIN) value = TP_CROSSHAIR_RANGE_MIN;
+        if (value > TP_CROSSHAIR_RANGE_MAX) value = TP_CROSSHAIR_RANGE_MAX;
+        g_ModThirdPersonCrosshairRange = value;
+    }
+    else if (row == 11)
+    {
+        g_ModTpWorldSpaceCrosshairEnabled ^= 1;
+    }
+
+    g_ModOptionsDirty = TRUE;
+}
+
+void init_menu_patches(void)
+{
+    g_PatchesMenuChoice = 0;
+    g_ModOptionsDirty = FALSE;
+    tab_prev_highlight = FALSE;
+    load_walletbond();
+}
+
+void update_menu_patches(void) { }
+
+void interface_menu_patches(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 row = ((s32)cursor_v_pos - 66) / 18;
+
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    g_PatchesMenuChoice = -1;
+
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && row >= 0 && row < 3)
+        g_PatchesMenuChoice = row;
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontModCommitDeferredSubmenuSettings();
+        g_ModOptionsStartPage2 = 1;
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (!tab_prev_highlight && row >= 0 && row < 3
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        frontPatchesChange(row);
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_patches(Gfx *DL)
+{
+    s32 i;
+    s32 x;
+    s32 y;
+    s32 enabled;
+
+    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+    x = 55; y = 42;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(53),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    for (i = 0; i < 3; i++)
+    {
+        char *label = frontModGetOptionLabel(i == 0 ? 55 : i == 1 ? 80 : 81);
+
+        y = 66 + i * 18;
+        x = 55;
+        if (i == g_PatchesMenuChoice)
+        {
+            s32 h, w;
+            textMeasure(&h,&w,label,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+            DL = microcode_constructor_related_to_menus(DL,53,y-1,57+w,y+14,0x32);
+        }
+        DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+        if (i == 0) enabled = g_ModTpCornerShootingFixEnabled;
+        else if (i == 1) enabled = g_ModSiloXMusicLoopFixEnabled;
+        else enabled = g_ModAr33PropFixMpEnabled;
+
+        x = 330;
+        DL = frontPrintText(DL,&x,&y,enabled ? "On" : "Off",ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    }
+
+    DL = frontAddPreviousTabText(DL);
+    DL = frontDrawCursor(DL);
+    return DL;
+}
+
+void init_menu_third_person_options(void)
+{
+    g_ThirdPersonOptionsMenuChoice = 0;
+    g_ModOptionsDirty = FALSE;
+    tab_prev_highlight = FALSE;
+    load_walletbond();
+}
+
+void update_menu_third_person_options(void) { }
+
+void interface_menu_third_person_options(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 row = ((s32)cursor_v_pos - 58) / 14;
+    s32 direction = 0;
+
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    g_ThirdPersonOptionsMenuChoice = -1;
+
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && row >= 0 && row < 12)
+        g_ThirdPersonOptionsMenuChoice = row;
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontModCommitDeferredSubmenuSettings();
+        frontChangeMenu(MENU_ENHANCEMENTS_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (pressed & (L_JPAD | L_CBUTTONS)) direction = -1;
+    if (pressed & (R_JPAD | R_CBUTTONS)) direction = 1;
+
+    if (!tab_prev_highlight && row >= 0 && row < 12
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && (direction != 0 || (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontThirdPersonOptionsChange(row, direction);
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_third_person_options(Gfx *DL)
+{
+    char valuebuf[16];
+    char *value;
+    s32 i;
+    s32 x;
+    s32 y;
+
+    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+    x = 55; y = 42;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(54),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    for (i = 0; i < 12; i++)
+    {
+        s32 labelindex = i == 0 ? 32 : i <= 3 ? 46 + i : i == 4 ? 51 : 51 + i;
+        char *label = frontModGetOptionLabel(labelindex);
+
+        y = 58 + i * 14;
+        x = 55;
+        if (i == g_ThirdPersonOptionsMenuChoice)
+        {
+            s32 h, w;
+            textMeasure(&h,&w,label,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+            DL = microcode_constructor_related_to_menus(DL,53,y-1,57+w,y+13,0x32);
+        }
+        DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+        if (i == 0) value = g_PlayerThirdPerson[0] ? "On" : "Off";
+        else if (i == 1) value = g_ModStayInTpOnDeathDefault ? "On" : "Off";
+        else if (i == 2) value = (g_ModGameplayOptions3 & MODOPT3_TP_CROUCH_CAM) ? "On" : "Off";
+        else if (i == 3) value = (g_ModGameplayOptions3 & MODOPT3_DIRECTIONAL_SHOULDER) ? "On" : "Off";
+        else if (i == 4) value = g_ModTpSightTranslucencyEnabled ? "On" : "Off";
+        else if (i == 5) { sprintf(valuebuf,"%d",TP_CAM_DISTANCE_DEFAULT + g_ModThirdPersonCameraDistanceAdjust); value=valuebuf; }
+        else if (i == 6) { sprintf(valuebuf,"%d",TP_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCameraHeightAdjust); value=valuebuf; }
+        else if (i == 7) { sprintf(valuebuf,"%d",TP_CAM_HORIZONTAL_DEFAULT + g_ModThirdPersonCameraHorizontalAdjust); value=valuebuf; }
+        else if (i == 8) { sprintf(valuebuf,"%d",TP_CAM_DOWN_FRAME_DEFAULT + g_ModThirdPersonCameraDownFrameAdjust); value=valuebuf; }
+        else if (i == 9) { sprintf(valuebuf,"%d",TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust); value=valuebuf; }
+        else if (i == 10) { sprintf(valuebuf,"%d",g_ModThirdPersonCrosshairRange); value=valuebuf; }
+        else value = g_ModTpWorldSpaceCrosshairEnabled ? "On" : "Off";
+
+        x = 345;
+        DL = frontPrintText(DL,&x,&y,value,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    }
+
+    DL = frontAddPreviousTabText(DL);
+    DL = frontDrawCursor(DL);
+    return DL;
+}
+
+
+void init_menu_debug_options(void)
+{
+    /* R27P R15: reset shared frontend/tab state for Debug child menu. */
+    g_ModOptionsDirty = FALSE;
+    tab_start_selected = FALSE;
+    tab_next_selected = FALSE;
+    tab_prev_selected = FALSE;
+    tab_start_highlight = FALSE;
+    tab_next_highlight = FALSE;
+    tab_prev_highlight = FALSE;
+    load_walletbond();
+}
+
+void update_menu_debug_options(void) { }
+
+void interface_menu_debug_options(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
+
+    /* R27P R15: Debug uses the same blank folder presentation as Special Options.
+     * Never inherit SW_CONFIDENTIAL or other Multiplayer Options switches. */
+    disable_all_switches(walletinst[0]);
+    set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_BLANK, 1);
+
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontModCommitDeferredSubmenuSettings();
+        /* R27P R15: clear child tab state before returning to Special Options. */
+        tab_start_selected = FALSE;
+        tab_next_selected = FALSE;
+        tab_prev_selected = FALSE;
+        tab_start_highlight = FALSE;
+        tab_next_highlight = FALSE;
+        tab_prev_highlight = FALSE;
+g_ModOptionsStartPage2 = 1;
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (!tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 81.0f && cursor_v_pos <= 97.0f
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        g_ModMasterControlDebugMenuEnabled ^= 1;
+        g_ModOptionsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_debug_options(Gfx *DL)
+{
+    s32 x;
+    s32 y;
+    s32 h;
+    s32 w;
+    char *label = frontModGetOptionLabel(72);
+    char *value = g_ModMasterControlDebugMenuEnabled ? "On" : "Off";
+
+    DL = viSetFillColor(DL,0,0,0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+
+    x = 55;
+    y = 42;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(71),
+            ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,
+            viGetX(),viGetY(),0,0);
+
+    y = 82;
+    x = 74;
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 81.0f && cursor_v_pos <= 97.0f)
+    {
+        textMeasure(&h,&w,label,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+        DL = microcode_constructor_related_to_menus(DL,72,y-1,76+w,y+14,0x32);
+    }
+    DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,
+            0xFF,viGetX(),viGetY(),0,0);
+
+    x = 330;
+    DL = frontPrintText(DL,&x,&y,value,ptrFontZurichBoldChars,ptrFontZurichBold,
+            0xFF,viGetX(),viGetY(),0,0);
+
+    DL = frontAddPreviousTabText(DL);
+    return frontDrawCursor(DL);
+}
+
+void init_menu_single_player_character(void)
+{
+    if (g_ModSinglePlayerCharacter > (u16)frontGetMpCharacterCount())
+        g_ModSinglePlayerCharacter = 0;
+    g_SinglePlayerCharacterMenuChoice = 0;
+    g_ModOptionsDirty = FALSE;
+    tab_prev_highlight = FALSE;
+    load_walletbond();
+}
+
+void update_menu_single_player_character(void) { }
+
+void interface_menu_single_player_character(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 direction = 0;
+    s32 count = frontGetMpCharacterCount();
+
+    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    g_SinglePlayerCharacterMenuChoice = -1;
+
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f)
+    {
+        if (cursor_v_pos >= 75.0f && cursor_v_pos <= 101.0f)
+            g_SinglePlayerCharacterMenuChoice = 0;
+        else if (cursor_v_pos >= 103.0f && cursor_v_pos <= 129.0f)
+            g_SinglePlayerCharacterMenuChoice = 1;
+    }
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontModCommitDeferredSubmenuSettings();
+        g_ModOptionsStartPage2 = 1;
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (pressed & (L_JPAD | L_CBUTTONS)) direction = -1;
+    if (pressed & (R_JPAD | R_CBUTTONS)) direction = 1;
+
+    if (!tab_prev_highlight && g_SinglePlayerCharacterMenuChoice >= 0
+        && (direction != 0 || (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        if (g_SinglePlayerCharacterMenuChoice == 0)
+        {
+            s32 values = count + 1;
+            s32 selection = g_ModSinglePlayerCharacter;
+            if (direction == 0) direction = 1;
+            selection = (selection + direction + values) % values;
+            g_ModSinglePlayerCharacter = (u16)selection;
+        }
+        else
+        {
+            g_ModSinglePlayerMatchViewHeight ^= 1;
+        }
+        g_ModOptionsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_single_player_character(Gfx *DL)
+{
+    s32 x;
+    s32 y;
+    s32 h;
+    s32 w;
+    char *label;
+    char *value;
+
+    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+    x = 55; y = 42;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(66),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    label = frontModGetOptionLabel(67);
+    y = 82; x = 74;
+    if (g_SinglePlayerCharacterMenuChoice == 0 && !tab_prev_highlight)
+    {
+        textMeasure(&h,&w,label,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+        DL = microcode_constructor_related_to_menus(DL,72,y-1,76+w,y+14,0x32);
+    }
+    DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    if (g_ModSinglePlayerCharacter == 0 || g_ModSinglePlayerCharacter > (u16)frontGetMpCharacterCount())
+        value = frontModGetOptionLabel(69);
+    else
+        value = langGet(mp_chr_setup[g_ModSinglePlayerCharacter - 1].text_preset);
+    x = 264;
+    DL = frontPrintText(DL,&x,&y,value,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    label = frontModGetOptionLabel(68);
+    y = 112; x = 74;
+    if (g_SinglePlayerCharacterMenuChoice == 1 && !tab_prev_highlight)
+    {
+        textMeasure(&h,&w,label,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+        DL = microcode_constructor_related_to_menus(DL,72,y-1,76+w,y+14,0x32);
+    }
+    DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    value = g_ModSinglePlayerMatchViewHeight ? "On" : "Off";
+    textMeasure(&h,&w,value,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+    {
+        s32 dh, dw;
+        char *disabled = frontModGetOptionLabel(69);
+        textMeasure(&dh,&dw,disabled,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+        x = 264 + (dw >> 1) - (w >> 1);
+    }
+    DL = frontPrintText(DL,&x,&y,value,ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    DL = frontAddPreviousTabText(DL);
+    DL = frontDrawCursor(DL);
+    return DL;
+}
 #endif
 
 
 
 //********************************************************************************************************
+void interface_menu_experimental_options(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontModCommitDeferredSubmenuSettings();
+        g_ModOptionsStartPage2 = 1;
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (!tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 81.0f && cursor_v_pos <= 97.0f
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
+        g_ModOptionsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+Gfx *constructor_menu_experimental_options(Gfx *DL)
+{
+    s32 x;
+    s32 y;
+    char *label;
+    char *value;
+
+    DL = viSetFillColor(DL,0,0,0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+
+    x = 55;
+    y = 42;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(74),
+            ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    label = frontModGetOptionLabel(75);
+    value = modExperimentalJumpEnabled() ? "On" : "Off";
+    y = 82;
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 81.0f && cursor_v_pos <= 97.0f)
+        DL = microcode_constructor_related_to_menus(DL,53,y-1,390,y+15,0x32);
+    x = 55;
+    DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,
+            0xFF,viGetX(),viGetY(),0,0);
+    x = 330;
+    DL = frontPrintText(DL,&x,&y,value,ptrFontZurichBoldChars,ptrFontZurichBold,
+            0xFF,viGetX(),viGetY(),0,0);
+
+    DL = frontAddPreviousTabText(DL);
+    return frontDrawCursor(DL);
+}
+
+static s32 g_EnhancementsMenuChoice;
+
+static s32 g_AdditionalDeathAnimationsChoice;
+
+void interface_menu_enhancements_options(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 row = -1;
+    s32 first_y = 58;
+    s32 row_pitch = 16;
+    s32 second_y = first_y + row_pitch;
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+
+    if (!tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f)
+    {
+        if (cursor_v_pos >= (f32)(first_y - 2)
+            && cursor_v_pos <= (f32)(first_y + 13))
+            row = 0;
+        else if (cursor_v_pos >= (f32)(second_y - 2)
+            && cursor_v_pos <= (f32)(second_y + row_pitch * 9 - 1))
+        {
+            row = 1 + ((s32)cursor_v_pos - second_y) / row_pitch;
+            if (row > 9) row = 9;
+        }
+    }
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontModCommitDeferredSubmenuSettings();
+        g_ModOptionsStartPage2 = 1;
+        frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (row >= 0 && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        if (row == 0)
+        {
+            frontChangeMenu(MENU_ADDITIONAL_DEATH_ANIMATIONS, FALSE);
+        }
+        else if (row == 1)
+        {
+            frontChangeMenu(MENU_THIRD_PERSON_OPTIONS, FALSE);
+        }
+        else
+        {
+            if (row == 2)
+                modSetMicroOptimizationsEnabled(!modMicroOptimizationsEnabled());
+            else if (row == 3)
+                g_ModGameplayOptions2 ^= MODOPT2_DISABLE_NOISE_DITHER;
+            else if (row == 4)
+                g_ModAntiAliasingEnabled ^= 1;
+            else if (row == 5)
+                g_ModUnlimitedExplosionsEnabled ^= 1;
+            else if (row == 6)
+                g_ModEnemyBulletHolesEnabled ^= 1;
+            else if (row == 7)
+                modMeleeQuickSwapSetEnabled(!g_ModMeleeQuickSwapEnabled);
+            else if (row == 8)
+                g_ModAlwaysShowCrosshairEnabled ^= 1;
+            else
+                g_ModDisableBodyArmorEnabled ^= 1;
+
+            g_ModOptionsDirty = TRUE;
+        }
+
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        return;
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+
+
+Gfx *constructor_menu_enhancements_options(Gfx *DL)
+{
+    s32 x;
+    s32 y;
+    s32 i;
+    s32 hover;
+    s32 first_y = 58;
+    s32 row_pitch = 16;
+    s32 second_y = first_y + row_pitch;
+    char *label;
+    char *value;
+
+    DL = viSetFillColor(DL,0,0,0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+
+    x=55; y=36;
+    DL=frontPrintText(DL,&x,&y,frontModGetOptionLabel(76),
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    hover = !tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= (f32)(first_y - 2)
+        && cursor_v_pos <= (f32)(first_y + 13);
+    if (hover)
+        DL=microcode_constructor_related_to_menus(
+            DL,53,first_y-2,390,first_y+13,0x32);
+
+    x=55; y=first_y;
+    DL=frontPrintText(DL,&x,&y,"Additional Death Animations For Player >",
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    for (i = 1; i < 10; i++)
+    {
+        y = second_y + (i - 1) * row_pitch;
+        hover = !tab_prev_highlight
+            && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+            && cursor_v_pos >= (f32)(y - 2)
+            && cursor_v_pos <= (f32)(y + 13);
+
+        if (hover)
+            DL=microcode_constructor_related_to_menus(DL,53,y-2,390,y+13,0x32);
+
+        if (i == 1) { label = frontModGetOptionLabel(54); value = ">"; }
+        else if (i == 2) { label = frontModGetOptionLabel(46); value = modMicroOptimizationsEnabled() ? "On" : "Off"; }
+        else if (i == 3) { label = frontModGetOptionLabel(31); value = (g_ModGameplayOptions2 & MODOPT2_DISABLE_NOISE_DITHER) ? "Off" : "On"; }
+        else if (i == 4) { label = frontModGetOptionLabel(50); value = g_ModAntiAliasingEnabled ? "On" : "Off"; }
+        else if (i == 5) { label = frontModGetOptionLabel(70); value = g_ModUnlimitedExplosionsEnabled ? "On" : "Off"; }
+        else if (i == 6) { label = frontModGetOptionLabel(52); value = g_ModEnemyBulletHolesEnabled ? "On" : "Off"; }
+        else if (i == 7) { label = frontModGetOptionLabel(73); value = g_ModMeleeQuickSwapEnabled ? "On" : "Off"; }
+        else if (i == 8) { label = frontModGetOptionLabel(78); value = g_ModAlwaysShowCrosshairEnabled ? "On" : "Off"; }
+        else { label = frontModGetOptionLabel(79); value = g_ModDisableBodyArmorEnabled ? "On" : "Off"; }
+
+        x=55;
+        DL=frontPrintText(DL,&x,&y,label,
+            ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+        x=330;
+        DL=frontPrintText(DL,&x,&y,value,
+            ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    }
+
+    DL=frontAddPreviousTabText(DL);
+    return frontDrawCursor(DL);
+}
+
+
+void interface_menu_additional_death_animations(void)
+{
+    u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 row = -1;
+    s32 title_y = 42;
+    s32 first_y = 82;
+    s32 second_y = first_y + 22;
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+
+    if (!tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f)
+    {
+        if (cursor_v_pos >= (f32)(first_y - 3)
+            && cursor_v_pos <= (f32)(first_y + 17))
+            row = 0;
+        else if (cursor_v_pos >= (f32)(second_y - 3)
+            && cursor_v_pos <= (f32)(second_y + 17))
+            row = 1;
+    }
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontChangeMenu(MENU_ENHANCEMENTS_OPTIONS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        return;
+    }
+
+    if (row >= 0 && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        if (row == 0)
+            g_ModAdditionalPlayerDeathAnimationsEnabled ^= 1;
+        else
+            g_ModStaggeringBackwardsDeathEnabled ^= 1;
+
+        g_ModOptionsDirty = TRUE;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        return;
+    }
+
+    frontUpdateControlStickPosition();
+}
+
+
+Gfx *constructor_menu_additional_death_animations(Gfx *DL)
+{
+    s32 x;
+    s32 y;
+    s32 hover;
+    s32 title_y = 42;
+    s32 first_y = 82;
+    s32 second_y = first_y + 22;
+    char *value;
+
+    DL=viSetFillColor(DL,0,0,0);
+    DL=viFillScreen(DL);
+    DL=frontSetupMenuBackground(DL);
+    DL=microcode_constructor(DL);
+
+    x=55; y=title_y;
+    DL=frontPrintText(DL,&x,&y,"Additional Death Animations For Player",
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    hover = !tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= (f32)(first_y - 3)
+        && cursor_v_pos <= (f32)(first_y + 17);
+    if (hover)
+        DL=microcode_constructor_related_to_menus(
+            DL,53,first_y-3,390,first_y+17,0x32);
+
+    x=55; y=first_y;
+    DL=frontPrintText(DL,&x,&y,frontModGetOptionLabel(82),
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    value=g_ModAdditionalPlayerDeathAnimationsEnabled ? "On" : "Off";
+    x=330;
+    DL=frontPrintText(DL,&x,&y,value,
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    hover = !tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= (f32)(second_y - 3)
+        && cursor_v_pos <= (f32)(second_y + 17);
+    if (hover)
+        DL=microcode_constructor_related_to_menus(
+            DL,53,second_y-3,390,second_y+17,0x32);
+
+    x=55; y=second_y;
+    DL=frontPrintText(DL,&x,&y,frontModGetOptionLabel(83),
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+    value=g_ModStaggeringBackwardsDeathEnabled ? "On" : "Off";
+    x=330;
+    DL=frontPrintText(DL,&x,&y,value,
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    DL=frontAddPreviousTabText(DL);
+    return frontDrawCursor(DL);
+}
+
+
+
 //LEVEL MODIFIERS FRONTEND
 //********************************************************************************************************
 #define LEVELMOD_FRONT_VISIBLE_ROWS 10
+/* R27Q_R4_LEVEL_MODIFIERS_SP_TWO_COLUMNS */
+#define LEVELMOD_FRONT_LEFT_CENTER_X   137
+#define LEVELMOD_FRONT_RIGHT_CENTER_X  303
+#define LEVELMOD_FRONT_SINGLE_CENTER_X 220
+#define LEVELMOD_FRONT_ROW_Y           78
+#define LEVELMOD_FRONT_ROW_PITCH       16
+#define LEVELMOD_FRONT_LEFT_HIT_X      54
+#define LEVELMOD_FRONT_MID_X           220
+#define LEVELMOD_FRONT_RIGHT_HIT_X     386
 
-static Gfx *frontLevelModifiersText(Gfx *DL, s32 x, s32 y, const char *text, u32 colour)
-{
-    return textRenderOutlined(DL, &x, &y, (s8 *)text, ptrFontZurichBoldChars,
-            ptrFontZurichBold, colour, 0x000000E0, viGetX(), viGetY(), 0, 0);
-}
+static const char *g_LevelModifierCategoryNames[LEVELMOD_CATEGORY_COUNT] = {
+    "Single-Player", "Multiplayer", "Miscellaneous"
+};
 
 void init_menu_level_modifiers(void)
 {
     g_LevelModifiersCategoryChoice = 0;
     g_LevelModifiersLevelChoice = 0;
     g_LevelModifiersListTop = 0;
+    tab_prev_highlight = FALSE;
     load_walletbond();
 }
 
@@ -10010,14 +11690,24 @@ void update_menu_level_modifiers(void) { }
 void interface_menu_level_modifiers(void)
 {
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
+    s32 row;
 
     viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    if (!tab_prev_highlight && cursor_v_pos >= 70.0f
+        && cursor_v_pos < 70.0f + LEVELMOD_CATEGORY_COUNT * 24.0f)
+    {
+        row = ((s32)cursor_v_pos - 70) / 24;
+        g_LevelModifiersCategoryChoice = row;
+    }
+
     if (pressed & (U_JPAD | U_CBUTTONS))
         g_LevelModifiersCategoryChoice = (g_LevelModifiersCategoryChoice + LEVELMOD_CATEGORY_COUNT - 1) % LEVELMOD_CATEGORY_COUNT;
     if (pressed & (D_JPAD | D_CBUTTONS))
         g_LevelModifiersCategoryChoice = (g_LevelModifiersCategoryChoice + 1) % LEVELMOD_CATEGORY_COUNT;
 
-    if (pressed & B_BUTTON)
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
     {
 #ifdef GE_MAP_MAKER
         g_ModOptionsStartPage2 = 1;
@@ -10027,7 +11717,7 @@ void interface_menu_level_modifiers(void)
         return;
     }
 
-    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+    if (!tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
     {
         g_LevelModifiersLevelChoice = 0;
         g_LevelModifiersListTop = 0;
@@ -10040,21 +11730,26 @@ void interface_menu_level_modifiers(void)
 
 Gfx *constructor_menu_level_modifiers(Gfx *DL)
 {
-    static const char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player", "Multiplayer", "Miscellaneous"};
     s32 i;
+    s32 x;
     s32 y;
 
     DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
-    DL = microcode_constructor_related_to_menus(DL,42,26,422,230,0x000000B8);
-    DL = frontLevelModifiersText(DL,55,42,"Level Modifiers",0xFFE070FF);
+    x = 55; y = 42;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(64),ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
     for (i = 0; i < LEVELMOD_CATEGORY_COUNT; i++)
     {
-        y = 86 + i * 30;
-        if (i == g_LevelModifiersCategoryChoice)
-            DL = microcode_constructor_related_to_menus(DL,70,y-2,370,y+18,0x76561CB0);
-        DL = frontLevelModifiersText(DL,74,y,categories[i],i == g_LevelModifiersCategoryChoice ? 0xFFE070FF : 0xFFFFFFFF);
+        s32 h, w;
+        y = 70 + i * 24;
+        x = 74;
+        if (i == g_LevelModifiersCategoryChoice && !tab_prev_highlight)
+        {
+            textMeasure(&h,&w,(char *)g_LevelModifierCategoryNames[i],ptrFontZurichBoldChars,ptrFontZurichBold,0);
+            DL = microcode_constructor_related_to_menus(DL,72,y-1,76+w,y+14,0x32);
+        }
+        DL = frontPrintText(DL,&x,&y,(char *)g_LevelModifierCategoryNames[i],ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
     }
-    DL = frontLevelModifiersText(DL,74,198,"Choose a level category.  B: Back",0xB8B8B8FF);
+    DL = frontAddPreviousTabText(DL);
     return frontDrawCursor(DL);
 }
 
@@ -10062,6 +11757,7 @@ void init_menu_level_modifiers_levels(void)
 {
     g_LevelModifiersLevelChoice = 0;
     g_LevelModifiersListTop = 0;
+    tab_prev_highlight = FALSE;
     load_walletbond();
 }
 
@@ -10071,30 +11767,120 @@ void interface_menu_level_modifiers_levels(void)
 {
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
     s32 count = levelModifiersGetLevelCount(g_LevelModifiersCategoryChoice);
+    s32 row;
+    s32 index;
+    s32 twoColumns = g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_SINGLE_PLAYER
+        && count > LEVELMOD_FRONT_VISIBLE_ROWS;
 
-    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
-    if (pressed & (U_JPAD | U_CBUTTONS))
-    {
-        if (g_LevelModifiersLevelChoice > 0) g_LevelModifiersLevelChoice--;
-        else g_LevelModifiersLevelChoice = count - 1;
-    }
-    if (pressed & (D_JPAD | D_CBUTTONS))
-    {
-        g_LevelModifiersLevelChoice++;
-        if (g_LevelModifiersLevelChoice >= count) g_LevelModifiersLevelChoice = 0;
-    }
-    if (g_LevelModifiersLevelChoice < g_LevelModifiersListTop)
-        g_LevelModifiersListTop = g_LevelModifiersLevelChoice;
-    if (g_LevelModifiersLevelChoice >= g_LevelModifiersListTop + LEVELMOD_FRONT_VISIBLE_ROWS)
-        g_LevelModifiersListTop = g_LevelModifiersLevelChoice - LEVELMOD_FRONT_VISIBLE_ROWS + 1;
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
 
-    if (pressed & B_BUTTON)
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+
+    if (!tab_prev_highlight
+        && cursor_v_pos >= (f32)LEVELMOD_FRONT_ROW_Y
+        && cursor_v_pos < (f32)(LEVELMOD_FRONT_ROW_Y
+            + LEVELMOD_FRONT_VISIBLE_ROWS * LEVELMOD_FRONT_ROW_PITCH))
+    {
+        row = ((s32)cursor_v_pos - LEVELMOD_FRONT_ROW_Y)
+            / LEVELMOD_FRONT_ROW_PITCH;
+
+        if (twoColumns)
+        {
+            if (cursor_h_pos >= (f32)LEVELMOD_FRONT_LEFT_HIT_X
+                && cursor_h_pos < (f32)LEVELMOD_FRONT_MID_X)
+            {
+                index = row;
+                if (index < count)
+                    g_LevelModifiersLevelChoice = index;
+            }
+            else if (cursor_h_pos >= (f32)LEVELMOD_FRONT_MID_X
+                && cursor_h_pos <= (f32)LEVELMOD_FRONT_RIGHT_HIT_X)
+            {
+                index = LEVELMOD_FRONT_VISIBLE_ROWS + row;
+                if (index < count)
+                    g_LevelModifiersLevelChoice = index;
+            }
+        }
+        else if (cursor_h_pos >= (f32)LEVELMOD_FRONT_LEFT_HIT_X
+            && cursor_h_pos <= (f32)LEVELMOD_FRONT_RIGHT_HIT_X)
+        {
+            index = g_LevelModifiersListTop + row;
+            if (index < count)
+                g_LevelModifiersLevelChoice = index;
+        }
+    }
+
+    if (twoColumns)
+    {
+        if (pressed & (U_JPAD | U_CBUTTONS))
+        {
+            row = g_LevelModifiersLevelChoice % LEVELMOD_FRONT_VISIBLE_ROWS;
+            index = g_LevelModifiersLevelChoice - row;
+            row = (row + LEVELMOD_FRONT_VISIBLE_ROWS - 1) % LEVELMOD_FRONT_VISIBLE_ROWS;
+            if (index + row < count)
+                g_LevelModifiersLevelChoice = index + row;
+        }
+
+        if (pressed & (D_JPAD | D_CBUTTONS))
+        {
+            row = g_LevelModifiersLevelChoice % LEVELMOD_FRONT_VISIBLE_ROWS;
+            index = g_LevelModifiersLevelChoice - row;
+            row = (row + 1) % LEVELMOD_FRONT_VISIBLE_ROWS;
+            if (index + row < count)
+                g_LevelModifiersLevelChoice = index + row;
+        }
+
+        if (pressed & (L_JPAD | L_CBUTTONS))
+        {
+            if (g_LevelModifiersLevelChoice >= LEVELMOD_FRONT_VISIBLE_ROWS)
+                g_LevelModifiersLevelChoice -= LEVELMOD_FRONT_VISIBLE_ROWS;
+        }
+
+        if (pressed & (R_JPAD | R_CBUTTONS))
+        {
+            index = g_LevelModifiersLevelChoice + LEVELMOD_FRONT_VISIBLE_ROWS;
+            if (g_LevelModifiersLevelChoice < LEVELMOD_FRONT_VISIBLE_ROWS
+                && index < count)
+                g_LevelModifiersLevelChoice = index;
+        }
+
+        g_LevelModifiersListTop = 0;
+    }
+    else
+    {
+        if (pressed & (U_JPAD | U_CBUTTONS))
+        {
+            if (g_LevelModifiersLevelChoice > 0)
+                g_LevelModifiersLevelChoice--;
+            else
+                g_LevelModifiersLevelChoice = count - 1;
+        }
+
+        if (pressed & (D_JPAD | D_CBUTTONS))
+        {
+            g_LevelModifiersLevelChoice++;
+            if (g_LevelModifiersLevelChoice >= count)
+                g_LevelModifiersLevelChoice = 0;
+        }
+
+        if (g_LevelModifiersLevelChoice < g_LevelModifiersListTop)
+            g_LevelModifiersListTop = g_LevelModifiersLevelChoice;
+        if (g_LevelModifiersLevelChoice >= g_LevelModifiersListTop + LEVELMOD_FRONT_VISIBLE_ROWS)
+            g_LevelModifiersListTop = g_LevelModifiersLevelChoice - LEVELMOD_FRONT_VISIBLE_ROWS + 1;
+    }
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
     {
         frontChangeMenu(MENU_LEVEL_MODIFIERS, FALSE);
         sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         return;
     }
-    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+
+    if (!tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
     {
         if (levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice))
         {
@@ -10107,41 +11893,96 @@ void interface_menu_level_modifiers_levels(void)
         }
         return;
     }
+
     frontUpdateControlStickPosition();
 }
 
 Gfx *constructor_menu_level_modifiers_levels(Gfx *DL)
 {
-    static const char *categories[LEVELMOD_CATEGORY_COUNT] = {"Single-Player", "Multiplayer", "Miscellaneous"};
     s32 i;
     s32 index;
     s32 count = levelModifiersGetLevelCount(g_LevelModifiersCategoryChoice);
+    s32 x;
     s32 y;
+    s32 h;
+    s32 w;
+    s32 center;
+    s32 row;
+    s32 twoColumns = g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_SINGLE_PLAYER
+        && count > LEVELMOD_FRONT_VISIBLE_ROWS;
     u32 colour;
+    char *name;
 
-    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
-    DL = microcode_constructor_related_to_menus(DL,42,26,422,252,0x000000B8);
-    DL = frontLevelModifiersText(DL,55,34,"Level Modifiers",0xFFE070FF);
-    DL = frontLevelModifiersText(DL,55,54,categories[g_LevelModifiersCategoryChoice],0xD8D8D8FF);
-    for (i = 0; i < LEVELMOD_FRONT_VISIBLE_ROWS; i++)
+    DL = viSetFillColor(DL,0,0,0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+
+    x = 55; y = 34;
+    DL = frontPrintText(DL,&x,&y,frontModGetOptionLabel(64),
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xFF,viGetX(),viGetY(),0,0);
+
+    x = 55; y = 54;
+    DL = frontPrintText(DL,&x,&y,
+        (char *)g_LevelModifierCategoryNames[g_LevelModifiersCategoryChoice],
+        ptrFontZurichBoldChars,ptrFontZurichBold,0xD8,viGetX(),viGetY(),0,0);
+
+    if (twoColumns)
     {
-        index = g_LevelModifiersListTop + i;
-        if (index >= count) break;
-        y = 78 + i * 16;
-        colour = levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice,index) ? 0xFFFFFFFF : 0x606060C0;
-        if (index == g_LevelModifiersLevelChoice)
+        for (index = 0; index < count; index++)
         {
-            DL = microcode_constructor_related_to_menus(DL,68,y-1,360,y+15,0x76561CB0);
-            if (levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice,index)) colour = 0xFFE070FF;
+            row = index % LEVELMOD_FRONT_VISIBLE_ROWS;
+            center = index < LEVELMOD_FRONT_VISIBLE_ROWS
+                ? LEVELMOD_FRONT_LEFT_CENTER_X
+                : LEVELMOD_FRONT_RIGHT_CENTER_X;
+            y = LEVELMOD_FRONT_ROW_Y + row * LEVELMOD_FRONT_ROW_PITCH;
+
+            name = (char *)levelModifiersGetLevelName(g_LevelModifiersCategoryChoice,index);
+            textMeasure(&h,&w,name,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+            x = center - (w >> 1);
+
+            colour = levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice,index) ? 0xFF : 0x60;
+
+            if (index == g_LevelModifiersLevelChoice && !tab_prev_highlight)
+                DL = microcode_constructor_related_to_menus(DL,x-2,y-1,x+w+2,y+14,0x32);
+
+            DL = frontPrintText(DL,&x,&y,name,
+                ptrFontZurichBoldChars,ptrFontZurichBold,
+                colour,viGetX(),viGetY(),0,0);
         }
-        DL = frontLevelModifiersText(DL,74,y,levelModifiersGetLevelName(g_LevelModifiersCategoryChoice,index),colour);
     }
-    DL = frontLevelModifiersText(DL,286,224,"B: Back",0xB8B8B8FF);
+    else
+    {
+        for (i = 0; i < LEVELMOD_FRONT_VISIBLE_ROWS; i++)
+        {
+            index = g_LevelModifiersListTop + i;
+            if (index >= count)
+                break;
+
+            y = LEVELMOD_FRONT_ROW_Y + i * LEVELMOD_FRONT_ROW_PITCH;
+            name = (char *)levelModifiersGetLevelName(g_LevelModifiersCategoryChoice,index);
+            textMeasure(&h,&w,name,ptrFontZurichBoldChars,ptrFontZurichBold,0);
+            x = LEVELMOD_FRONT_SINGLE_CENTER_X - (w >> 1);
+
+            colour = levelModifiersLevelImplemented(g_LevelModifiersCategoryChoice,index) ? 0xFF : 0x60;
+
+            if (index == g_LevelModifiersLevelChoice && !tab_prev_highlight)
+                DL = microcode_constructor_related_to_menus(DL,x-2,y-1,x+w+2,y+14,0x32);
+
+            DL = frontPrintText(DL,&x,&y,name,
+                ptrFontZurichBoldChars,ptrFontZurichBold,
+                colour,viGetX(),viGetY(),0,0);
+        }
+    }
+
+    DL = frontAddPreviousTabText(DL);
     return frontDrawCursor(DL);
 }
 
 void init_menu_level_modifiers_detail(void)
 {
+    g_LevelModifiersDetailChoice = 0;
+    tab_prev_highlight = FALSE;
     load_walletbond();
 }
 
@@ -10150,58 +11991,223 @@ void update_menu_level_modifiers_detail(void) { }
 void interface_menu_level_modifiers_detail(void)
 {
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
-    viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f,10000.0f); viSetUseZBuf(FALSE);
-    if (pressed & B_BUTTON)
+    s32 count = levelModifiersGetFrontendModifierCount(
+        g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice);
+    s32 row;
+
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(FALSE);
+
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+
+    if (!tab_prev_highlight
+        && count > 0
+        && cursor_v_pos >= 82.0f
+        && cursor_v_pos < 82.0f + count * 26.0f)
     {
-        frontChangeMenu(MENU_LEVEL_MODIFIERS_LEVELS,FALSE);
-        sndPlaySfx(g_musicSfxBufferPtr,DOOR_METAL_CLOSE2_SFX,NULL);
+        row = ((s32)cursor_v_pos - 82) / 26;
+        if (row >= 0 && row < count)
+            g_LevelModifiersDetailChoice = row;
+    }
+
+    if (count > 0 && (pressed & (U_JPAD | U_CBUTTONS)))
+    {
+        g_LevelModifiersDetailChoice--;
+        if (g_LevelModifiersDetailChoice < 0)
+            g_LevelModifiersDetailChoice = count - 1;
+    }
+
+    if (count > 0 && (pressed & (D_JPAD | D_CBUTTONS)))
+    {
+        g_LevelModifiersDetailChoice++;
+        if (g_LevelModifiersDetailChoice >= count)
+            g_LevelModifiersDetailChoice = 0;
+    }
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
+    {
+        frontChangeMenu(MENU_LEVEL_MODIFIERS_LEVELS, FALSE);
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         return;
     }
-    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | L_JPAD | R_JPAD | L_CBUTTONS | R_CBUTTONS))
+
+    if (count > 0
+        && !tab_prev_highlight
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON
+            | L_JPAD | R_JPAD | L_CBUTTONS | R_CBUTTONS)))
     {
-        if (g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_MISCELLANEOUS
-            && g_LevelModifiersLevelChoice == 1)
+        if (levelModifiersToggleFrontendModifier(
+                g_LevelModifiersCategoryChoice,
+                g_LevelModifiersLevelChoice,
+                g_LevelModifiersDetailChoice))
         {
-            levelModifiersSetCitadelWaterPreload(!levelModifiersGetCitadelWaterPreload());
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else
         {
-            levelModifiersSetSiloBetaVentPreload(!levelModifiersGetSiloBetaVentPreload());
+            sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, NULL);
         }
-        sndPlaySfx(g_musicSfxBufferPtr,OPTION_CHOOSE_SFX,NULL);
     }
+
     frontUpdateControlStickPosition();
 }
 
 Gfx *constructor_menu_level_modifiers_detail(Gfx *DL)
 {
-    s32 citadel = g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_MISCELLANEOUS
-        && g_LevelModifiersLevelChoice == 1;
-    const char *value = citadel
-        ? (levelModifiersGetCitadelWaterPreload() ? "On" : "Off")
-        : (levelModifiersGetSiloBetaVentPreload() ? "On" : "Off");
+    s32 count = levelModifiersGetFrontendModifierCount(
+        g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice);
+    s32 i;
+    s32 x;
+    s32 y;
+    s32 h;
+    s32 w;
+    char titlebuf[64];
+    const char *name;
+    const char *value;
+    const char *description;
+    const char *credit;
 
-    DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
-    DL = microcode_constructor_related_to_menus(DL,42,26,422,210,0x000000B8);
-    DL = microcode_constructor_related_to_menus(DL,70,91,370,111,0x76561CB0);
+    DL = viSetFillColor(DL, 0, 0, 0);
+    DL = viFillScreen(DL);
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
 
-    if (citadel)
+    sprintf(titlebuf, "Level Modifiers - %s",
+        levelModifiersGetLevelName(g_LevelModifiersCategoryChoice,
+            g_LevelModifiersLevelChoice));
+    x = 55;
+    y = 42;
+    DL = frontPrintText(DL, &x, &y, titlebuf,
+        ptrFontZurichBoldChars, ptrFontZurichBold,
+        0xFF, viGetX(), viGetY(), 0, 0);
+
+    if (count <= 0)
     {
-        DL = frontLevelModifiersText(DL,55,42,"Level Modifiers - Citadel",0xFFE070FF);
-        DL = frontLevelModifiersText(DL,74,94,"Water",0xFFE070FF);
-        DL = frontLevelModifiersText(DL,300,94,value,0xFFFFFFFF);
-        DL = frontLevelModifiersText(DL,74,142,"Adds the restored Citadel water plane using the level's",0xD0D0D0FF);
-        DL = frontLevelModifiersText(DL,74,160,"native water height, texture and colour environment data.",0xD0D0D0FF);
+        x = 74;
+        y = 94;
+        DL = frontPrintText(DL, &x, &y, "No modifiers available",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0x80, viGetX(), viGetY(), 0, 0);
     }
     else
     {
-        DL = frontLevelModifiersText(DL,55,42,"Level Modifiers - Silo",0xFFE070FF);
-        DL = frontLevelModifiersText(DL,74,94,"Beta Vent Start",0xFFE070FF);
-        DL = frontLevelModifiersText(DL,300,94,value,0xFFFFFFFF);
-        DL = frontLevelModifiersText(DL,74,142,"Starts Bond at preserved beta vent pad 230 and",0xD0D0D0FF);
-        DL = frontLevelModifiersText(DL,74,160,"restores the matching historical Silo collision layout.",0xD0D0D0FF);
+        for (i = 0; i < count; i++)
+        {
+            name = levelModifiersGetFrontendModifierName(
+                g_LevelModifiersCategoryChoice,
+                g_LevelModifiersLevelChoice, i);
+            value = levelModifiersGetFrontendModifierValue(
+                g_LevelModifiersCategoryChoice,
+                g_LevelModifiersLevelChoice, i);
+            y = 82 + i * 26;
+
+            if (!tab_prev_highlight && i == g_LevelModifiersDetailChoice)
+            {
+                textMeasure(&h, &w, (char *)name,
+                    ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+                DL = microcode_constructor_related_to_menus(
+                    DL, 72, y - 1, 370, y + 14, 0x32);
+            }
+
+            x = 74;
+            DL = frontPrintText(DL, &x, &y, (char *)name,
+                ptrFontZurichBoldChars, ptrFontZurichBold,
+                0xFF, viGetX(), viGetY(), 0, 0);
+            x = 350;
+            DL = frontPrintText(DL, &x, &y, (char *)value,
+                ptrFontZurichBoldChars, ptrFontZurichBold,
+                0xFF, viGetX(), viGetY(), 0, 0);
+        }
     }
-    DL = frontLevelModifiersText(DL,74,190,"A/Left/Right: Toggle     B: Back",0xB8B8B8FF);
+
+    if (g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_SINGLE_PLAYER
+        && g_LevelModifiersLevelChoice == 0
+        && g_LevelModifiersDetailChoice == 0)
+    {
+        x = 74; y = 148;
+        DL = frontPrintText(DL, &x, &y,
+            "Restores the missing doors near the Dam docks.",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+        x = 74; y = 166;
+        DL = frontPrintText(DL, &x, &y,
+            "Existing retail doors are left untouched.",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+    }
+    else if (g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_SINGLE_PLAYER
+        && g_LevelModifiersLevelChoice == 0
+        && g_LevelModifiersDetailChoice == 1)
+    {
+        x = 74; y = 148;
+        DL = frontPrintText(DL, &x, &y,
+            "Adds the restored speedboat at its preserved dock pad.",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+        x = 74; y = 166;
+        DL = frontPrintText(DL, &x, &y,
+            "No existing crate or prop is replaced.",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+    }
+    else if (g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_SINGLE_PLAYER
+        && g_LevelModifiersLevelChoice == 5)
+    {
+        x = 74; y = 148;
+        DL = frontPrintText(DL, &x, &y,
+            "Starts Bond at preserved beta vent pad 230 and",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+        x = 74; y = 166;
+        DL = frontPrintText(DL, &x, &y,
+            "restores the matching historical Silo collision layout.",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+    }
+    else if (g_LevelModifiersCategoryChoice == LEVELMOD_CATEGORY_MISCELLANEOUS
+        && g_LevelModifiersLevelChoice == 1)
+    {
+        x = 74; y = 148;
+        DL = frontPrintText(DL, &x, &y,
+            "Adds the restored Citadel water plane using the level's",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+        x = 74; y = 166;
+        DL = frontPrintText(DL, &x, &y,
+            "native water height, texture and colour environment data.",
+            ptrFontZurichBoldChars, ptrFontZurichBold,
+            0xD0, viGetX(), viGetY(), 0, 0);
+    }
+
+    if (!tab_prev_highlight && count > 0)
+    {
+        description = levelModifiersGetFrontendModifierDescription(
+            g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice,
+            g_LevelModifiersDetailChoice);
+        credit = levelModifiersGetFrontendModifierCredit(
+            g_LevelModifiersCategoryChoice, g_LevelModifiersLevelChoice,
+            g_LevelModifiersDetailChoice);
+
+        if (description[0] != '\0')
+        {
+            x = 74; y = 168;
+            DL = frontPrintText(DL, &x, &y, (char *)description,
+                ptrFontZurichBoldChars, ptrFontZurichBold,
+                0xD0, viGetX(), viGetY(), 0, 0);
+        }
+        if (credit[0] != '\0')
+        {
+            x = 74; y = 186;
+            DL = frontPrintText(DL, &x, &y, (char *)credit,
+                ptrFontZurichBoldChars, ptrFontZurichBold,
+                0xB0, viGetX(), viGetY(), 0, 0);
+        }
+    }
+
+    DL = frontAddPreviousTabText(DL);
     return frontDrawCursor(DL);
 }
 
@@ -10234,10 +12240,26 @@ void interface_menu_map_maker(void)
     viSetZRange(100.0f, 10000.0f);
     viSetUseZBuf(FALSE);
 
-    if (pressed & (U_JPAD | U_CBUTTONS)) g_MapMakerMenuChoice = 0;
-    if (pressed & (D_JPAD | D_CBUTTONS)) g_MapMakerMenuChoice = 1;
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
 
-    if (pressed & B_BUTTON)
+    /* R27D: the initial Basic/Advanced chooser uses the normal folder-menu
+     * crosshair interaction.  The descriptor line belongs to its title but is
+     * deliberately not a separate selectable row. */
+    if (!tab_prev_highlight)
+    {
+        if (cursor_v_pos >= 68.0f && cursor_v_pos < 122.0f)
+            g_MapMakerMenuChoice = 0;
+        else if (cursor_v_pos >= 132.0f && cursor_v_pos < 186.0f)
+            g_MapMakerMenuChoice = 1;
+    }
+
+    if (pressed & (U_JPAD | U_CBUTTONS))
+        g_MapMakerMenuChoice = 0;
+    if (pressed & (D_JPAD | D_CBUTTONS))
+        g_MapMakerMenuChoice = 1;
+
+    if ((pressed & B_BUTTON)
+        || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
     {
         g_ModOptionsStartPage2 = 1;
         musicTrack1Play(M_FOLDERS);
@@ -10246,12 +12268,13 @@ void interface_menu_map_maker(void)
         return;
     }
 
-    if (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))
+    if (!tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
     {
         mapmakerSetEditorMode(g_MapMakerMenuChoice == 1
                 ? MAPMAKER_EDITOR_ADVANCED : MAPMAKER_EDITOR_BASIC);
         frontChangeMenu(MENU_MAP_MAKER_BASIC, FALSE);
         sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        return;
     }
 
     frontUpdateControlStickPosition();
@@ -10259,37 +12282,51 @@ void interface_menu_map_maker(void)
 
 Gfx *constructor_menu_map_maker(Gfx *DL)
 {
+    s32 i;
     s32 h;
     s32 w;
+    s32 x;
+    s32 y;
 
     DL = viSetFillColor(DL, 0, 0, 0);
     DL = viFillScreen(DL);
     DL = frontSetupMenuBackground(DL);
     DL = microcode_constructor(DL);
 
-    /* Keep every Map Maker label readable over the animated folder/Bond art. */
-    DL = microcode_constructor_related_to_menus(DL, 42, 26, 422, 222, 0x000000B8);
-    DL = frontMapMakerPrintOutlined(DL, 55, 42, "Map Maker", 0xFFE070FF);
+    x = 55;
+    y = 42;
+    DL = frontPrintText(DL, &x, &y, frontModGetOptionLabel(63),
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
 
-    textMeasure(&h, &w, "Basic Map", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-    if (g_MapMakerMenuChoice == 0)
-        DL = microcode_constructor_related_to_menus(DL, 70, 90, 400, 109, 0x76561CB0);
-    DL = frontMapMakerPrintOutlined(DL, 74, 92, "Basic Map",
-            g_MapMakerMenuChoice == 0 ? 0xFFE070FF : 0xFFFFFFFF);
-    DL = frontMapMakerPrintOutlined(DL, 250, 92, "3D Module Editor", 0xFFFFFFFF);
+    for (i = 0; i < 2; i++)
+    {
+        /* Basic/Advanced are the visual anchors, matching the Bank Gothic
+         * emphasis used by UNLOCK EVERYTHING. */
+        char *title = i ? "Advanced Map" : "Basic Map";
+        char *description = i ? "Meshes / Rooms / Portals" : "3D Module Editor";
+        s32 optiony = i ? 142 : 78;
 
-    textMeasure(&h, &w, "Advanced Map", ptrFontZurichBoldChars, ptrFontZurichBold, 0);
-    if (g_MapMakerMenuChoice == 1)
-        DL = microcode_constructor_related_to_menus(DL, 70, 120, 400, 139, 0x76561CB0);
-    DL = frontMapMakerPrintOutlined(DL, 74, 122, "Advanced Map",
-            g_MapMakerMenuChoice == 1 ? 0xFFE070FF : 0xFFFFFFFF);
-    DL = frontMapMakerPrintOutlined(DL, 250, 122, "Meshes / Rooms / Portals", 0xFFFFFFFF);
+        textMeasure(&h, &w, title, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+        x = 220 - (w >> 1);
+        y = optiony;
+        if (i == g_MapMakerMenuChoice && !tab_prev_highlight)
+            DL = microcode_constructor_related_to_menus(DL, x - 4, y - 2, x + w + 4, y + h + 3, 0x32);
+        DL = frontPrintText(DL, &x, &y, title,
+                ptrFontBankGothicChars, ptrFontBankGothic, 0xFF,
+                viGetX(), viGetY(), 0, 0);
 
-    DL = frontMapMakerPrintOutlined(DL, 74, 176, "Basic: fast modules   Advanced: direct mesh authoring", 0xD0D0D0FF);
-    DL = frontMapMakerPrintOutlined(DL, 74, 198, "B: Back", 0xB8B8B8FF);
+        /* Supporting descriptor: centered, normal menu text, not selectable. */
+        textMeasure(&h, &w, description, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        x = 220 - (w >> 1);
+        y = optiony + 27;
+        DL = frontPrintText(DL, &x, &y, description,
+                ptrFontZurichBoldChars, ptrFontZurichBold, 0xD8,
+                viGetX(), viGetY(), 0, 0);
+    }
 
-    DL = frontDrawCursor(DL);
-    return DL;
+    DL = frontAddPreviousTabText(DL);
+    return frontDrawCursor(DL);
 }
 
 void init_menu_map_maker_basic(void)
@@ -11519,11 +13556,23 @@ void menu_init(void)
             case MENU_CHEAT:                  update_menu15_cheat();                break;
 #ifdef GE_MODDED_CHEATS
             case MENU_MOD_OPTIONS:            update_menu_mod_options();            break;
+            case MENU_EXPERIMENTAL_OPTIONS:   update_menu_debug_options(); break;
+            case MENU_ENHANCEMENTS_OPTIONS:    update_menu_debug_options(); break;
+            case MENU_ADDITIONAL_DEATH_ANIMATIONS: update_menu_debug_options(); break;
             case MENU_LEVEL_MODIFIERS:        update_menu_level_modifiers();        break;
             case MENU_LEVEL_MODIFIERS_LEVELS: update_menu_level_modifiers_levels(); break;
             case MENU_LEVEL_MODIFIERS_DETAIL:   update_menu_level_modifiers_detail();   break;
+            case MENU_PATCHES:                  update_menu_patches();                  break;
+            case MENU_THIRD_PERSON_OPTIONS:     update_menu_third_person_options();     break;
+            case MENU_SINGLE_PLAYER_CHARACTER:   update_menu_single_player_character();   break;
+case MENU_DEBUG_OPTIONS:              update_menu_debug_options();
+    break;
             case MENU_MP_SETTINGS:             update_menu_mp_settings();             break;
             case MENU_MP_PLAYER_OPTIONS:       update_menu_mp_player_options();        break;
+            case MENU_MP_BOT_SETTINGS:         update_menu_mp_bot_settings();          break;
+            case MENU_MP_BOT_EDIT:             update_menu_mp_bot_edit();              break;
+            case MENU_MP_BOT_TRAITS:           update_menu_mp_bot_traits();            break;
+            case MENU_MP_BOT_RENAME:           update_menu_mp_bot_rename();            break;
 #ifdef GE_MAP_MAKER
             case MENU_MAP_MAKER:              update_menu_map_maker();              break;
             case MENU_MAP_MAKER_BASIC:        update_menu_map_maker_basic();        break;
@@ -11571,11 +13620,23 @@ void menu_init(void)
             case MENU_CHEAT:                  init_menu15_cheat();                  break;
 #ifdef GE_MODDED_CHEATS
             case MENU_MOD_OPTIONS:            init_menu_mod_options();              break;
+            case MENU_EXPERIMENTAL_OPTIONS:   tab_prev_highlight = FALSE; load_walletbond(); break;
+            case MENU_ENHANCEMENTS_OPTIONS:    tab_prev_highlight = FALSE; load_walletbond(); break;
+            case MENU_ADDITIONAL_DEATH_ANIMATIONS: tab_prev_highlight = FALSE; load_walletbond(); break;
             case MENU_LEVEL_MODIFIERS:        init_menu_level_modifiers();          break;
             case MENU_LEVEL_MODIFIERS_LEVELS: init_menu_level_modifiers_levels();   break;
             case MENU_LEVEL_MODIFIERS_DETAIL:   init_menu_level_modifiers_detail();     break;
+            case MENU_PATCHES:                  init_menu_patches();                    break;
+            case MENU_THIRD_PERSON_OPTIONS:     init_menu_third_person_options();       break;
+            case MENU_SINGLE_PLAYER_CHARACTER:   init_menu_single_player_character();     break;
+case MENU_DEBUG_OPTIONS:              init_menu_debug_options();
+    break;
             case MENU_MP_SETTINGS:             init_menu_mp_settings();               break;
             case MENU_MP_PLAYER_OPTIONS:       init_menu_mp_player_options();          break;
+            case MENU_MP_BOT_SETTINGS:         init_menu_mp_bot_settings();            break;
+            case MENU_MP_BOT_EDIT:             init_menu_mp_bot_edit();                break;
+            case MENU_MP_BOT_TRAITS:           init_menu_mp_bot_traits();              break;
+            case MENU_MP_BOT_RENAME:           init_menu_mp_bot_rename();              break;
 #ifdef GE_MAP_MAKER
             case MENU_MAP_MAKER:              init_menu_map_maker();                break;
             case MENU_MAP_MAKER_BASIC:        init_menu_map_maker_basic();          break;
@@ -11612,11 +13673,23 @@ void menu_init(void)
         case MENU_CHEAT:                  interface_menu15_cheat();                 break;
 #ifdef GE_MODDED_CHEATS
         case MENU_MOD_OPTIONS:            interface_menu_mod_options();             break;
+        case MENU_EXPERIMENTAL_OPTIONS:   interface_menu_experimental_options(); break;
+            case MENU_ENHANCEMENTS_OPTIONS:    interface_menu_enhancements_options(); break;
+        case MENU_ADDITIONAL_DEATH_ANIMATIONS: interface_menu_additional_death_animations(); break;
         case MENU_LEVEL_MODIFIERS:        interface_menu_level_modifiers();         break;
         case MENU_LEVEL_MODIFIERS_LEVELS: interface_menu_level_modifiers_levels();  break;
         case MENU_LEVEL_MODIFIERS_DETAIL:   interface_menu_level_modifiers_detail();    break;
+        case MENU_PATCHES:                  interface_menu_patches();                  break;
+        case MENU_THIRD_PERSON_OPTIONS:     interface_menu_third_person_options();     break;
+        case MENU_SINGLE_PLAYER_CHARACTER:   interface_menu_single_player_character();   break;
+case MENU_DEBUG_OPTIONS:              interface_menu_debug_options();
+    break;
         case MENU_MP_SETTINGS:             interface_menu_mp_settings();              break;
         case MENU_MP_PLAYER_OPTIONS:       interface_menu_mp_player_options();         break;
+        case MENU_MP_BOT_SETTINGS:         interface_menu_mp_bot_settings();           break;
+        case MENU_MP_BOT_EDIT:             interface_menu_mp_bot_edit();               break;
+        case MENU_MP_BOT_TRAITS:           interface_menu_mp_bot_traits();             break;
+        case MENU_MP_BOT_RENAME:           interface_menu_mp_bot_rename();             break;
 #ifdef GE_MAP_MAKER
         case MENU_MAP_MAKER:              interface_menu_map_maker();               break;
         case MENU_MAP_MAKER_BASIC:        interface_menu_map_maker_basic();         break;
@@ -11757,6 +13830,15 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
         case MENU_MOD_OPTIONS:
             DL = constructor_menu_mod_options(DL);
             break;
+        case MENU_EXPERIMENTAL_OPTIONS:
+            DL = constructor_menu_experimental_options(DL);
+            break;
+        case MENU_ENHANCEMENTS_OPTIONS:
+            DL = constructor_menu_enhancements_options(DL);
+            break;
+        case MENU_ADDITIONAL_DEATH_ANIMATIONS:
+            DL = constructor_menu_additional_death_animations(DL);
+            break;
         case MENU_LEVEL_MODIFIERS:
             DL = constructor_menu_level_modifiers(DL);
             break;
@@ -11766,11 +13848,35 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
         case MENU_LEVEL_MODIFIERS_DETAIL:
             DL = constructor_menu_level_modifiers_detail(DL);
             break;
+        case MENU_PATCHES:
+            DL = constructor_menu_patches(DL);
+            break;
+        case MENU_THIRD_PERSON_OPTIONS:
+            DL = constructor_menu_third_person_options(DL);
+            break;
+        case MENU_SINGLE_PLAYER_CHARACTER:
+            DL = constructor_menu_single_player_character(DL);
+            break;
+        case MENU_DEBUG_OPTIONS:
+            DL = constructor_menu_debug_options(DL);
+            break;
         case MENU_MP_SETTINGS:
             DL = constructor_menu_mp_settings(DL);
             break;
         case MENU_MP_PLAYER_OPTIONS:
             DL = constructor_menu_mp_player_options(DL);
+            break;
+        case MENU_MP_BOT_SETTINGS:
+            DL = constructor_menu_mp_bot_settings(DL);
+            break;
+        case MENU_MP_BOT_EDIT:
+            DL = constructor_menu_mp_bot_edit(DL);
+            break;
+        case MENU_MP_BOT_TRAITS:
+            DL = constructor_menu_mp_bot_traits(DL);
+            break;
+        case MENU_MP_BOT_RENAME:
+            DL = constructor_menu_mp_bot_rename(DL);
             break;
 #ifdef GE_MAP_MAKER
         case MENU_MAP_MAKER:

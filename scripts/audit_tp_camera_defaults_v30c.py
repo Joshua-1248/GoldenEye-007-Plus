@@ -7,7 +7,7 @@ F2H=(ROOT/'src/game/file2.h').read_text(errors='replace')
 OPTH=(ROOT/'src/game/options.h').read_text(errors='replace')
 MK=(ROOT/'Makefile').read_text(errors='replace')
 checks=[
- ('defaults are 300/-12/-24/24', all(x in OPTH for x in ['#define TP_CAM_DISTANCE_DEFAULT 300','#define TP_CAM_HEIGHT_DEFAULT (-12)','#define TP_CAM_HORIZONTAL_DEFAULT (-24)','#define TP_CAM_DOWN_FRAME_DEFAULT 24'])),
+ ('defaults are 310/-12/-24/24', all(x in OPTH for x in ['#define TP_CAM_DISTANCE_DEFAULT 310','#define TP_CAM_HEIGHT_DEFAULT (-12)','#define TP_CAM_HORIZONTAL_DEFAULT (-24)','#define TP_CAM_DOWN_FRAME_DEFAULT 24'])),
  ('V30 and V30B signatures are both migration sources', 'MOD_CAMERA_PACK_SIGNATURE3_LEGACY_V30  0x05' in F2H and 'MOD_CAMERA_PACK_SIGNATURE3_LEGACY_V30B 0x06' in F2H),
  ('V30C current signature is 7', 'MOD_CAMERA_PACK_SIGNATURE3             0x07' in F2H),
  ('both legacy formats reset camera adjustments', '== MOD_CAMERA_PACK_SIGNATURE3_LEGACY_V30' in F2 and '== MOD_CAMERA_PACK_SIGNATURE3_LEGACY_V30B' in F2 and F2.count('g_ModThirdPersonCameraHeightAdjust = 0;') >= 2),

@@ -61,12 +61,12 @@ check('TP Crouch Cam owns save-backed bit 4 without growing save_data',
       'MODOPT3_TP_CROUCH_CAM' in FILE2H and '0x10' in FILE2H)
 check('TP Crouch Cam follows smooth crouch offset proportionally',
       ('g_CurrentPlayer->ducking_height_offset * g_playerPerm->player_perspective_height' in BV or 'crouchfraction = g_CurrentPlayer->ducking_height_offset / FULL_CROUCH_OFFSET;' in BV))
-check('main-menu Special Options exposes TP Crouch Cam',
-      ('page2labels[12]' in FRONT or 'page2labels[13]' in FRONT or 'page2labels[14]' in FRONT or 'page2labels[15]' in FRONT) and '48' in FRONT and 'MODOPT3_TP_CROUCH_CAM' in FRONT)
-check('SP watch exposes TP Crouch Cam',
-      'MODWATCH_OPTION_ROWS' in OPT and 'frontModGetOptionLabel(48)' in OPT and 'MODOPT3_TP_CROUCH_CAM' in OPT)
-check('MP watch exposes TP Crouch Cam',
-      (('mode == 2 ? 14' in MP or 'mode == 2 ? 15' in MP or 'mode == 2 ? 16' in MP or 'mode == 2 ? 17' in MP or 'if (mode == 2) return 17;' in MP)) and 'frontModGetOptionLabel(48)' in MP and 'MODOPT3_TP_CROUCH_CAM' in MP)
+check('main-menu Third-Person Options exposes TP Crouch Cam',
+      'labelindex = i == 0 ? 32 : i <= 3 ? 46 + i : i == 4 ? 51 : 51 + i' in FRONT and
+      'MODOPT3_TP_CROUCH_CAM' in FRONT)
+check('SP watch Third-Person Options exposes TP Crouch Cam', 'MODWATCH_MODE_TP_OPTIONS' in OPT and 'frontModGetOptionLabel(48)' in OPT and 'MODOPT3_TP_CROUCH_CAM' in OPT)
+check('MP watch Third-Person Options exposes TP Crouch Cam',
+      'if (mode == 6) return 11;' in MP and '47 + row' in MP and 'MODOPT3_TP_CROUCH_CAM' in MP)
 check('TP Crouch Cam label is exact',
       'TP Crouch Cam' in SPEC and '0x54502043' in SPEC and '0x726F7563' in SPEC)
 check('V32 audit is mandatory build prerequisite',

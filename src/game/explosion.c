@@ -241,6 +241,42 @@ void explosionScorchTick(struct coord3d *pos, f32 explosion_size, s16 room);
 #endif
 
 Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *coord);
+
+#ifdef GE_MODDED_CHEATS
+/*
+ * R27O R4: Unlimited Explosions can create far more billboard work than the
+ * retail six-explosion renderer was dimensioned for. GoldenEye's dyn allocator
+ * has no bounds checks; running g_GfxMemPos past the active VTX/Mtx half-buffer
+ * corrupts adjacent render memory.
+ *
+ * Simulation is NOT capped here. Only excess visual work for the current frame
+ * is skipped once shared render scratch approaches a safe reserve.
+ */
+#define R27O_EXP_RENDER_VTX_RESERVE 0x4000
+#define R27O_EXP_RENDER_GFX_RESERVE 512
+
+static s32 explosionUnlimitedRenderScratchAvailable(
+    Gfx *gdl, s32 vtxbytes, s32 gfxcommands)
+{
+    if (!g_ModUnlimitedExplosionsEnabled)
+    {
+        return TRUE;
+    }
+
+    if (dynGetFreeVtx() < R27O_EXP_RENDER_VTX_RESERVE + vtxbytes)
+    {
+        return FALSE;
+    }
+
+    if (dynGetFreeGfx(gdl) < R27O_EXP_RENDER_GFX_RESERVE + gfxcommands)
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
 #ifdef GE_PHYSICAL_FASTPATHS
 Gfx *explosionRenderPartFast(struct ExplosionPart *part, Gfx *gdl, struct coord3d *roompos,
         Mtxf *viewtoworld, struct coord3d *playerpos, f32 roomscale);
@@ -265,6 +301,7 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
     f32 sp38;
     s32 var_v0;
     PropRecord *sp30;
+    s32 explosion_limit;
 
     sp44 = &g_ExplosionTypes[explosion_type];
     sp40 = NULL;
@@ -276,7 +313,15 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
     }
 #endif
 
-    for (var_v0 = 0; var_v0 < EXPLOSION_BUFFER_LEN; var_v0++)
+#ifdef GE_MODDED_CHEATS
+    explosion_limit = g_ModUnlimitedExplosionsEnabled
+        ? EXPLOSION_BUFFER_LEN
+        : EXPLOSION_BUFFER_LEN_RETAIL;
+#else
+    explosion_limit = EXPLOSION_BUFFER_LEN;
+#endif
+
+    for (var_v0 = 0; var_v0 < explosion_limit; var_v0++)
     {
         if (g_ExplosionBuffer[var_v0].prop == NULL)
         {
@@ -1087,7 +1132,14 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
     {
         return gdl;
     }
-    else
+
+#ifdef GE_MODDED_CHEATS
+    if (!explosionUnlimitedRenderScratchAvailable(gdl, 0, 24))
+    {
+        return gdl;
+    }
+#endif
+
     {
         if (getPropCombinedRoomsBBox2D(prop, &sp70) > 0)
         {
@@ -1298,7 +1350,23 @@ Gfx *explosionRenderPartFast(struct ExplosionPart *part, Gfx *gdl, struct coord3
     rot_y.f[1] = viewtoworld->m[1][1] * scaledrot;
     rot_y.f[2] = viewtoworld->m[1][2] * scaledrot;
 
-    vertices = dynAllocateVertices(4);
+#ifdef GE_MODDED_CHEATS
+    if (g_ModUnlimitedExplosionsEnabled)
+    {
+        if (!explosionUnlimitedRenderScratchAvailable(
+                gdl, 5 * sizeof(Vtx), 2))
+        {
+            return gdl;
+        }
+
+        vertices = dynAllocateVertices(5);
+    }
+    else
+#endif
+    {
+        vertices = dynAllocateVertices(4);
+    }
+
     vertices[0] = base;
     vertices[1] = base;
     vertices[2] = base;
@@ -1423,7 +1491,22 @@ Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *c
     sp48 = sp98->f[1] + (sp60 * f2);
     sp44 = sp98->f[2] + (sp5C * f2);
 
-    vertices = dynAllocateVertices(4);
+#ifdef GE_MODDED_CHEATS
+    if (g_ModUnlimitedExplosionsEnabled)
+    {
+        if (!explosionUnlimitedRenderScratchAvailable(
+                gdl, 5 * sizeof(Vtx), 2))
+        {
+            return gdl;
+        }
+
+        vertices = dynAllocateVertices(5);
+    }
+    else
+#endif
+    {
+        vertices = dynAllocateVertices(4);
+    }
 
     vertices[0] = spA0;
     vertices[1] = spA0;
@@ -1560,6 +1643,14 @@ Gfx *explosionSmokeRenderPart(struct Smoke *smoke, struct SmokePart *smoke_part,
     {
         sp77 = smoke_part->alpha;
     }
+
+#ifdef GE_MODDED_CHEATS
+    if (!explosionUnlimitedRenderScratchAvailable(
+            gdl, 4 * sizeof(Vtx), 2))
+    {
+        return gdl;
+    }
+#endif
 
     vertices = dynAllocateVertices(4);
 
@@ -1965,6 +2056,13 @@ Gfx *explosionRenderPropSmoke(PropRecord *arg0, Gfx *gdl, s32 withalpha)
         return gdl;
     }
 
+#ifdef GE_MODDED_CHEATS
+    if (!explosionUnlimitedRenderScratchAvailable(gdl, 0, 12))
+    {
+        return gdl;
+    }
+#endif
+
     if (getPropCombinedRoomsBBox2D(arg0, &sp78) > 0)
     {
         gdl = bgScissorCurrentPlayerViewF(gdl, sp78.min.f[0], sp78.min.f[1], sp78.max.f[0], sp78.max.f[1]);
@@ -2241,6 +2339,13 @@ Gfx *explosionRenderFlyingParticles(Gfx *gdl)
                 && (sp80.m[3][2] < 20000.0f)
                 && (sp80.m[3][2] > -20000.0f))
             {
+#ifdef GE_MODDED_CHEATS
+                if (!explosionUnlimitedRenderScratchAvailable(
+                        gdl, sizeof(Mtx), 3))
+                {
+                    break;
+                }
+#endif
                 temp_v0_2 = dynAllocateMatrix();
                 matrix_4x4_f32_to_s32(&sp80, (Mtxf *)temp_v0_2);
 

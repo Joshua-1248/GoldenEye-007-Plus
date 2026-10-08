@@ -7,7 +7,14 @@
 // applied that compiler factors out.
 #define EXPLOSION_DAMAGE_SCALER 1.0f
 
-#define EXPLOSION_BUFFER_LEN 6
+#define EXPLOSION_BUFFER_LEN_RETAIL 6
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_FASTPATHS)
+/* R27O R3: expanded storage lives in the dedicated Expansion Pak pool. */
+#define EXPLOSION_BUFFER_LEN 64
+#else
+/* Retail and non-physical configurations keep the original six entries. */
+#define EXPLOSION_BUFFER_LEN EXPLOSION_BUFFER_LEN_RETAIL
+#endif
 #define EXPLOSION_PARTS_LEN 40
 #define SMOKE_BUFFER_LEN 20
 #define SMOKE_PARTS_LEN 10

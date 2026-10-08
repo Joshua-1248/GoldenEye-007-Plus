@@ -85,6 +85,9 @@ struct MP_selectable_chars {
     f32 pov;
 };
 
+/* GoldenEye 007 Plus: first appended custom character slot (65th entry). */
+#define MP_CHAR_JOSH_7774 64
+
 struct MP_handicap_menu {
     u16 text_preset;
     u16 padding;
@@ -341,6 +344,12 @@ void do_extended_cast_display(bool doExtended);
 MPSCENARIOS get_scenario(void);
 f32 get_player_mp_handicap(int player);
 f32 get_player_mp_char_height(int player);
+#ifdef GE_MODDED_CHEATS
+s32 frontGetMpCharacterCount(void);
+s32 frontGetMpCharacterData(s32 index, s32 *body, s32 *head, f32 *pov);
+const char *frontGetMpCharacterName(s32 index);
+s32 frontGetSinglePlayerCharacterOverride(s32 *body, s32 *head, f32 *pov);
+#endif
 s32 get_mp_timelimit(void);
 s32 get_mp_pointlimit(void);
 void reset_mp_options_for_scenario(MPSCENARIOS scenarioid);

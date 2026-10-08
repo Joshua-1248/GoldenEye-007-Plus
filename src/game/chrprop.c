@@ -36,6 +36,9 @@
 #include "objecthandler.h"
 #include "objective_status.h"
 #include "options.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 #include "stan.h"
 #include "tex.h"
 
@@ -85,6 +88,20 @@ PropRecord **g_LastOnScreenProp;
  * canonically propznum
 */
 s32 g_OnScreenPropCount;
+
+#ifdef GE_PHYSICAL_FASTPATHS
+/*
+ * R27G2 render-room cache lives in the final 0x200 bytes of the physical-fast
+ * Expansion Pak scratch reservation.  Room ids are < 0xff, so u8 preserves
+ * every valid room and uses 0xff as the no-render-room sentinel.
+ */
+extern u8 _gameFastPropRoomCacheStart[];
+#define g_ModOnScreenPropRenderRoom ((u8 *)_gameFastPropRoomCacheStart)
+#define MOD_RENDER_ROOM_NONE 0xff
+typedef char r27g2_prop_room_cache_fits[(ONSCREEN_PROP_LIST_LEN <= 0x200) ? 1 : -1];
+static void chrpropsBuildRenderRoomCache(void);
+#endif
+
 
 //CODE.bss:80071DF8
 PropRecord *g_InteractProp;
@@ -293,6 +310,7 @@ void chraiUpdateOnscreenPropCount(void)
             }
         }
     }
+
 }
 
 
@@ -513,6 +531,57 @@ static s32 chrpropsLocalThirdPersonActive(PropRecord *prop)
 }
 #endif
 
+#ifdef GE_PHYSICAL_FASTPATHS
+/* Resolve the exact first rendered room chraiGetPropRoomIds() would expose,
+ * but do it directly once per on-screen prop instead of copying a temporary
+ * s32 room list and calling getROOMID_isRendered() for every render room/pass. */
+static u8 chrpropsResolveRenderRoomFast(PropRecord *prop)
+{
+    s32 i;
+    u8 room;
+
+#ifdef GE_MODDED_CHEATS
+    if (chrpropsLocalThirdPersonActive(prop))
+    {
+        return (u8)g_BgCurrentRoom;
+    }
+#endif
+
+    if (prop->stan == NULL)
+    {
+        return MOD_RENDER_ROOM_NONE;
+    }
+
+    if (prop->type == PROP_TYPE_VIEWER && prop->obj == NULL)
+    {
+        room = (u8)prop->stan->room;
+        return g_BgRoomInfo[room].room_rendered ? room : MOD_RENDER_ROOM_NONE;
+    }
+
+    for (i = 0; prop->rooms[i] != 0xff; i++)
+    {
+        room = prop->rooms[i];
+        if (g_BgRoomInfo[room].room_rendered)
+        {
+            return room;
+        }
+    }
+
+    return MOD_RENDER_ROOM_NONE;
+}
+
+static void chrpropsBuildRenderRoomCache(void)
+{
+    s32 i;
+
+    for (i = 0; i < g_OnScreenPropCount; i++)
+    {
+        g_ModOnScreenPropRenderRoom[i] =
+            chrpropsResolveRenderRoomFast(g_OnScreenPropList[i]);
+    }
+}
+#endif
+
 /**
  * Address: 7F03A6F4
 */
@@ -562,6 +631,13 @@ Gfx *chrpropsRenderPass(Gfx *gdl, s32 roomid, s32 renderpass)
                 if (flag != 0)
                 {
                     flag = 0;
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+                if (modMicroOptimizationsEnabled())
+                {
+                    flag = (g_ModOnScreenPropRenderRoom[(s32)(pp - g_OnScreenPropList)] == (u8)roomid);
+                }
+                else
+#endif
 #ifdef GE_MODDED_CHEATS
                     if (chrpropsLocalThirdPersonActive(prop))
                     {
@@ -606,6 +682,13 @@ Gfx *chrpropsRenderPass(Gfx *gdl, s32 roomid, s32 renderpass)
             if (prop != NULL)
             {
                 flag = 0;
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+                if (modMicroOptimizationsEnabled())
+                {
+                    flag = (g_ModOnScreenPropRenderRoom[(s32)(pp - g_OnScreenPropList)] == (u8)roomid);
+                }
+                else
+#endif
 #ifdef GE_MODDED_CHEATS
                 if (chrpropsLocalThirdPersonActive(prop))
                 {
@@ -1085,6 +1168,80 @@ static s32 chrpropThirdPersonBgSegmentHit(const coord3d *from, const coord3d *to
 }
 
 /*
+ * Shared finite-segment BG resolver for modded gameplay paths.  This is the
+ * same all-room nearest-triangle search used by Bond's Third Person firing
+ * collision, exposed so AI surface effects can resolve the actual owning room
+ * instead of assuming the shooter's current STAN room owns the wall.
+ */
+s32 chrpropFindNearestBgHitOnSegment(const coord3d *from, const coord3d *to,
+        struct HitThing *hit, s32 *room)
+{
+    return chrpropThirdPersonBgSegmentHit(from, to, hit, room, NULL);
+}
+
+/* Visual-only exact object/door surface probe for enemy impact parity.
+ * This gathers the same BulletHit data Bond's objHit path receives, but it
+ * never applies damage, penetration continuation, drops, bounce or breakage. */
+s32 chrpropProbeObjectHitOnSegment(PropRecord *target, const coord3d *from,
+        const coord3d *to, ITEM_IDS weapon, ShotData *shot, BulletHit *hit)
+{
+    coord3d delta;
+    f32 len;
+    f32 bestdist = M_U32_MAX_VALUE_F;
+    BulletHit *besthit = NULL;
+    bool oldprobestate;
+    s32 i;
+
+    if (target == NULL || from == NULL || to == NULL || shot == NULL || hit == NULL
+            || (target->type != PROP_TYPE_OBJ && target->type != PROP_TYPE_WEAPON
+                && target->type != PROP_TYPE_DOOR))
+        return FALSE;
+
+    delta.x = to->x - from->x;
+    delta.y = to->y - from->y;
+    delta.z = to->z - from->z;
+    len = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+    if (len <= 0.001f) return FALSE;
+
+    shot->weapon = weapon;
+    shot->gunpos = *from;
+    shot->dir.x = delta.x / len;
+    shot->dir.y = delta.y / len;
+    shot->dir.z = delta.z / len;
+    shot->maxdist = M_U32_MAX_VALUE_F;
+    shot->viewOrigin = shot->gunpos;
+    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(), &shot->viewOrigin);
+    shot->viewDir = shot->dir;
+    mtx4RotateVecInPlace(camGetWorldToScreenMtxf(), &shot->viewDir);
+
+    for (i = 0; i < 10; i++)
+    {
+        shot->hits[i].prop = NULL;
+        shot->hits[i].hitpart = 0;
+        shot->hits[i].node = NULL;
+    }
+
+    oldprobestate = g_ChrTestHitProbeNoSideEffects;
+    g_ChrTestHitProbeNoSideEffects = TRUE;
+    sub_GAME_7F04E9BC(target, shot);
+    g_ChrTestHitProbeNoSideEffects = oldprobestate;
+
+    for (i = 0; i < 10; i++)
+    {
+        if (shot->hits[i].prop == target && shot->hits[i].dist < bestdist)
+        {
+            bestdist = shot->hits[i].dist;
+            besthit = &shot->hits[i];
+        }
+    }
+
+    if (besthit == NULL) return FALSE;
+    *hit = *besthit;
+    return TRUE;
+}
+
+
+/*
  * Return the first dynamic solid cover hit on a finite Bond-side segment.
  * This is intentionally separate from the main shot candidate pass: it exists
  * only to answer whether a crate/door/path blocker physically lies between
@@ -1213,7 +1370,7 @@ typedef struct TpThirdPersonReticleResult {
  * detailed rendered-model bullet path.  The latter depends on live model
  * render matrices and is not safe to invoke from the late HUD/crosshair pass.
  */
-static s32 chrpropThirdPersonBoundsSegmentHit(PropRecord *prop,
+s32 chrpropThirdPersonBoundsSegmentHit(PropRecord *prop,
         const coord3d *from, const coord3d *to, coord3d *impact, f32 *outfrac)
 {
     struct rect4f *polygon = NULL;
@@ -1839,6 +1996,8 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     s32 tpReticleValid;
     s32 tpReticleLocked;
     s32 tpLaserStableMuzzleRay;
+    s32 tpBeamVisualOriginValid;
+    coord3d tpBeamVisualOrigin;
     TpThirdPersonReticleResult tpReticle;
 #endif
 
@@ -1854,6 +2013,7 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     tpReticleValid = FALSE;
     tpReticleLocked = FALSE;
     tpLaserStableMuzzleRay = FALSE;
+    tpBeamVisualOriginValid = FALSE;
     if (tpactive)
     {
         /* A TP beam is valid only when this exact firing tick publishes the
@@ -1890,7 +2050,8 @@ void chraiDefaultWeaponFireHandler(s32 hand)
         /* Resolve the exact world-space reticle before the gameplay origin is
          * moved toward the weapon.  This is the same query used by gunDrawSight,
          * so visual aim, contact intent and weapon-side cover agree. */
-        tpReticleValid = chrpropThirdPersonResolveReticle(hand, &tpReticle, TRUE);
+        tpReticleValid = chrpropThirdPersonResolveReticle(hand, &tpReticle,
+                g_ModTpCornerShootingFixEnabled);
     }
 
     if (tpactive)
@@ -1930,22 +2091,25 @@ void chraiDefaultWeaponFireHandler(s32 hand)
          * Bond-depth projection could lag far from the moving tank and made
          * beams/impact points look detached from the gun.  Tank shells retain
          * their dedicated vehicle weapon path. */
-        if (g_PlayerIsInTank == 0
-            && shotdata.weapon == ITEM_LASER
-            && gunGetThirdPersonMuzzleOrigin(hand, &shotdata.gunpos))
+        if (g_PlayerIsInTank == 0 && shotdata.weapon == ITEM_LASER)
         {
-            /*
-             * V82: the Moonraker Laser is a visible penetrating ray, so it must
-             * never use the invisible-bullet projected-origin bridge.  Start the
-             * gameplay/tracer ray at the real rendered muzzle and KEEP the one
-             * camera-derived shot direction.  Glass/doors/crates/characters are
-             * then gathered by GoldenEye's normal penetration pass on this same
-             * line, preventing the apparent refraction/deflection seen after a
-             * penetrable surface in Third Person.
-             */
+            /* The Moonraker's authoritative TP shot is the HUD-crosshair ray,
+             * not a muzzle-to-near-reticle convergence line.  Keep the rendered
+             * muzzle only as the visual beam start; gameplay is projected onto
+             * the same camera ray used by every other TP hitscan weapon. */
             tpLaserStableMuzzleRay = TRUE;
+            tpBeamVisualOriginValid = gunGetThirdPersonMuzzleOrigin(hand,
+                    &tpBeamVisualOrigin);
         }
-        else if (g_PlayerIsInTank != 0
+        else if (g_PlayerIsInTank == 0 && shotdata.weapon == ITEM_WATCHLASER)
+        {
+            /* Watch Laser uses the same authoritative TP firing ray, but its
+             * tracer should visibly begin at the rendered wrist/weapon point. */
+            tpBeamVisualOriginValid = gunGetThirdPersonMuzzleOrigin(hand,
+                    &tpBeamVisualOrigin);
+        }
+
+        if (g_PlayerIsInTank != 0
             && shotdata.weapon != ITEM_TANKSHELLS
             && gunGetThirdPersonMuzzleOrigin(hand, &shotdata.gunpos))
         {
@@ -1984,10 +2148,18 @@ void chraiDefaultWeaponFireHandler(s32 hand)
             shotdata.gunpos.z = camorigin.z + exactworlddir.z * depth;
         }
 
+        if (g_PlayerIsInTank == 0 && shotdata.weapon == ITEM_LASER)
+        {
+            /* Moonraker has no ballistic spread.  Preserve the exact HUD
+             * crosshair axis through every penetrable object; only the visual
+             * beam origin is allowed to differ from this gameplay ray. */
+            shotdata.dir = exactworlddir;
+        }
+
         /*
          * shotdata.dir already contains GoldenEye's normal per-weapon spread,
-         * transformed into world space above.  Keep it untouched so Third
-         * Person firing cadence/feel matches the retail weapon path.
+         * transformed into world space above.  Keep it untouched for ordinary
+         * weapons so Third Person firing cadence/feel matches retail.
          */
 
         if (g_PlayerIsInTank == 0 && tpReticleValid
@@ -2382,7 +2554,7 @@ void chraiDefaultWeaponFireHandler(s32 hand)
          * V57 segment could cut through a window sill/floor even while the
          * visible weapon was already above the opening.
          */
-        if (g_PlayerIsInTank == 0)
+        if (g_PlayerIsInTank == 0 && g_ModTpCornerShootingFixEnabled)
         {
             tpweaponhasmuzzle = gunGetThirdPersonMuzzleOrigin(hand,
                     &tpweaponmuzzle);
@@ -2406,6 +2578,14 @@ void chraiDefaultWeaponFireHandler(s32 hand)
                 {
                     tpblockkind = 1;
                     tpblocksource = tpweaponhand;
+                    tpblockimpact = tpblockbghit.hitpos;
+                }
+                else if (tpweaponhasmuzzle
+                        && chrpropThirdPersonBgSegmentHit(&tpweaponmuzzle,
+                            &tphitorigin, &tpblockbghit, &tpblockroom, NULL))
+                {
+                    tpblockkind = 1;
+                    tpblocksource = tpweaponmuzzle;
                     tpblockimpact = tpblockbghit.hitpos;
                 }
             }
@@ -2662,7 +2842,17 @@ void chraiDefaultWeaponFireHandler(s32 hand)
         tpbeamend.x = shotdata.gunpos.x + shotdata.dir.x * beamrayt;
         tpbeamend.y = shotdata.gunpos.y + shotdata.dir.y * beamrayt;
         tpbeamend.z = shotdata.gunpos.z + shotdata.dir.z * beamrayt;
-        gunSetThirdPersonResolvedBeam(hand, &shotdata.gunpos, &tpbeamend);
+
+        if (tpBeamVisualOriginValid && tpblockkind == 0
+                && (shotdata.weapon == ITEM_LASER
+                    || shotdata.weapon == ITEM_WATCHLASER))
+        {
+            gunSetThirdPersonResolvedBeam(hand, &tpBeamVisualOrigin, &tpbeamend);
+        }
+        else
+        {
+            gunSetThirdPersonResolvedBeam(hand, &shotdata.gunpos, &tpbeamend);
+        }
     }
     else
     {
@@ -3137,6 +3327,12 @@ void chraiCheckUseHeldItem(s32 hand)
         {
             inc_curplayer_hitcount_with_weapon(item_id, SHOT_REGISTER_TOTAL);
             chraiDefaultWeaponFireHandler(hand);
+#ifdef GE_MODDED_CHEATS
+            if (item_id == ITEM_WATCHLASER && modThirdPersonActive(get_cur_playernum()))
+            {
+                gunCreateBeamForHand(hand);
+            }
+#endif
         }
     }
 }
@@ -3177,6 +3373,9 @@ void propExecuteTickOperation(PropRecord *prop, TICKOP op)
                 return;
             }
         }
+#ifdef GE_MODDED_CHEATS
+        modMpBotsNotifyPropFreed(prop);
+#endif
         chrpropDeregisterRooms(prop);
         chrpropDelist(prop);
         chrpropDisable(prop);
@@ -3381,6 +3580,10 @@ s32 chrpropIsFarFromPlayers(PropRecord* prop)
  * 6) Update MP character bullet tracers.
  * 7) Handle prop delisting or activation.
  */
+#ifdef GE_MODDED_CHEATS
+static u8 r27w_body_armor_applied;
+#endif
+
 void chrpropTick(void)
 {
     PropRecord *prop;
@@ -3397,7 +3600,23 @@ void chrpropTick(void)
     ObjectRecord *setupobj;
 
     // Advance AI states e.g. attacking, walking, dying, etc...
+#ifdef GE_MODDED_CHEATS
+    if (r27w_body_armor_applied != g_ModDisableBodyArmorEnabled)
+    {
+        modSyncBodyArmorPickups();
+        r27w_body_armor_applied = g_ModDisableBodyArmorEnabled;
+    }
+#endif
+
+#ifdef GE_MODDED_CHEATS
+    modMpBotsTick();
+#endif
     chrlvAllChrTick();
+
+#ifdef GE_MODDED_CHEATS
+    /* R30 P3: one post-chr Simulant seam owns heading sync and pickups. */
+    modMpBotsPostChrTick();
+#endif
 
     prop = chrpropGetActiveTail();
 
@@ -3482,8 +3701,15 @@ void chrpropTick(void)
                         }
                         else
                         {
-                            chrpropEnable(prop);
-                            sub_GAME_7F03E134(prop);
+#ifdef GE_MODDED_CHEATS
+                            if (obj->type != PROPDEF_ARMOUR || !g_ModDisableBodyArmorEnabled)
+                            {
+#endif
+                                chrpropEnable(prop);
+                                sub_GAME_7F03E134(prop);
+#ifdef GE_MODDED_CHEATS
+                            }
+#endif
                             obj->runtime_bitflags &= ~RUNTIMEBITFLAG_00000800;
                         }
                     }
@@ -3965,6 +4191,19 @@ void propsTickPlayer(void)
             propExecuteTickOperation(prop, isCollected);
         }
     }
+
+#if defined(GE_PHYSICAL_FASTPATHS) && defined(GE_MODDED_CHEATS)
+    /*
+     * R27G2 R2: prepare render membership only after weapon/player prop
+     * transitions for this viewport. A Throwing Knife can be removed or
+     * collected in weaponTickPlayer(); caching before that leaves a stale
+     * room byte which can submit a model after objFree() cleared model->obj.
+     */
+    if (modMicroOptimizationsEnabled())
+    {
+        chrpropsBuildRenderRoomCache();
+    }
+#endif
 }
 
 

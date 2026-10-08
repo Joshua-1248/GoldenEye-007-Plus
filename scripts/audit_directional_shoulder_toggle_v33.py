@@ -40,28 +40,23 @@ check('Directional On retains explicit B+L left and B+R right',
 check('second-controller input path follows the same toggle/directional policy',
       'freshshoulder = (abSecondButtonsRaw & ~copy_prev_buttons_pressed) & (L_TRIG | R_TRIG)' in BV and
       BV.count('MODOPT3_DIRECTIONAL_SHOULDER') >= 2)
-check('main-menu Special Options exposes the setting',
-      ('page2labels[13]' in FRONT or 'page2labels[14]' in FRONT or 'page2labels[15]' in FRONT) and '49' in FRONT and
+check('main-menu Third-Person Options exposes the setting',
+      'labelindex = i == 0 ? 32 : i <= 3 ? 46 + i : i == 4 ? 51 : 51 + i' in FRONT and
       'MODOPT3_DIRECTIONAL_SHOULDER' in FRONT)
-check('SP watch exposes the setting',
-      ('#define MODWATCH_OPTION_ROWS 20' in OPT or
-       '#define MODWATCH_OPTION_ROWS 21' in OPT or
-       '#define MODWATCH_OPTION_ROWS 22' in OPT or
-       '#define MODWATCH_OPTION_ROWS 23' in OPT or
-       '#define MODWATCH_OPTION_ROWS 24' in OPT) and
-      'frontModGetOptionLabel(49)' in OPT and
-      'MODOPT3_DIRECTIONAL_SHOULDER' in OPT and
-      'row == 13' in OPT)
-check('MP watch exposes the setting',
-      ('mode == 2 ? 15' in MP or 'mode == 2 ? 16' in MP or 'mode == 2 ? 17' in MP or 'if (mode == 2) return 17;' in MP) and 'frontModGetOptionLabel(49)' in MP and
+check('SP watch Third-Person Options exposes the setting',
+      'MODWATCH_MODE_TP_OPTIONS' in OPT and 'frontModGetOptionLabel(49)' in OPT and
+      'MODOPT3_DIRECTIONAL_SHOULDER' in OPT)
+check('MP watch Third-Person Options exposes the setting',
+      'if (mode == 6) return 11;' in MP and '47 + row' in MP and
       'MODOPT3_DIRECTIONAL_SHOULDER' in MP)
 check('current compact label is present',
       'Directional Shoulder' in SPEC and
       '0x44697265' in SPEC and '0x6C646572; buf[5]=0;' in SPEC)
 check('label scratch storage includes room for 32 chars plus terminator',
-      'static u32 text[4][9];' in SPEC)
-check('main-menu row bounds include the new thirteenth Special Options row',
-      ('s32 maxrow = g_ModOptionsPage ? 12 : 10;' in FRONT or 's32 maxrow = g_ModOptionsPage ? 13 : 10;' in FRONT or 's32 maxrow = g_ModOptionsPage ? 14 : 10;' in FRONT))
+      ('static u32 text[4][9];' in SPEC or 'static u32 text[4][10];' in SPEC))
+check('main-menu base row bounds reflect submenu restructuring',
+      's32 maxrow = g_ModOptionsPage ? 9 : 10;' in FRONT and
+      'MENU_ENHANCEMENTS_OPTIONS' in FRONT and 'MENU_THIRD_PERSON_OPTIONS' in FRONT)
 check('V33 audit is mandatory build prerequisite',
       'directional-shoulder-toggle-v33-audit:' in MAKE and
       'directional-shoulder-toggle-v33-audit' in MAKE.split('prerequisites:',1)[1].split('\n',1)[0])

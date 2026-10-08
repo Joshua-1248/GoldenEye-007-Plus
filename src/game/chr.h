@@ -313,6 +313,9 @@ void        chrpropAddBulletHit(struct ShotData *shotdata, PropRecord *prop, f32
 void        chrTestHit(PropRecord *prop, ShotData *shotdata);
 #ifdef GE_MODDED_CHEATS
 s32         chrpropGetThirdPersonReticlePoint(s32 hand, coord3d *point);
+s32         chrpropFindNearestBgHitOnSegment(const coord3d *from, const coord3d *to, struct HitThing *hit, s32 *room);
+s32         chrpropThirdPersonBoundsSegmentHit(PropRecord *prop, const coord3d *from, const coord3d *to, coord3d *impact, f32 *outfrac);
+s32         chrpropProbeObjectHitOnSegment(PropRecord *target, const coord3d *from, const coord3d *to, ITEM_IDS weapon, struct ShotData *shot, struct BulletHit *hit);
 #endif
 void        sub_GAME_7F03E134(PropRecord* p);
 

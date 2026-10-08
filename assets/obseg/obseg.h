@@ -864,4 +864,9 @@ extern u8 Tbg_mapmaker_all_p_stanZ[];
 extern u8 UsetupmapmakerZ[];
 #endif
 extern u8 Ump_setupcatZ[];
+#ifdef GE_MODDED_CHEATS
+extern u8 bg_courtyard_all_p_seg[];
+extern u8 Tbg_courtyard_all_p_stanZ[];
+extern u8 Ump_setupcourtyardZ[];
+#endif
 extern u8 ob__ob_end_seg[];

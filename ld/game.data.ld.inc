@@ -122,6 +122,7 @@
       build/OUTCODE/src/game/mp_music.o (.data);
       build/OUTCODE/src/game/language.o (.data);
       build/OUTCODE/src/game/mpmenu.o (.data);
+      build/OUTCODE/src/game/mpbots.o (.data);
       build/OUTCODE/src/game/radar.o (.data);
       build/OUTCODE/src/game/mp_weapon.o (.data);
       build/OUTCODE/src/game/image.o (.data);

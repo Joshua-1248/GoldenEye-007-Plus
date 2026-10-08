@@ -4,6 +4,22 @@
 #include <boss.h>
 #include <fr.h>
 
+#ifdef GE_MODDED_CHEATS
+/* R27S R4 R1: Start that closes MCM belongs to MCM for this frame only. */
+static s32 g_DebugMenuStartExitConsumedThisFrame;
+
+void debugMenuBeginInputFrame(void)
+{
+    g_DebugMenuStartExitConsumedThisFrame = FALSE;
+}
+
+s32 debugMenuStartExitConsumed(void)
+{
+    return g_DebugMenuStartExitConsumedThisFrame;
+}
+#endif
+
+
 #ifndef DEBUG
     #ifdef __sgi
         #define osSyncPrintf(x)
@@ -463,7 +479,15 @@ s32 debug_menu_processor(s8 stick_h, s8 stick_v, u16 button_held, u16 button_pre
 
     if (!show_debug_menu_flag)
     {
+        #ifdef GE_MODDED_CHEATS
+        /* R27P R10: alternate GE+ MCM opener reuses retail init path. */
+        varv0 =
+            ((button_held & (L_TRIG | R_TRIG | U_JPAD | U_CBUTTONS))
+                == (L_TRIG | R_TRIG | U_JPAD | U_CBUTTONS))
+            && ((button_pressed & (L_TRIG | R_TRIG | U_JPAD | U_CBUTTONS)) != 0);
+#else
         varv0 = (button_held & U_CBUTTONS) && (button_held & D_CBUTTONS);
+#endif
 
         show_debug_menu_flag = varv0;
 
@@ -506,7 +530,12 @@ s32 debug_menu_processor(s8 stick_h, s8 stick_v, u16 button_held, u16 button_pre
             g_DebugMode = -2;
         }
 
+#ifdef GE_MODDED_CHEATS
+        /* R27P: GE+ uses A to activate; Start is reserved for closing MCM. */
+        if (button_pressed & A_BUTTON)
+#else
         if ((button_pressed & (START_BUTTON | A_BUTTON)))
+#endif
         {
             switch (get_highlighted_debug_option()) {
 
@@ -916,11 +945,25 @@ s32 debug_menu_processor(s8 stick_h, s8 stick_v, u16 button_held, u16 button_pre
         p32 = &show_debug_menu_flag;
         if (button_pressed & START_BUTTON)
         {
+#ifdef GE_MODDED_CHEATS
+            /* Own this Start edge: gameplay pause reads input later this frame. */
+            g_DebugMenuStartExitConsumedThisFrame = TRUE;
+#endif
             if (*p32 == 1)
             {
                 debmenuResetBuffer();
             }
 
+            #ifdef GE_MODDED_CHEATS
+            /* R27P R12: restore normal gameplay control state after MCM exit.
+             * debug_menu_processor sets g_DebugMode to -2 while MCM owns input.
+             * Standard Plus builds do not compile the retail DEBUGMENU boss-side
+             * mode-restoration branch, so explicitly return all three debug view
+             * selectors to Bond View before handing controls back to gameplay. */
+            g_DebugMode = DEB_BOND_VIEW;
+            debug_render_raster = DEB_BOND_VIEW;
+            debug_freeze_processing = DEB_BOND_VIEW;
+            #endif
             show_debug_menu_flag = 0;
         }
 

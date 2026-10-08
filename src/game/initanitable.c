@@ -2,6 +2,7 @@
 #include <memp.h>
 #include "initanitable.h"
 #include "objecthandler.h"
+#include "model.h"
 #include "bondgame.h"
 
 //bss
@@ -259,6 +260,11 @@ void alloc_load_expand_ani_table(void)
     
     osCreateMesgQueue(&animMsgQ, animMesg, 8);
     initAnimationsBuffer(&D_80029D60, &animMsgQ, &dword_CODE_bss_80069458);
+
+#ifdef GE_PHYSICAL_FASTPATHS
+    modelInitAnimationFrameCache();
+    modelInitTrigCache();
+#endif
     
     animsDataSegmentSize = (s32)&_animation_dataSegmentEnd - (s32)&_animation_dataSegmentStart;
     

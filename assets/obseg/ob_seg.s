@@ -937,6 +937,23 @@ obseg_file_Z stan, Tbg_mapmaker_all_p_stanZ
 obseg_file_Z setup, UsetupmapmakerZ
 .endif
 obseg_file_Z setup, Ump_setupcatZ
+#ifdef GE_MODDED_CHEATS
+/* R27X: BMW Courtyard recovered assets are already in final runtime file form. */
+.global bg_courtyard_all_p_seg
+bg_courtyard_all_p_seg:
+.incbin "assets/obseg/bg/bg_courtyard_all_p.bin"
+.balign 16
+
+.global Tbg_courtyard_all_p_stanZ
+Tbg_courtyard_all_p_stanZ:
+.incbin "assets/obseg/stan/Tbg_courtyard_all_p_stanZ.rz"
+.balign 16
+
+.global Ump_setupcourtyardZ
+Ump_setupcourtyardZ:
+.incbin "assets/obseg/setup/Ump_setupcourtyardZ.rz"
+.balign 16
+#endif
 
 .global ob__ob_end_seg
 ob__ob_end_seg:

@@ -558,7 +558,10 @@ $(BUILD_DIR)/src/game/ob.o: assets/obseg/file_resource_table.inc.c assets/obseg/
 # ob_seg.s incbins Citadel's compressed setup and exact Zoinkity reclip.
 # Make cannot infer assembler .incbin dependencies, so keep both explicit.
 $(BUILD_DIR)/assets/obseg/ob_seg.o: $(BUILD_DIR)/assets/obseg/setup/Ump_setupcatZ.rz \
-	$(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz
+	$(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz \
+	assets/obseg/bg/bg_courtyard_all_p.bin \
+	assets/obseg/stan/Tbg_courtyard_all_p_stanZ.rz \
+	assets/obseg/setup/Ump_setupcourtyardZ.rz
 
 $(BUILD_DIR)/assets/images/combined/%.o: assets/images/combined/combined.bin
 	$(LD) -r -b binary $< -o $@
@@ -802,8 +805,14 @@ fly-turbo-tp-y-v88-audit:
 level-modifiers-v89-audit:
 	python3 scripts/audit_level_modifiers_v89.py
 
+r27q-dam-restoration-audit:
+	python3 scripts/audit_r27q_dam_restoration.py
+
 mp-citadel-v90-audit:
 	python3 scripts/audit_mp_citadel_v90.py
+
+mp-courtyard-r27x-audit:
+	python3 scripts/audit_mp_courtyard_r27x.py
 
 eeprom16-backend-v46-audit:
 	python3 scripts/audit_eeprom16_backend_v46.py
@@ -838,7 +847,64 @@ crouch-default-v44-audit:
 crouch-default-v45-audit:
 	python3 scripts/audit_crouch_default_v45.py
 
-prerequisites: autoshot-resource-audit coop-mission-item-audit playtester-bugfix-audit mipmap-metadata-audit tp-camera-settings-v29-audit tp-camera-defaults-v29a-audit stay-tp-death-v30-audit mainmenu-special-highlight-v30a-audit tp-camera-default-reset-v30b-audit tp-camera-default-reset-v30c-audit tp-death-animation-v30d-audit tp-death-speed-v30e-audit jungle-natalya-tp-v30h-audit mapmaker-hardware-v31-audit tp-controls-watch-surface-v32-audit directional-shoulder-toggle-v33-audit tp-crouched-cam-height-v34-audit sram-backend-v35-audit sram-extended-settings-v36-audit coop-autoaim-v37-audit surface2-world-item-v38-audit v38r1-defaults-compat-audit special-options-v40-audit kinetic-explosions-v41-audit crouch-default-v41r3-audit tp-tank-super-tank-v42-audit print_info create_directories build_tools extractassets sram-frontend-special-v39-audit tp-crouch-super-tank-watch-v42r2-audit crouch-default-v44-audit crouch-default-v45-audit eeprom16-backend-v46-audit mirrored-levels-v49-audit tp-sight-distance-v74-audit tp-camera-legacy-sync-v75-audit surface2-posend-coop-v79-audit dam-posend-teleport-v80-audit coop-objective-team-v83-audit flashcart-eeprom16-v84-audit super-ultra-kinetics-v85-audit level-never-ends-v86-audit freeze-timer-v87-audit fly-turbo-tp-y-v88-audit level-modifiers-v89-audit mp-citadel-v90-audit
+r27c-special-options-tp-audit:
+	python3 scripts/audit_r27c_special_options_tp.py
+
+r27d-single-player-character-menu-audit:
+	python3 scripts/audit_r27d_single_player_character_menu.py
+
+r27e-deferred-special-options-save-audit:
+	python3 scripts/audit_r27e_deferred_special_options_save.py
+
+r27g2-render-visibility-cache-audit:
+	python3 scripts/audit_r27g2_render_visibility_cache.py
+
+r27g2-r2-stale-weapon-cache-audit:
+	python3 scripts/audit_r27g2_r2_stale_weapon_cache.py
+
+r27h-quick-settings-preset-audit:
+	python3 scripts/audit_r27h_quick_settings_preset.py
+
+r27i-character-animation-frame-cache-audit:
+	python3 scripts/audit_r27i_character_animation_frame_cache.py
+
+r27j-exact-12bit-joint-decode-audit:
+	python3 scripts/audit_r27j_exact_12bit_joint_decode.py
+
+r27k-matrix-parent-lookup-fastpath-audit:
+	python3 scripts/audit_r27k_matrix_parent_lookup_fastpath.py
+
+r27l-exact-model-trig-cache-audit:
+	python3 scripts/audit_r27l_exact_model_trig_cache.py
+
+r27m-noop-joint-callback-elision-audit:
+	python3 scripts/audit_r27m_noop_joint_callback_elision.py
+
+r27n-exact-unrolled-model-matrix-multiply-audit:
+	python3 scripts/audit_r27n_exact_unrolled_model_matrix_multiply.py
+
+r27o-unlimited-explosions-audit:
+	python3 scripts/audit_r27o_unlimited_explosions.py
+
+r27o-r3-highmem-explosion-pool-audit:
+	python3 scripts/audit_r27o_r3_highmem_explosion_pool.py
+
+r27o-r4-explosion-render-scratch-audit:
+	python3 scripts/audit_r27o_r4_explosion_render_scratch.py
+
+r27p-debug-options-master-control-audit:
+	python3 scripts/audit_r27p_debug_options_master_control.py
+
+r27q-r4-level-modifier-columns-audit:
+	python3 scripts/audit_r27q_r4_level_modifiers_sp_columns.py
+
+r27r-drivable-speedboat-audit:
+	python3 scripts/audit_r27r_drivable_speedboat.py
+
+r27v-additional-player-deaths-audit:
+	python3 scripts/audit_r27v_additional_player_deaths.py
+
+prerequisites: autoshot-resource-audit coop-mission-item-audit playtester-bugfix-audit mipmap-metadata-audit tp-camera-settings-v29-audit tp-camera-defaults-v29a-audit stay-tp-death-v30-audit mainmenu-special-highlight-v30a-audit tp-camera-default-reset-v30b-audit tp-camera-default-reset-v30c-audit tp-death-animation-v30d-audit tp-death-speed-v30e-audit jungle-natalya-tp-v30h-audit mapmaker-hardware-v31-audit tp-controls-watch-surface-v32-audit directional-shoulder-toggle-v33-audit tp-crouched-cam-height-v34-audit sram-backend-v35-audit sram-extended-settings-v36-audit coop-autoaim-v37-audit surface2-world-item-v38-audit v38r1-defaults-compat-audit special-options-v40-audit kinetic-explosions-v41-audit crouch-default-v41r3-audit tp-tank-super-tank-v42-audit print_info create_directories build_tools extractassets sram-frontend-special-v39-audit tp-crouch-super-tank-watch-v42r2-audit crouch-default-v44-audit crouch-default-v45-audit eeprom16-backend-v46-audit mirrored-levels-v49-audit tp-sight-distance-v74-audit tp-camera-legacy-sync-v75-audit surface2-posend-coop-v79-audit dam-posend-teleport-v80-audit coop-objective-team-v83-audit flashcart-eeprom16-v84-audit super-ultra-kinetics-v85-audit level-never-ends-v86-audit freeze-timer-v87-audit fly-turbo-tp-y-v88-audit level-modifiers-v89-audit mp-citadel-v90-audit r27c-special-options-tp-audit r27d-single-player-character-menu-audit r27e-deferred-special-options-save-audit r27g2-render-visibility-cache-audit r27g2-r2-stale-weapon-cache-audit r27h-quick-settings-preset-audit r27i-character-animation-frame-cache-audit r27j-exact-12bit-joint-decode-audit r27k-matrix-parent-lookup-fastpath-audit r27l-exact-model-trig-cache-audit r27m-noop-joint-callback-elision-audit r27n-exact-unrolled-model-matrix-multiply-audit r27o-unlimited-explosions-audit r27o-r3-highmem-explosion-pool-audit r27o-r4-explosion-render-scratch-audit r27p-debug-options-master-control-audit r27q-dam-restoration-audit r27q-r4-level-modifier-columns-audit r27r-drivable-speedboat-audit r27s-facility-vent-grate-audit r27s-r2-beta-modifiers-audit r27s-r4-temple-complex-frigate-audit r27s-r4-r1-mcm-hole-room-tp-solo-mp-audit r27t-melee-quick-swap-audit r27s-r5-synthetic-hole-visibility-audit r27u-experimental-jumping-audit r27v-additional-player-deaths-audit r27w-gameplay-patches-audit mp-courtyard-r27x-audit r27y-cradle-mp-kill-plane-audit r27z-split-player-deaths-audit r30-p4-bot-navigation-audit r30-p5-bot-lifecycle-animation-audit r30-p6-bot-crash-hardening-audit r30-p7-one-player-mp-fpv-audit r30-p9-simulant-integration-audit r30-p10-simulant-player-death-stability-audit r30-p11-stan-navigation-audit r30-p12-p13-simulant-features-audit
 
 optimized-preflight:
 ifeq ($(OPTIMIZED_ROM), YES)
@@ -1145,3 +1211,70 @@ sram-frontend-special-v39-audit:
 .PHONY: special-options-v40-audit
 special-options-v40-audit:
 	python3 scripts/audit_special_options_aa_crouch_v40.py
+
+.PHONY: r27c-special-options-tp-audit
+
+r27s-facility-vent-grate-audit:
+	python3 scripts/audit_r27s_facility_vent_grate.py
+
+r27s-r2-beta-modifiers-audit:
+	python3 scripts/audit_r27s_r2_beta_modifiers.py
+
+r27s-r4-temple-complex-frigate-audit:
+	python3 scripts/audit_r27s_r4_temple_complex_frigate.py
+
+r27s-r4-r1-mcm-hole-room-tp-solo-mp-audit:
+	python3 scripts/audit_r27s_r4_r1_mcm_hole_room_tp_solo_mp.py
+
+r27t-melee-quick-swap-audit:
+	python3 scripts/audit_r27t_melee_quick_swap.py
+
+r27s-r5-synthetic-hole-visibility-audit:
+	python3 scripts/audit_r27s_r5_synthetic_hole_visibility.py
+
+r27u-experimental-jumping-audit:
+	python3 scripts/audit_r27u_experimental_jumping.py
+
+.PHONY: r27w-gameplay-patches-audit
+r27w-gameplay-patches-audit:
+	python3 scripts/audit_r27w_gameplay_patch_options.py
+
+.PHONY: r27y-cradle-mp-kill-plane-audit
+r27y-cradle-mp-kill-plane-audit:
+	python3 scripts/audit_r27y_cradle_mp_kill_plane.py
+
+.PHONY: r27z-split-player-deaths-audit
+r27z-split-player-deaths-audit:
+	python3 scripts/audit_r27z_split_player_death_enhancements.py
+
+
+.PHONY: r30-p4-bot-navigation-audit
+r30-p4-bot-navigation-audit:
+	python3 scripts/audit_r30_p4_bot_navigation.py
+
+.PHONY: r30-p5-bot-lifecycle-animation-audit
+r30-p5-bot-lifecycle-animation-audit:
+	python3 scripts/audit_r30_p5_bot_lifecycle_animation.py
+
+.PHONY: r30-p6-bot-crash-hardening-audit
+r30-p6-bot-crash-hardening-audit:
+	python3 scripts/audit_r30_p6_bot_crash_hardening.py
+
+.PHONY: r30-p7-one-player-mp-fpv-audit
+r30-p7-one-player-mp-fpv-audit:
+	python3 scripts/audit_r30_p7_one_player_mp_fpv.py
+
+.PHONY: r30-p9-simulant-integration-audit
+r30-p9-simulant-integration-audit:
+	python3 scripts/audit_r30_p9_simulant_integration.py
+.PHONY: r30-p10-simulant-player-death-stability-audit
+r30-p10-simulant-player-death-stability-audit:
+	python3 scripts/audit_r30_p10_simulant_player_death_stability.py
+
+.PHONY: r30-p11-stan-navigation-audit
+r30-p11-stan-navigation-audit:
+	python3 scripts/audit_r30_p11_stan_navigation.py
+
+.PHONY: r30-p12-p13-simulant-features-audit
+r30-p12-p13-simulant-features-audit:
+	python3 scripts/audit_r30_p12_p13_simulant_features.py

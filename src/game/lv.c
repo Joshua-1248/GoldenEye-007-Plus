@@ -34,6 +34,7 @@
 #include "cheat.h"
 #ifdef GE_MODDED_CHEATS
 #include "mirroredlevels.h"
+#include "mpbots.h"
 #endif
 #include "bg.h"
 #include "objective.h"
@@ -69,6 +70,7 @@
 #endif
 #ifdef GE_MODDED_CHEATS
 #include "dyn.h"
+#include "levelmodifiers.h"
 #endif
 
 /* Used by the Co-Op stage bootstrap before the first gameplay tick. */
@@ -446,6 +448,17 @@ void lvlStageLoad(s32 stage)
                 player_data->sight = 0;
                 player_data->handicap = 1.0f;
                 player_data->player_perspective_height = 1.0f;
+#ifdef GE_MODDED_CHEATS
+                /* R27D reads the exact authored MP POV value for the selected
+                 * character, but never mutates MP character state itself. */
+                if (i == 0 && g_ModSinglePlayerMatchViewHeight
+                    && gamemode != GAMEMODE_MULTI && get_scenario() != SCENARIO_COOP)
+                {
+                    f32 pov;
+                    if (frontGetSinglePlayerCharacterOverride(NULL, NULL, &pov))
+                        player_data->player_perspective_height = pov;
+                }
+#endif
             }
             else
             {
@@ -590,6 +603,12 @@ void lvlStageLoad(s32 stage)
          * valid gameplay data and before the first gameplay frame.
          */
         cheatApplyFrontendSelectionsForStage();
+
+        /* P10: resolve Simulant resources and prime their animated-model
+         * slots while lvlReset still owns exact-size allocation. Do this after
+         * frontend cheats are restored so presentation-dependent model setup
+         * (for example DK mode) matches the live stage state. */
+        modMpBotsPrepareStage();
 #endif
 #ifdef GE_PHYSICAL_FASTPATHS
         /* Hide first-person texture DMA/decompression inside stage loading so
@@ -1841,6 +1860,15 @@ void lvlViewMoveTick(void)
 
         return;
     }
+
+#ifdef GE_MODDED_CHEATS
+    if (g_CurrentPlayer != NULL && g_CurrentPlayer->prop != NULL
+        && !g_CurrentPlayer->bonddead
+        && levelModifiersCradleKillPlaneShouldKill(g_CurrentPlayer->prop->pos.y))
+    {
+        bondviewKillCurrentPlayer();
+    }
+#endif
 }
 
 

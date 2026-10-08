@@ -79,6 +79,11 @@ struct music_struct_b {
 };
 
 s32 g_musicUnused = 0;
+#ifdef GE_MODDED_CHEATS
+extern u8 g_ModSiloXMusicLoopFixEnabled;
+extern s32 mission_state;
+static u8 g_ModSiloXLoopRestartQueued;
+#endif
 
 /**
  * Current playing track. Sometimes compared to zero to check
@@ -1421,4 +1426,17 @@ void musicFadeTick(void)
             g_musicXTrack3Fade = MUSIC_FADESTATE_UNSET;
         }
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* R27Z: fully reload Silo's X-track after natural completion. */
+    if (g_ModSiloXMusicLoopFixEnabled
+        && (mission_state == MISSION_STATE_2 || mission_state == MISSION_STATE_5)
+        && g_musicXTrack2CurrentTrackNum == M_SILOX)
+    {
+        if (alCSPGetState(g_musicXTrack2SeqPlayer) == AL_STOPPED)
+        {
+            musicTrack2Play(M_SILOX);
+        }
+    }
+#endif
 }

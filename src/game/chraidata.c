@@ -826,6 +826,9 @@ char *setup_text_pointers[] = {
 #ifdef GE_MAP_MAKER
     "UsetupmapmakerZ",
 #endif
+#ifdef GE_MODDED_CHEATS
+    "UcZ",
+#endif
     NULL, NULL
 };
 

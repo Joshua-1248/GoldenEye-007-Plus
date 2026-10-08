@@ -15,7 +15,7 @@ def check(name, ok):
         raise SystemExit(1)
 
 checks = [
-    ("Distance default is 300", "#define TP_CAM_DISTANCE_DEFAULT 300" in OPT),
+    ("Distance default is 310", "#define TP_CAM_DISTANCE_DEFAULT 310" in OPT),
     ("Height default is -12", "#define TP_CAM_HEIGHT_DEFAULT (-12)" in OPT),
     ("Horizontal default is -24", "#define TP_CAM_HORIZONTAL_DEFAULT (-24)" in OPT),
     ("Down Frame default is 24", "#define TP_CAM_DOWN_FRAME_DEFAULT 24" in OPT),

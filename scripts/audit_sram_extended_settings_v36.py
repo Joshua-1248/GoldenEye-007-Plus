@@ -16,7 +16,7 @@ def check(name, cond):
 check('legacy 512-byte compatibility window remains unchanged', '#define GE_SRAM_LEGACY_SIZE   0x00000200u' in file2)
 check('extension starts immediately after legacy window', '#define GE_SRAM_EXT_BANK_A_OFFSET   0x0200u' in file2)
 check('extension uses second 64-byte journal bank', '#define GE_SRAM_EXT_BANK_B_OFFSET   0x0240u' in file2 and '#define GE_SRAM_EXT_BANK_SIZE       0x40u' in file2)
-check('extension has GEPS magic and explicit v1/v2/v3 schema', 'GE_SRAM_EXT_MAGIC           0x47455053u' in file2 and 'GE_SRAM_EXT_VERSION_LEGACY  1u' in file2 and 'GE_SRAM_EXT_VERSION_V2      2u' in file2 and 'GE_SRAM_EXT_VERSION         3u' in file2)
+check('extension has GEPS magic and explicit v1/v2/v3/v4 schema', 'GE_SRAM_EXT_MAGIC           0x47455053u' in file2 and 'GE_SRAM_EXT_VERSION_LEGACY  1u' in file2 and 'GE_SRAM_EXT_VERSION_V2      2u' in file2 and 'GE_SRAM_EXT_VERSION_V3      3u' in file2 and 'GE_SRAM_EXT_VERSION         4u' in file2)
 check('folder record stays compact at eight bytes', 'GE_SRAM_EXT_RECORD_SIZE     8u' in file2 and 'ge_sram_ext_record_must_be_8' in file2)
 check('bank stays exactly 64 bytes', 'ge_sram_ext_bank_must_be_64' in file2)
 check('bank has checksum validation', 'fileSramExtChecksum' in file2 and 'fileSramExtBankValid' in file2 and '0xedb88320u' in file2)

@@ -24,35 +24,19 @@ check('crouch-height adjustment has a dedicated runtime variable',
       'g_ModThirdPersonCrouchCameraHeightAdjust' in OPT and
       'extern s8 g_ModThirdPersonCrouchCameraHeightAdjust;' in OPTH and
       'extern s8 g_ModThirdPersonCrouchCameraHeightAdjust;' in ROOTOPTH)
-check('SP Special Options has a twentieth row for the new tuner',
-      ('#define MODWATCH_OPTION_ROWS 20' in OPT or
-       '#define MODWATCH_OPTION_ROWS 21' in OPT or
-       '#define MODWATCH_OPTION_ROWS 22' in OPT or
-       '#define MODWATCH_OPTION_ROWS 23' in OPT or
-       '#define MODWATCH_OPTION_ROWS 24' in OPT) and
-      'label = "TP Crouched Cam Height";' in OPT and
-      ('else if (row == 19)' in OPT or 'else if (row == 20)' in OPT))
-check('new tuner is in-game only',
-      'TP Crouched Cam Height' not in FRONT and
-      'TP Crouched Cam Height' not in MP)
+check('SP Third-Person Options exposes the crouched-height tuner',
+      '#define MODWATCH_TP_ROWS 11' in OPT and
+      'frontModGetOptionLabel(60)' in OPT and 'MODWATCH_MODE_TP_OPTIONS' in OPT)
+check('tuner is exposed in main, SP and MP Third-Person Options',
+      'labelindex = i == 0 ? 32 : i <= 3 ? 46 + i : i == 4 ? 51 : 51 + i' in FRONT and
+      'frontModGetOptionLabel(60)' in OPT and '52 + row' in MP)
 check('new tuner is placed after the four existing TP camera tuners',
-      ('else if (row == 18)' in OPT or 'else if (row == 19)' in OPT) and
-      'TP Cam Down Frame' in OPT and
-      'TP Crouched Cam Height' in OPT)
-check('In-Game Cheats moves down one row cleanly',
-      (('if (pressed & B_BUTTON) MODWATCH_STATE = 19;' in OPT and 'else if (row >= 14 && row <= 18) modWatchAdjustThirdPersonCamera(row - 3);' in OPT) or
-       ('if (pressed & B_BUTTON) MODWATCH_STATE = 20;' in OPT and 'else if (row >= 15 && row <= 19) modWatchAdjustThirdPersonCamera(row - 4);' in OPT) or
-       ('if (pressed & B_BUTTON) MODWATCH_STATE = 21;' in OPT and
-        'else if (row >= 15 && row <= 20) modWatchAdjustThirdPersonCamera(row - 4);' in OPT and
-        'label = "TP Crosshair Range";' in OPT) or
-       ('if (pressed & B_BUTTON) MODWATCH_STATE = 22;' in OPT and
-        'else if (row >= 16 && row <= 21) modWatchAdjustThirdPersonCamera(row - 5);' in OPT and
-        'label = "TP Crosshair Range";' in OPT) or
-       ('MODWATCH_STATE = 23;' in OPT and
-        'else if (row >= 16 && row <= 21)' in OPT and
-        'modWatchAdjustThirdPersonCamera(row - 5);' in OPT and
-        'label = "TP Crosshair Range";' in OPT and
-        'label = "Level Modifiers"; value = ">";' in OPT)))
+      OPT.find('frontModGetOptionLabel(56)') < OPT.find('frontModGetOptionLabel(57)') <
+      OPT.find('frontModGetOptionLabel(58)') < OPT.find('frontModGetOptionLabel(59)') <
+      OPT.find('frontModGetOptionLabel(60)'))
+check('In-Game Cheats remains reachable after the new Special Options submenus',
+      'MODWATCH_MODE_CHEATS' in OPT and 'frontModGetOptionLabel(54)' in OPT and
+      'frontModGetOptionLabel(65)' in OPT)
 check('adjustment uses the same two-unit camera tuning cadence',
       'g_ModThirdPersonCrouchCameraHeightAdjust + delta' in OPT)
 check('adjustment is clamped to the authored 0..96 crouch-height range',

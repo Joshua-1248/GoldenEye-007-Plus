@@ -646,6 +646,17 @@ static bool stanTileContainsPointAllEdges(StandTile *tile, f32 scaledX, f32 scal
     return inside != FALSE;
 }
 
+/* R27S R9 R1: public world-coordinate ownership test using the real
+ * STAN polygon rather than retail's approximate three-point triangle. */
+bool stanTestPointWithinTileFullBounds(StandTile *tile, f32 p_x, f32 p_z)
+{
+    return stanTileContainsPointAllEdges(
+        tile,
+        p_x * level_scale,
+        p_z * level_scale);
+}
+
+
 static f32 stanTileClosestPoint2dSq(StandTile *tile, f32 scaledX, f32 scaledZ,
         f32 *closestX, f32 *closestZ)
 {
@@ -1118,6 +1129,142 @@ void getTileMidPoint(StandTile *tile, coord3d *out)
     out->x = (((f32)stanMirrorPointX(pointA) + (f32)stanMirrorPointX(pointB) + (f32)stanMirrorPointX(&tile->points[indexC])) / 3.0f) * inv_level_scale;
     out->y = (((((f32) (&tile->points[indexA])->y) + ((f32) pointB->y)) + ((f32) (&tile->points[indexC])->y)) / 3.0f) * inv_level_scale;
     out->z = (((((f32) (&tile->points[indexA])->z) + ((f32) pointB->z)) + ((f32) ((float) (&tile->points[indexC])->z))) / 3.0f) * inv_level_scale;
+}
+
+
+s32 stanGetTilePointCount(StandTile *tile)
+{
+    if (tile == NULL)
+        return 0;
+
+    return (tile->tail.half >> 12) & 0xf;
+}
+
+
+StandTile *stanGetLinkedTileAtEdge(StandTile *tile, s32 edgeIndex)
+{
+    s32 pointcount;
+    u16 link;
+
+    if (tile == NULL)
+        return NULL;
+
+    pointcount = stanGetTilePointCount(tile);
+
+    if (edgeIndex < 0 || edgeIndex >= pointcount)
+        return NULL;
+
+    link = tile->points[edgeIndex].link;
+
+    if ((link >> 4) == 0)
+        return NULL;
+
+    return (StandTile *)((u8 *)standTileStart + (link << 3));
+}
+
+
+s32 stanGetEdgeMidPointWorld(StandTile *tile, s32 edgeIndex, coord3d *out, f32 *width)
+{
+    s32 pointcount;
+    s32 nextIndex;
+    StandTilePoint *a;
+    StandTilePoint *b;
+    f32 ax;
+    f32 az;
+    f32 bx;
+    f32 bz;
+    f32 dx;
+    f32 dz;
+
+    if (tile == NULL || out == NULL)
+        return FALSE;
+
+    pointcount = stanGetTilePointCount(tile);
+
+    if (edgeIndex < 0 || edgeIndex >= pointcount)
+        return FALSE;
+
+    nextIndex = (edgeIndex + 1) % pointcount;
+    a = &tile->points[edgeIndex];
+    b = &tile->points[nextIndex];
+
+    ax = (f32)stanMirrorPointX(a) * inv_level_scale;
+    az = (f32)a->z * inv_level_scale;
+    bx = (f32)stanMirrorPointX(b) * inv_level_scale;
+    bz = (f32)b->z * inv_level_scale;
+
+    out->x = (ax + bx) * 0.5f;
+    out->y = ((f32)a->y + (f32)b->y) * 0.5f * inv_level_scale;
+    out->z = (az + bz) * 0.5f;
+
+    if (width != NULL)
+    {
+        dx = bx - ax;
+        dz = bz - az;
+        *width = sqrtf(dx * dx + dz * dz);
+    }
+
+    return TRUE;
+}
+
+
+f32 stanGetTileCenterClearanceWorld(StandTile *tile)
+{
+    coord3d center;
+    s32 pointcount;
+    s32 i;
+    s32 nextIndex;
+    f32 best = 999999.0f;
+    f32 ax;
+    f32 az;
+    f32 bx;
+    f32 bz;
+    f32 ex;
+    f32 ez;
+    f32 px;
+    f32 pz;
+    f32 len;
+    f32 dist;
+
+    if (tile == NULL)
+        return 0.0f;
+
+    pointcount = stanGetTilePointCount(tile);
+
+    if (pointcount < 3)
+        return 0.0f;
+
+    getTileMidPoint(tile, &center);
+
+    for (i = 0; i < pointcount; i++)
+    {
+        nextIndex = (i + 1) % pointcount;
+        ax = (f32)stanMirrorPointX(&tile->points[i]) * inv_level_scale;
+        az = (f32)tile->points[i].z * inv_level_scale;
+        bx = (f32)stanMirrorPointX(&tile->points[nextIndex]) * inv_level_scale;
+        bz = (f32)tile->points[nextIndex].z * inv_level_scale;
+        ex = bx - ax;
+        ez = bz - az;
+        px = center.x - ax;
+        pz = center.z - az;
+        len = sqrtf(ex * ex + ez * ez);
+
+        if (len > 0.001f)
+        {
+            dist = ex * pz - ez * px;
+            if (dist < 0.0f)
+                dist = -dist;
+            dist /= len;
+
+            if (dist < best)
+                best = dist;
+        }
+    }
+
+    if (best == 999999.0f)
+        return 0.0f;
+
+    return best;
 }
 
 

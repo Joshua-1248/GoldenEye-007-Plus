@@ -5,6 +5,9 @@
 #include "chr.h"
 #include "chrobjdata.h"
 #include "initguards.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 
 void init_guards(void) {
     animation_rate = 1.0f;
@@ -19,6 +22,7 @@ void init_guards(void) {
     g_NumChrSlots = 0;
 #ifdef GE_MODDED_CHEATS
     chrCoopResetTargetCache();
+    modMpBotsResetRuntime();
 #endif
     init_obj_register_difficulty_vals();
 }

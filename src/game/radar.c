@@ -6,6 +6,9 @@
 #include "player.h"
 #include "othermodemicrocode.h"
 #include "image_bank.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 
 
 /**
@@ -53,7 +56,11 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
     cur_playernum = get_cur_playernum();
     player_count = getPlayerCount();
     
+#ifdef GE_MODDED_CHEATS
+    if (gamemode != GAMEMODE_MULTI)
+#else
     if (player_count == 1)
+#endif
     {
         return DL;
     }
@@ -192,6 +199,40 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
             }
         }
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* PD draws Simulants in a second pass through the same radar-dot path. */
+    for (i = 0; i < MOD_MP_BOT_MAX; i++)
+    {
+        other_player_prop = modMpBotsGetBotProp(i);
+
+        if (other_player_prop != NULL)
+        {
+            player_prop = g_CurrentPlayer->prop;
+            temp_f20 = other_player_prop->pos.f[0] - player_prop->pos.f[0];
+            temp_f22 = other_player_prop->pos.f[2] - player_prop->pos.f[2];
+            temp_f28 = ((atan2f(temp_f20, temp_f22) * 180.0f) / M_PI_F)
+                + g_CurrentPlayer->vv_theta + 180.0f;
+            temp_f24 = 16;
+            temp_f16 = 4000;
+            temp_f2 = sqrtf((temp_f20 * temp_f20) + (temp_f22 * temp_f22))
+                * (temp_f24 / temp_f16);
+            dl_color_2 = 0xFFFF0060;
+
+            if (temp_f2 < temp_f24)
+                dl_color_2 = 0xFFFF00A0;
+            else
+                temp_f2 = temp_f24;
+
+            loop_start_left = (s32)(sinf(temp_f28 * 0.017453292f) * temp_f2) + start_left;
+            loop_start_top = (s32)(cosf(temp_f28 * 0.017453292f) * temp_f2 * RADAR_VERT_SCALE) + start_top;
+            DL = microcode_constructor_related_to_menus(DL, loop_start_left - 2, loop_start_top - 2,
+                loop_start_left + 2, loop_start_top + 2, 0x40);
+            DL = microcode_constructor_related_to_menus(DL, loop_start_left - 1, loop_start_top - 1,
+                loop_start_left + 1, loop_start_top + 1, dl_color_2);
+        }
+    }
+#endif
 
     return combiner_bayer_lod_perspective(DL);
 

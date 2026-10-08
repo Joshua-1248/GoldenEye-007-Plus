@@ -17,6 +17,9 @@
 #include "math_ceil.h"
 #include "math_floor.h"
 #include "model.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 #include "mp_music.h"
 #include "objecthandler.h"
 #include "objective_status.h"
@@ -933,6 +936,11 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
     if (EntityType == PROP_TYPE_CHR)
     {
         ChrEntityp = Entityp;
+#ifdef GE_MODDED_CHEATS
+        /* Simulants are driven exclusively by mpbots.c, never guard AI lists. */
+        if (ChrEntityp != NULL && modMpBotsGetSlotForChr(ChrEntityp) >= 0)
+            return;
+#endif
     }
     else if (EntityType == PROP_TYPE_OBJ)
     {
