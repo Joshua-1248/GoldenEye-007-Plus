@@ -1,138 +1,207 @@
 # GoldenEye 007 Plus
 
-GoldenEye 007 Plus is a community modification of **GoldenEye 007 for Nintendo 64**, built on the fully decompiled GoldenEye source and focused on performance, stability, expanded multiplayer/co-op support, Third Person gameplay, quality-of-life features, experimental in-game map creation, and preservation-minded enhancements.
+GoldenEye 007 Plus is a community modification of **GoldenEye 007 for Nintendo 64**, built on the fully decompiled GoldenEye source code.
 
-This repository contains **source code and project material only**. It is not a substitute for the original game. A legally obtained retail ROM is required where the upstream build/extraction process needs original game data.
+The project focuses on improving performance, stability, gameplay flexibility, expanded multiplayer and campaign Co-Op, Perfect Dark-derived simulants (AI bots), Third Person gameplay, quality-of-life improvements, experimental map creation, and preservation-minded enhancements.
 
-## Current development snapshot
+**This repository contains source code and project materials only.** It does not distribute a retail GoldenEye 007 ROM. A legally obtained original game ROM is required for the applicable build and extraction processes.
 
-This source refresh represents the current **R22-derived GoldenEye 007 Plus development tree through internal checkpoint V90 (2026-09-28)**. It supersedes the older public GitHub source snapshot from 2026-09-27.
+## Current Development Status — October 2026
 
-Major work present in this tree includes:
+The current public source is the **R22-derived GoldenEye 007 Plus development tree with subsequent R27/R30 integration**.
 
-- performance and load-time optimization passes;
-- expanded 1–4 player campaign Co-Op architecture;
-- expanded multiplayer maps, menus, character selection and dual-wield behavior;
-- save-backed gameplay/Special Options;
-- Optional Third Person mode with adjustable camera and crosshair tuning;
-- Third Person cutscene handoff fixes, including the Surface II and Dam end cinematics;
-- TP Sight Translucency while manually aiming;
-- Third Person projectile/beam/tracer alignment work;
-- Moonraker Laser Third Person straight-ray penetration work;
-- shared campaign Co-Op mission-item and objective-state handling;
-- Co-Op mission report/statistics routing;
-- Mirrored Levels support and live-toggle safety work;
-- Basic/Advanced Map Maker development with a dedicated native Map Maker stage architecture;
-- Citadel restored as a dedicated multiplayer stage, using community restoration work by Krijy and Zoinkity;
-- a Perfect Dark-inspired, room-aware and cylinder-aware STAN ground-support backport used generically;
-- selective, evidence-based Perfect Dark backports where the underlying behavior is genuinely equivalent or appropriate.
+The latest major source update was published in commit [`95656a3`](https://github.com/Joshua-1248/GoldenEye-007-Plus/commit/95656a3), making the current Perfect Dark-derived simulant implementation publicly available.
 
-The project deliberately keeps GoldenEye behavior as the baseline. Perfect Dark and related Rare-era material are references, not wholesale replacements.
+This supersedes the older September 2026 V90 development snapshot.
 
-## Current runtime notes
+### Major Features
 
-Some current development areas are still under stress testing. In particular, Mirrored Levels live toggling has received multiple safety fixes and should continue to be tested on large/explored stages such as Caverns.
+- Performance optimizations covering character processing, model rendering, visibility, explosions, and other engine systems.
+- Expanded **1–4 player campaign Co-Op**.
+- Expanded multiplayer maps, characters, weapons, menus, and settings.
+- **Perfect Dark-derived simulants (AI bots)** for multiplayer and campaign Co-Op.
+- STAN-based bot navigation independent of GoldenEye's original guard waypoint system.
+- Optional Third Person gameplay with adjustable camera and crosshair settings.
+- Additional player death animations and gameplay options.
+- Expanded multiplayer weapon handling and dual-wield functionality.
+- Save-backed Special Options, cheats, and gameplay preferences.
+- Expanded Co-Op objectives, shared mission items, mission reporting, and player statistics.
+- Mirrored Levels support.
+- Experimental Basic/Advanced Map Maker.
+- Restored Citadel multiplayer stage.
+- Courtyard multiplayer integration.
+- Selective Perfect Dark engine and gameplay backports.
 
-The Surface II Third Person/Co-Op cutscene crash is runtime-confirmed fixed in:
+The project aims to preserve GoldenEye's original behavior wherever practical. Perfect Dark features are adapted only where necessary to accommodate differences between the two game engines.
 
-- single-player Third Person;
-- 2P Co-Op, including both players in Third Person;
-- 3P and 4P Co-Op.
+---
 
-Dam's Third Person ending presentation has also been corrected so its scripted camera sequence can play normally while the Third Person preference remains enabled.
+## Perfect Dark-Derived Simulants (AI Bots)
 
-## Emulator note
+One of GoldenEye 007 Plus's largest ongoing additions is the backport and adaptation of Perfect Dark's simulant architecture.
 
-When testing with **Project64 + GLideN64**, keep graphics-plugin behavior separate from source-code regressions. Earlier development found that GLideN64 framebuffer/depth settings can produce black-world symptoms unrelated to GoldenEye game logic.
+GoldenEye originally lacked Perfect Dark's multiplayer simulant system. GoldenEye 007 Plus introduces AI-controlled participants that can operate alongside human players.
 
-A known useful diagnostic setting is:
+### Multiplayer Simulants
 
-`Force depth buffer clear = ON`
+The current implementation includes:
 
-Record the Project64 version, GLideN64 revision, framebuffer-emulation state, and depth-buffer-clear setting with renderer bug reports.
+- Support for **up to 8 configurable bots**.
+- **6 difficulty levels**, ranging from Very Easy to Extreme.
+- Independently combinable bot personality traits.
+- AI-controlled movement, combat, and target selection.
+- Weapon searching, pickup, and inventory management.
+- Weapon switching and reloading.
+- Ranged and melee combat.
+- Body Armor interaction.
+- Radar participation.
+- Multiplayer scoring.
+- Damage handling and pain sounds.
+- Player-style animation handling.
+- Death animations, corpse cleanup, and respawning.
+- Navigation and door interaction.
 
-## Building
+Bot difficulty and personality settings are intended to influence their behavior in ways consistent with the Perfect Dark simulant system, adapted to GoldenEye's available mechanics.
 
-The current tested build configuration is:
+### STAN-Based Navigation
 
-```sh
-make VERSION=US \
-    PHYSICAL_CODE=YES \
-    PHYSICAL_FASTPATHS=YES \
-    MODDED_CHEATS=YES \
-    MAP_MAKER=YES \
-    OPT_USE_LLVM=YES \
-    COMPARE=0 \
-    -j2
-```
+Unlike GoldenEye's original guards, which rely on guard waypoint/navigation behavior, the new simulants use a separate navigation system built around the game's STAN collision and ground geometry.
 
-`MODDED_CHEATS=YES` currently enables the Plus 16 Kbit EEPROM backend by default, so the normal output path includes `-eep16`.
+This allows the bot navigation architecture to operate independently of GoldenEye's original guard AI waypoint infrastructure.
 
-A helper script is also provided:
+Navigation remains under active development and runtime testing.
 
-```sh
-./build_geplus.sh
-```
+### Campaign Co-Op Simulants
 
-The helper intentionally defaults to **2 build jobs** rather than consuming every CPU core. Override with `JOBS=<n>` if desired.
+The simulant architecture also supports campaign Co-Op.
 
-Place a legally obtained, unmodified NTSC-U ROM in the repository root as:
+Current development functionality includes:
 
-```text
-baserom.u.z64
-```
+- AI companions participating alongside human players.
+- Following human players through missions.
+- Engaging hostile guards.
+- Weapon and combat handling.
+- Door interaction.
+- Damage and death handling.
+- Integration with the expanded campaign Co-Op architecture.
 
-The helper verifies the expected retail SHA-1 before extraction/build.
+Campaign Co-Op bot behavior is still being refined and tested.
 
-## Repository organization
+### Source Code and Audits
 
-The public source layout is intentionally cleaned of development-session clutter and generated ROM/build outputs.
+The primary simulant implementation is available publicly:
 
-Useful areas include:
+- [`src/game/mpbots.c`](src/game/mpbots.c)
+- [`src/game/mpbots.h`](src/game/mpbots.h)
 
-- `src/game/` — gameplay, menus, AI, player systems and rendering-facing game code;
-- `src/libultra/` and `src/libultrare/` — N64 runtime/library code carried by the upstream project;
-- `assets/` — build-time asset definitions and source material permitted in the public tree;
-- `scripts/` — build, audit, generation and extraction helpers;
-- `tools/` — build and conversion utilities;
-- `docs/` — project documentation where applicable.
+Related regression and integration audits include:
 
-Generated/extracted retail assets, ROMs, object files and local build products are intentionally excluded. The additive `MP_CITADEL.bin` portrait is tracked explicitly because it is part of the Plus Citadel integration rather than a retail extracted image.
+- `scripts/audit_r30_p4_bot_navigation.py`
+- `scripts/audit_r30_p5_bot_lifecycle_animation.py`
+- `scripts/audit_r30_p6_bot_crash_hardening.py`
+- `scripts/audit_r30_p7_one_player_mp_fpv.py`
+- `scripts/audit_r30_p9_simulant_integration.py`
+- `scripts/audit_r30_p10_simulant_player_death_stability.py`
+- `scripts/audit_r30_p11_stan_navigation.py`
+- `scripts/audit_r30_p12_p13_simulant_features.py`
 
-## Development principles
+**Development warning:** Simulants are still experimental. Navigation, animation timing with multiple human players, death-animation completion, respawning, frame pacing, and overall stability remain subjects of runtime testing. A successful compilation or static audit does not guarantee that every behavior works correctly in-game.
 
-1. **Correctness before optimization.** Known-good checkpoints are retained as comparison points and risky changes are regression-tested across 1P/2P/3P/4P.
-2. **All relevant modes stay in sync.** New options, cheats and campaign state should behave consistently in every appropriate interface/player mode.
-3. **Preserve attribution and provenance.** Upstream code, research, third-party tools and backported material must retain their original notices.
-4. **Backport selectively.** Perfect Dark or related-engine code is used only when the function/algorithm is genuinely equivalent or clearly appropriate for GoldenEye.
-5. **Separate game bugs from emulator/plugin bugs.** Reproduce and document the distinction before altering game code.
-6. **Campaign Co-Op objectives are team-wide.** Mission-objective truth and required mission-item authority must not become accidentally player-local.
+The current implementation is not claimed to have complete behavioral parity with Perfect Dark.
 
-## Citadel restoration credits
+---
 
-Special thanks to **Krijy** and **Zoinkity** for their foundational work on Citadel.
+## Expanded Campaign Co-Op
 
-- **Krijy** was the first to discover Citadel and make it playable for the wider GoldenEye community. His original playable implementation reused **Cradle's setup**, which was a practical solution because Cradle keeps all of its rooms loaded at once.
-- **Zoinkity** later reworked Citadel's STAN/clipping data so the level could function correctly with the final GoldenEye engine's collision system.
+GoldenEye 007 Plus expands the original single-player campaign to support up to four human players, with ongoing support for AI companions.
 
-GoldenEye 007 Plus builds on those community efforts while integrating Citadel as its own dedicated level rather than replacing or reusing another retail stage.
+Development work includes:
 
-## Documentation and provenance
+- Shared campaign mission progression and objective state.
+- Team-wide mission-item handling.
+- Improved Co-Op player lifecycle management.
+- Expanded player targeting and friendly-fire handling.
+- Co-Op mission reporting and statistics.
+- Campaign death and GAME OVER handling.
+- Cutscene and end-of-level transitions.
+- Improved split-screen gameplay behavior.
+- Multiple-player mission testing and stability corrections.
 
-Before redistributing or contributing, keep these files with the source:
+The Co-Op architecture is designed to preserve GoldenEye's original campaign systems while adapting them for multiple participants.
 
-- `LICENSES_AND_NOTICES.txt`
-- `CREDITS.txt`
-- `REFERENCES.txt`
-- `UPSTREAM_GOLDENEYE_README.md`
+---
 
-See `CURRENT_DEVELOPMENT_STATUS.md` for a concise summary of the current post-GitHub-snapshot work.
+## Third Person Gameplay
 
-## Legal / trademark notice
+GoldenEye 007 Plus includes an optional Third Person gameplay mode.
 
-GoldenEye 007, James Bond, Nintendo 64, Rare, Nintendo, MGM, EON Productions, and other names, marks, characters, artwork, audio, and game content belong to their respective owners. This fan/community project is not affiliated with, endorsed by, or sponsored by those rights holders.
+Development work includes:
 
-No original retail ROM is distributed by this project.
+- Adjustable camera behavior.
+- Crosshair and aiming improvements.
+- Weapon projectile, tracer, and beam alignment.
+- Camera positioning and collision-related refinements.
+- Third Person death presentation.
+- Cutscene transitions and camera handoffs.
+- Compatibility improvements for campaign and Co-Op gameplay.
 
-### Additional mod provenance
-- **Cradle (MP) Kill Plane Level Modifier:** original multiplayer Cradle fall/death-plane modification by **Zoinkity**. GoldenEye Plus ports only the Y < -2550 behavior and preserves the retail multiplayer setup.
+The Surface II Third Person/Co-Op cutscene crash was runtime-confirmed fixed in single-player Third Person and 2P–4P Co-Op configurations.
+
+Dam's ending camera presentation was also corrected to allow its scripted sequence to function while Third Person remains enabled.
+
+---
+
+## Multiplayer Enhancements
+
+GoldenEye 007 Plus includes several multiplayer expansions and refinements.
+
+These include:
+
+- Additional playable multiplayer maps.
+- Expanded multiplayer character availability.
+- Duplicate-character selection.
+- Expanded weapon selections.
+- Dual-wield weapon handling.
+- Multiplayer HUD improvements.
+- Additional gameplay options and cheats.
+- Expanded multiplayer settings and menu functionality.
+- One-player multiplayer support.
+- Perfect Dark-derived bot integration.
+
+### Citadel
+
+Citadel is integrated as a dedicated multiplayer stage.
+
+Special thanks to:
+
+**Krijy** — First discovered Citadel and made the level playable for the wider GoldenEye community. His early playable implementation reused Cradle's setup because Cradle keeps all its rooms loaded simultaneously.
+
+**Zoinkity** — Later reworked Citadel's STAN and clipping information to make the stage compatible with the final GoldenEye engine's collision system.
+
+GoldenEye 007 Plus builds on this community restoration work while integrating Citadel as its own stage.
+
+### Courtyard
+
+GoldenEye 007 Plus also includes Courtyard multiplayer integration.
+
+**BMW** is credited as the creator of Courtyard, the first GoldenEye level created using Valve Hammer Editor.
+
+The original community authorship and contributions remain recognized.
+
+---
+
+## Map Maker
+
+GoldenEye 007 Plus includes ongoing development of an experimental in-game Map Maker.
+
+Development work includes:
+
+- Basic and Advanced editing functionality.
+- Geometry and mesh editing.
+- Texture selection and application.
+- Entity and pickup placement.
+- Dedicated Map Maker stage architecture.
+- Native map testing.
+- Experimental in-game editing and storage systems.
+
+The Map Maker is **experimental**, and
