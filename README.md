@@ -332,4 +332,34 @@ Important foundations and references include:
 - The Perfect Dark decompilation project and its contributors, including Ryan Dwyer.
 - Krijy and Zoinkity for Citadel restoration.
 - BMW for Courtyard.
-- Golden
+- GoldenEye and Perfect Dark community research and tooling.
+
+Project64 and GLideN64 for testing and investigation.
+
+Development and research assistance from OpenAI ChatGPT.
+
+See CREDITS.txt, REFERENCES.txt, and LICENSES_AND_NOTICES.txt for additional information.
+
+Additional Mod Provenance
+
+Cradle (MP) Kill Plane Level Modifier: Originally developed by Zoinkity. GoldenEye 007 Plus ports the relevant Y < -2550 behavior while preserving the original multiplayer setup.
+
+Additional historical GameShark-related level-modifier provenance is documented in CREDITS.txt.
+
+Development Status and Contributions
+
+GoldenEye 007 Plus is an ongoing community modification.
+
+Features may change as development continues, and experimental functionality may have unresolved issues.
+
+The project's current state is documented in CURRENT_DEVELOPMENT_STATUS.md.
+
+Contributions, testing, bug reports, and research that help preserve original engine behavior and improve reliability are welcome.
+
+Legal and Trademark Notice
+
+GoldenEye 007, James Bond, Nintendo 64, Rare, Nintendo, MGM, EON Productions, and their respective characters, artwork, audio, names, and trademarks belong to their applicable rights holders.
+
+GoldenEye 007 Plus is an unofficial fan/community project and is not affiliated with, endorsed by, or sponsored by those rights holders.
+
+No original retail GoldenEye 007 ROM is distributed by this project.
