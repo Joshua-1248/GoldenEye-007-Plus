@@ -442,7 +442,11 @@ WOFF :=  -woff 609,649,709,712,807,838,763
 ifeq ($(IDO_RECOMP), NO)
   CC := $(QEMU_IRIX) -silent -L $(IRIX_ROOT) $(IRIX_ROOT)/usr/bin/cc
 else
-  CC := scripts/toolchain/ido-cc-clean.sh $(IRIX_ROOT)/cc
+  ifeq ($(OS),Windows_NT)
+    CC := scripts/toolchain/ido-cc-clean.sh $(IRIX_ROOT)/cc.exe
+  else
+    CC := scripts/toolchain/ido-cc-clean.sh $(IRIX_ROOT)/cc
+  endif
 endif
 
 CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64
