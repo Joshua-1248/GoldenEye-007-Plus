@@ -95,11 +95,19 @@ s32 texFindClosestColourIndexIA(u16 *palette, s32 numcolours, s32 intensity, s32
 s32 texShrinkPaletted(u8 *src, u8 *dst, s32 srcwidth, s32 srcheight, s32 format, u16 *palette, s32 numcolours);
 struct tex *texFindInPool(s32 texturenum, struct texpool *arg1);
 s32 texFreeBytesInBuffer(struct texpool *arg0);
+#ifdef GE_MODDED_CHEATS
+s32 texGetPoolAllocationFailures(void);
+#endif
 s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpool *arg4);
 s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpool *arg4);
 void texLoad(s32 *updateword, struct texpool *pool);
 void texInitPool(struct texpool *arg0, u8 *arg1, s32 arg2);
 void texResetStageOverflowPool(void);
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+/* R31: only the Simulant resource pool uses linked, downward allocations. */
+void texBindBotDynamicPool(struct texpool *pool);
+void texSetBotDynamicFloor(u8 *floor);
+#endif
 void texLoadFromTextureNum(s32 texturenum, struct texpool *arg1);
 void texLoadFromModelFileHeader(ModelFileHeader* arg0, struct texpool* arg1);
 

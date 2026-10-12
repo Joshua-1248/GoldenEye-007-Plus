@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+R = Path(__file__).resolve().parents[1]
+OH = (R/'src/game/options.h').read_text()
+ROH = (R/'options.h').read_text()
+F = (R/'src/game/file2.c').read_text()
+M = (R/'Makefile').read_text()
+checks=[]
+def ck(name, cond):
+    checks.append((name, bool(cond)))
+    print(f"[{'PASS' if cond else 'FAIL'}] {name}")
+ck('authored TP Crouched Cam Height default is 46 in both headers',
+   '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in OH and '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in ROH)
+ck('V44 SRAM generation marker exists', '#define GE_SRAM_EXT_RESERVED_CROUCH46    0x08' in F)
+ck('old authored absolute 36 migrates to current default',
+   'if (migrated.crouch_camera_height_adjust == 36)' in F and
+   'migrated.crouch_camera_height_adjust = TP_CROUCH_CAM_HEIGHT_DEFAULT;' in F)
+ck('custom absolute crouch heights are preserved by migration',
+   'if (migrated.crouch_camera_height_adjust == 36)' in F and
+   'migrated.crouch_camera_height_adjust = TP_CROUCH_CAM_HEIGHT_DEFAULT;' in F)
+ck('migration marker is journal-committed',
+   'migrated.reserved |= GE_SRAM_EXT_RESERVED_CROUCH46;' in F and
+   'fileSramExtUpdateFolder(folder, &migrated)' in F)
+ck('fresh and ordinary saves carry V44 marker', F.count('GE_SRAM_EXT_RESERVED_CROUCH46') >= 5)
+ck('V44 audit is mandatory build prerequisite',
+   'crouch-default-v44-audit:' in M and 'crouch-default-v44-audit' in M.split('prerequisites:',1)[1].split('\n',1)[0])
+failed=[n for n,v in checks if not v]
+if failed:
+    print(f"\nCROUCH DEFAULT V44 AUDIT: FAIL ({len(checks)-len(failed)}/{len(checks)})", file=sys.stderr)
+    for n in failed: print(f" - {n}", file=sys.stderr)
+    sys.exit(1)
+print(f"\nCROUCH DEFAULT V44 AUDIT: PASS ({len(checks)}/{len(checks)})")

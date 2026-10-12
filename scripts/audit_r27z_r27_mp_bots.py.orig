@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+BOT_H = (ROOT / 'src/game/mpbots.h').read_text()
+BOT_C = (ROOT / 'src/game/mpbots.c').read_text()
+FRONT = (ROOT / 'src/game/front.c').read_text()
+FRONT_H = (ROOT / 'src/game/front.h').read_text()
+CONST = (ROOT / 'src/bondconstants.h').read_text()
+CHRACT = (ROOT / 'src/game/chraction.c').read_text()
+CHRPROP = (ROOT / 'src/game/chrprop.c').read_text()
+CHR = (ROOT / 'src/game/chr.c').read_text()
+INITGUARDS = (ROOT / 'src/game/initguards.c').read_text()
+BONDVIEW = (ROOT / 'src/game/bondview2.c').read_text()
+MPMENU = (ROOT / 'src/game/mpmenu.c').read_text()
+MAKEFILE = (ROOT / 'Makefile').read_text()
+LDS = '\n'.join((ROOT / p).read_text() for p in (
+    'ld/game.text.ld.inc', 'ld/game.data.ld.inc',
+    'ld/game.rodata.ld.inc', 'ld/game.bss.ld.inc'))
+
+checks = []
+def ck(name, cond):
+    ok = bool(cond)
+    checks.append(ok)
+    print(('[PASS] ' if ok else '[FAIL] ') + name)
+
+# Foundation/plumbing remains intact.
+ck('bot pool is exactly eight independent slots', '#define MOD_MP_BOT_MAX 8' in BOT_H)
+ck('six Perfect Dark difficulty tiers remain', all(x in BOT_H for x in (
+   'MODBOT_DIFFICULTY_MEAT','MODBOT_DIFFICULTY_EASY','MODBOT_DIFFICULTY_NORMAL',
+   'MODBOT_DIFFICULTY_HARD','MODBOT_DIFFICULTY_PERFECT','MODBOT_DIFFICULTY_DARK')))
+ck('user-facing personality names remain mapped', all(x in BOT_C for x in (
+   '"MeleeBot"','"SpeedBot"','"VindictBot"','"PsychoBot"','"PacifistBot"',
+   '"IronBot"','"ArmorBot"','"TNTBot"','"QuarryBot"','"FearBot"',
+   '"UmpireBot"','"StalkerBot"')))
+ck('frontend bot configuration remains wired',
+   '(u8 *)"Bots"' in FRONT and '(u8 *)"Bot Settings"' in FRONT
+   and 'modMpBotsCycleCount();' in FRONT)
+ck('bot runtime resets and ticks from chrprop',
+   'modMpBotsResetRuntime();' in INITGUARDS and 'modMpBotsTick();' in CHRPROP)
+ck('bot module remains linked in all segments', LDS.count('src/game/mpbots.o') == 4)
+ck('existing explicit target/damage ownership plumbing remains',
+   'modMpBotsGetTargetProp(self)' in CHRACT and 'modMpBotsDamageViewer' in CHRACT
+   and 'modMpBotsGetDamageOwner()' in BONDVIEW)
+ck('human MP score still includes bot kills', 'modMpBotsGetHumanKills(playernum)' in MPMENU)
+
+# R30 proper PD core.
+ck('R30 runtime carries PD aibot movement/orientation state', all(x in BOT_C for x in (
+   'speedmultforwards','speedmultsideways','roty','lookangle','speedtheta',
+   'moveratex','moveratez','zeroangle','zerospeed','zeroinc','curzerotimer60')))
+ck('old invented V1 strafe/recovery controller is gone', all(x not in BOT_C for x in (
+   'strafetimer','strafedir','recoverytimer','moveforward','movesideways',
+   'g_ModMpBotMoveSpeed','g_ModMpBotTurnRate','modMpBotsThink','modMpBotsDrive')))
+ck('old custom difficulty decision/guard-skill tables are gone', all(x not in BOT_C for x in (
+   'g_ModMpBotAccuracy','g_ModMpBotReaction','g_ModMpBotDecisionTicks','g_ModMpBotMeleeTicks')))
+ck('PD NTSC lateral damping constants are exact',
+   '0.055000007152557f' in BOT_C and '0.945f * runtime->moveratex' in BOT_C
+   and '0.945f * runtime->moveratez' in BOT_C)
+ck('PD difficulty speed multipliers are exact', all(x in BOT_C for x in (
+   'speed *= 5.0f','speed *= 6.2f','speed *= 7.6f','speed *= 9.4f','speed *= 11.2f',
+   'speed *= 3.5f','speed *= 14.0f')))
+ck('PD look turn constants are exact',
+   '0.061590049415827f' in BOT_C and '16.236389160156f' in BOT_C)
+ck('PD zeroing damping constants are exact',
+   '0.97500002384186f' in BOT_C and '0.024999976158142f' in BOT_C)
+ck('PD six-tier shoot delay table is present', all(x in BOT_C for x in (
+   '{90, MODBOT_PD_DTOR(15.0f)', '{60, MODBOT_PD_DTOR(7.0f)',
+   '{30, MODBOT_PD_DTOR(4.0f)', '{15, MODBOT_PD_DTOR(1.5f)',
+   '{ 0, MODBOT_PD_DTOR(0.0f)')))
+ck('PD botcmd distance table is exact', all(x in BOT_C for x in (
+   '{0.0f,    120.0f,  10000.0f}', '{300.0f,  450.0f,   4500.0f}',
+   '{300.0f,  600.0f,   4500.0f}', '{600.0f, 1200.0f,   4500.0f}',
+   '{150.0f,  250.0f,   4500.0f}', '{1000.0f, 2000.0f,  3000.0f}',
+   '{0.0f,    250.0f,  10000.0f}', '{450.0f,  700.0f,   4500.0f}')))
+ck('PD target query is amortised one participant at a time',
+   'runtime->queryplayernum' in BOT_C and 'modMpBotsPdChooseGeneralTarget' in BOT_C
+   and 'runtime->chrnumsbydistanceasc' in BOT_C)
+ck('PeaceSim semantics are weapon-state based rather than retaliate-only',
+   'modMpBotsPdPassesPeaceCheck' in BOT_C and 'modMpBotsPdTargetIsArmed' in BOT_C)
+ck('PD distance hysteresis and corner override are present',
+   'minattackdistance += 25.0f' in BOT_C and 'maxattackdistance -= 25.0f' in BOT_C
+   and 'distoverridetimer60 = 20 +' in BOT_C)
+ck('GE GOPOS is now a PD route-intent compatibility shim',
+   'plot_course_for_actor(runtime->chr, &targetprop->pos, targetprop->stan, SPEED_RUN)' in BOT_C)
+ck('PD travel yaw and look yaw are separated across chr tick',
+   'modMpBotsPostChrTick();' in CHRPROP and 'runtime->roty = getsubroty' in BOT_C
+   and 'setsubroty(runtime->chr->model, runtime->lookangle);' in BOT_C)
+ck('PD-style lateral motor remains at GE pre-collision seam',
+   'modMpBotsApplyLateral(chr, src, dst);' in CHR
+   and 's32 modMpBotsApplyLateral(ChrRecord *chr, coord3d *src, coord3d *dst)' in BOT_C)
+ck('atan2f ABI is explicit', '#include "math_atan2f.h"' in BOT_C)
+ck('P1 does not fall back to GoldenEye guard combat brain',
+   'actor_fire_or_aim_at_target_update(runtime->chr' not in BOT_C
+   and 'actor_aim_at_actor(runtime->chr' not in BOT_C)
+ck('P2 retires the P1 Coward deferral',
+   "CowardSim's weapon-strength veto is intentionally deferred" not in BOT_C)
+ck('campaign Co-Op bot policy remains deliberately deferred', 'scenario != SCENARIO_COOP' in BOT_C)
+ck('mandatory bot audit remains in build',
+   'r27z-r27-mp-bots-audit' in MAKEFILE and 'python3 scripts/audit_r27z_r27_mp_bots.py' in MAKEFILE)
+
+ck('P2 carries PD botact clip/reload/fire state', all(x in BOT_C for x in (
+   'loadedammo[2]','timeuntilreload60[2]','nextbullettimer60[2]',
+   'punchtimer60[2]','ammoheld[AMMOTYPE_MAX]','changeguntimer60','burstsdone[2]')))
+ck('P2 ports PD weapon-config score/distance/reload values through explicit GE adapter',
+   'struct ModMpBotPdWeaponConfig' in BOT_C
+   and 'PD WEAPON_UNARMED' in BOT_C and 'PD Falcon 2' in BOT_C
+   and 'PD RCP-120 primary' in BOT_C and 'PD Rocket Launcher primary' in BOT_C)
+ck('P2 separates PD ammo-goal flags from GE adapter support',
+   'u8 supported;' in BOT_C and 'if (!cfg.supported)' in BOT_C
+   and 'PD Timed Mine primary: usable, but haspriammogoal is false.' in BOT_C
+   and 'PD Proximity Mine primary: usable, but haspriammogoal is false.' in BOT_C)
+ck('PD RocketSim weighting is exact on mapped GE explosive roles',
+   'score = extra + 300' in BOT_C and 'score = extra + 280' in BOT_C
+   and 'score = extra + 240' in BOT_C)
+ck('CowardSim uses PD weapon-score threshold',
+   'theirscore < myscore - 30' in BOT_C and 'modMpBotsPdPassesCowardCheck' in BOT_C)
+ck('distance config now follows current PD weapon config except Kaze override',
+   'modMpBotsPdGetWeaponConfig(g_ModMpBotRuntime[slot].weaponnum, &cfg);' in BOT_C
+   and 'return cfg.pridistconfig;' in BOT_C)
+ck('PD botinv tick precedes combat tick',
+   BOT_C.find('modMpBotsPdBotInvTick(slot);') < BOT_C.find('modMpBotsPdCombatTick(slot);'))
+ck('PD shoot delay and 45-degree fire gate are live',
+   'shootdelaytimer60 >= g_ModMpBotPdDifficulties[difficulty].shootdelay60' in BOT_C
+   and 'modMpBotsPdTargetInFov(slot, 45.0f)' in BOT_C)
+ck('PD melee gate/cooldowns are live',
+   'modMpBotsPdTargetInFov(slot, 40.0f)' in BOT_C
+   and 'modMpBotsPdDistance(runtime->chr, runtime->targetprop) > 360.0f' in BOT_C
+   and 'runtime->punchtimer60[GUNRIGHT] = 120' in BOT_C
+   and 'runtime->punchtimer60[GUNRIGHT] = 60' in BOT_C
+   and 'runtime->punchtimer60[GUNRIGHT] = 30' in BOT_C)
+ck('PD reload delay and partial-reload scaling are live',
+   'cfg.reloaddelay * 60' in BOT_C and 'cfg.allowpartialreloaddelay' in BOT_C)
+ck('PD aibot aimend vertical branch is present',
+   'dy -= g_playerPointers[playernum]->eyeheight * 0.4f' in BOT_C
+   and 'runtime->chr->aimendrshoulder = pitch;' in BOT_C)
+ck('GE ray uses held bot weapon and bypasses ACT_ATTACK union/cadence',
+   'R30 P2 R1: bot weapon is authoritative' in CHRACT
+   and 'R30 P2 R1: PD botact owns Simulant fire interval.' in CHRACT
+   and 'attack_item = weapon_prop->weapon->weaponnum;' in CHRACT
+   and 'sp21C = 1;' in CHRACT)
+ck('GoldenEye guard ACT_ATTACK brain is still absent from Simulant controller',
+   'actor_fire_or_aim_at_target_update(runtime->chr' not in BOT_C
+   and 'actor_aim_at_actor(runtime->chr' not in BOT_C)
+ck('P3 ports PD botact_throw trajectory/projectile path',
+   'modMpBotsPdCalculateTrajectory' in BOT_C and 'speed *= 0.59999999f' in BOT_C
+   and '9.81f' in BOT_C and 'modMpBotsPdSpawnProjectile' in BOT_C)
+ck('P3 uses GE-safe detach/free weapon ownership instead of PD delete flag',
+   'OBJHFLAG_DELETING' not in BOT_C and 'objDetach(held);' in BOT_C
+   and 'objFreePermanently(obj, TRUE);' in BOT_C
+   and 'Deliberately no physical switch in P2 R1.' not in BOT_C)
+
+ck('P3 matches PD bot inventory capacity and dual provenance',
+   '#define MODBOT_PD_INV_MAX 10' in BOT_C
+   and 'inventorycopies[MODBOT_PD_INV_MAX]' in BOT_C
+   and 'inventorypads[MODBOT_PD_INV_MAX]' in BOT_C
+   and 'runtime->inventorypads[i] != pad' in BOT_C)
+ck('P3 botinv selection now materializes the selected weapon',
+   'modMpBotsPdSwitchToWeapon(slot, bestweapon);' in BOT_C
+   and 'getPropForHeldItem(item)' in BOT_C
+   and 'chrGiveWeapon(runtime->chr, propid, item, flags)' in BOT_C)
+ck('P3 dual inventory creates and links a real GE left-hand weapon',
+   'PROPFLAG_WEAPON_LEFTHANDED' in BOT_C and 'propweaponSetDual' in BOT_C)
+ck('P3 returns loaded ammo before a PD weapon switch and retains 60-tick change delay',
+   'modMpBotsPdGiveAmmo(runtime, oldammotype, runtime->loadedammo[hand]);' in BOT_C
+   and 'runtime->changeguntimer60 = 60;' in BOT_C)
+ck('P3 projectile weapons bypass the GE ACT_ATTACK ray and spawn physical projectiles directly',
+   'projectileweapon = cfg.throwable || modMpBotsPdIsLauncherProjectile' in BOT_C
+   and 'gunInitProjectileObject' in BOT_C
+   and 'PROP_CHRROCKET' in BOT_C and 'PROP_CHRGRENADEROUND' in BOT_C)
+ck('P3 uses exact PD throwable intervals',
+   'if (item == ITEM_THROWKNIFE)\n        return 120;' in BOT_C
+   and 'if (item == ITEM_GRENADE)\n        return 90;' in BOT_C)
+ck('P3 ordinary gunfire services both held hands',
+   'for (hand = GUNRIGHT; hand <= GUNLEFT; hand++)' in BOT_C
+   and 'CHRHIDDEN_FIRE_WEAPON_LEFT' in BOT_C)
+ck('P3 pickup query uses PD normal radius/Y limits and explicit LOS',
+   'dx * dx + dz * dz > 10000.0f' in BOT_C
+   and 'dy < -200.0f || dy > 200.0f' in BOT_C
+   and 'CDTYPE_DOORS | CDTYPE_BG' in BOT_C)
+ck('P3 pickup query limits work to current/direct-neighbour rooms',
+   'modMpBotsPdRoomsNear' in BOT_C and 'bgRoomsSharePortal' in BOT_C)
+ck('P3 preserves one-human Multiplayer pickup quantities',
+   'One-human Multiplayer is still Multiplayer' in BOT_C
+   and 'g_SoloAmmoMultiplier' not in BOT_C)
+ck('P3 pickup mutation supports weapons, magazines, multi-ammo and armour',
+   all(x in BOT_C for x in ('PROPDEF_COLLECTABLE','PROPDEF_MAGAZINE','PROPDEF_AMMO','PROPDEF_ARMOUR'))
+   and 'propExecuteTickOperation(prop, TICKOP_FREE);' in BOT_C)
+ck('P3 executes bot_check_pickups at the faithful post-chr seam',
+   'void modMpBotsPostChrTick(void)' in BOT_C
+   and 'void modMpBotsPostChrTick(void);' in BOT_H
+   and CHRPROP.find('chrlvAllChrTick();') < CHRPROP.find('modMpBotsPostChrTick();')
+   and CHRPROP.find('modMpBotsPostChrTick();') < CHRPROP.find('prop = chrpropGetActiveTail();'))
+ck('P3 keeps remote-mine detonation explicit rather than inventing auto-detonation',
+   'PD remote-mine detonation decision/function state remains P4.' in BOT_C)
+ck('P3 still does not reintroduce GoldenEye guard ACT_ATTACK brain',
+   'actor_fire_or_aim_at_target_update(runtime->chr' not in BOT_C
+   and 'actor_aim_at_actor(runtime->chr' not in BOT_C)
+
+passed = sum(checks)
+print(f'\nR27Z R30 PD SIMULANT PICKUPS/SWITCH/THROW P3 AUDIT: {"PASS" if passed == len(checks) else "FAIL"} ({passed}/{len(checks)})')
+sys.exit(0 if passed == len(checks) else 1)

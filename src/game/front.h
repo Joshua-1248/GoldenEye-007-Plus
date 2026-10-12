@@ -87,6 +87,9 @@ struct MP_selectable_chars {
 
 /* GoldenEye 007 Plus: first appended custom character slot (65th entry). */
 #define MP_CHAR_JOSH_7774 64
+#define MP_CHAR_TEGGUY1989 65
+#define MP_CHAR_GF_SUBDRAG 66
+#define MP_CHAR_GF_TREVOR 67
 
 struct MP_handicap_menu {
     u16 text_preset;

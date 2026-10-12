@@ -14,13 +14,13 @@ def ck(name, cond):
     checks.append((name,bool(cond)))
     print(('[PASS] ' if cond else '[FAIL] ')+name)
 
-ck('Freeze Timer ID is appended after Level Never Ends',
-   re.search(r'CHEAT_LEVEL_NEVER_ENDS,\s*CHEAT_FREEZE_TIMER,\s*#endif', B) is not None)
+ck('Freeze Timer keeps its ID before appended Max Head-On Mode',
+   re.search(r'CHEAT_LEVEL_NEVER_ENDS,\s*CHEAT_FREEZE_TIMER,\s*CHEAT_MAX_HEAD_ON_MODE,\s*#endif', B) is not None)
 ck('Freeze Timer is a global SP/MP toggle cheat',
    'CHEAT_FREEZE_TIMER' in C and
    re.search(r'CHEAT_FREEZE_TIMER[^\n]*CHEAT_MASK_TOGGLE[^\n]*CHEAT_MASK_GLOBAL[^\n]*CHEAT_MASK_MPGAME[^\n]*CHEAT_MASK_SPGAME', C) is not None)
 ck('main Cheat Options classifies Freeze Timer as hidden/modded entry',
-   re.search(r'case CHEAT_FREEZE_TIMER:\s*case CHEAT_SUPER_TANK:', F) is not None)
+   re.search(r'case CHEAT_FREEZE_TIMER:\s*case CHEAT_MAX_HEAD_ON_MODE:\s*case CHEAT_SUPER_TANK:', F) is not None)
 ck('main Cheat Options labels it Freeze Timer',
    'case CHEAT_FREEZE_TIMER: return (u8 *)"Freeze Timer";' in F)
 ck('main Cheat Options page includes Freeze Timer exactly once',

@@ -30,6 +30,7 @@
 
 #ifdef GE_MODDED_CHEATS
 #include "game/mirroredlevels.h"
+#include "mpbots.h"
 #endif
 // bss
 //CODE.bss:8007A100
@@ -799,6 +800,11 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                             s32 savedplayer = get_cur_playernum();
                             s32 ownerplayer = (s32)temp_s2->player;
 
+                            if (modMpBotsFriendlyFireBlocksCoopAlly()
+                                && modMpBotsGetSlotForChr(temp_s0->chr) >= 0
+                                && (u32)ownerplayer < (u32)getPlayerCount())
+                                continue;
+
                             if ((u32)ownerplayer < (u32)getPlayerCount())
                             {
                                 set_cur_player(ownerplayer);
@@ -824,6 +830,10 @@ void explosionInflictDamage(PropRecord *arg0, f32 horiz_range, f32 vert_range)
                                 xdist *= 1.0f / temp_f2_3;
                                 zdist *= 1.0f / temp_f2_3;
                             }
+
+                            if (modMpBotsFriendlyFireBlocksHuman(
+                                    (s32)temp_s2->player, getPlayerPointerIndex(temp_s0)))
+                                continue;
 
                             sp90 = get_cur_playernum();
                             set_cur_player(getPlayerPointerIndex(temp_s0));

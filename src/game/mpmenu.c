@@ -93,6 +93,10 @@ static CHEAT_ID mpwatchCheatAtRow(s32 row)
         return CHEAT_LEVEL_NEVER_ENDS;
     if (row == CHEAT_LEVEL_NEVER_ENDS)
         return CHEAT_FREEZE_TIMER;
+    /* Keep the old rows and their saved IDs stable; use the newly freed
+     * final Watch row for the appended Max Head-On Mode cheat. */
+    if (row == CHEAT_FREEZE_TIMER)
+        return CHEAT_MAX_HEAD_ON_MODE;
     if (row < MPWATCH_TOGGLE_ROWS)
         return (CHEAT_ID)row;
     return CHEAT_INVALID;

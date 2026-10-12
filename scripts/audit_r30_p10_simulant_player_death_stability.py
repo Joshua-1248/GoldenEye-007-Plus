@@ -51,15 +51,33 @@ ck('bot corpse lifecycle remains natural GE ACT_DIE/ACT_DEAD/fade/free',
 ck('only Cheap trait receives a starting gun',
    'if (config->traits & MODBOT_TRAIT_CHEAP)' in B
    and B.find('if (config->traits & MODBOT_TRAIT_CHEAP)') < B.find('weaponindex = modMpBotsChooseWeaponIndex(slot);', B.find('if (config->traits & MODBOT_TRAIT_CHEAP)')))
-ck('bot cache reset does not add stale-header ownership machinery',
-   'modMpBotsInvalidateCachedModelHeaders' not in B and 'g_ModMpBotModelCacheCursor = _modMpBotModelCacheStart;' in B)
-ck('bot animated-model slots are primed during level-reset allocation without live chr spawn',
-   'Model *primedmodels[MOD_MP_BOT_MAX];' in B
-   and 'retrieve_header_for_body_and_head(body, head, 0);' in B
+# P26 now binds the bounded model/texture arena through a single helper.
+# Keep accepting the historical direct cursor reset, but require the complete
+# reset sequence in the new mode rather than checking for a removed assignment.
+reset_begin = B.find('void modMpBotsResetRuntime(void)')
+reset_end = B.find('void modMpBotsPrepareStage(void)', reset_begin)
+reset_body = B[reset_begin:reset_end] if reset_begin >= 0 and reset_end > reset_begin else ''
+legacy_reset = 'g_ModMpBotModelCacheCursor = _modMpBotModelCacheStart;' in reset_body
+p26_reset = all(fragment in reset_body for fragment in (
+    'g_ModMpBotBorrowedCoopArena = FALSE;',
+    'modMpBotsBindResourceArena(_modMpBotModelCacheStart,',
+    '_modMpBotDecodeScratchStart);',
+)) and all(fragment in B for fragment in (
+    'g_ModMpBotModelCacheCursor = start;',
+    'texInitPool(&g_ModMpBotTexturePool, start, (s32)(end - start));',
+    'texBindBotDynamicPool(&g_ModMpBotTexturePool);',
+    'texSetBotDynamicFloor(g_ModMpBotModelCacheCursor);',
+))
+ck('bot cache reset uses bounded stage ownership without stale-header invalidation',
+   'modMpBotsInvalidateCachedModelHeaders' not in B
+   and (legacy_reset or p26_reset))
+ck('live bot and corpse animated-model slots are primed without live chr spawn',
+   'Model *primedmodels[MOD_MP_BOT_MAX * 2];' in B
+   and B.count('model = retrieve_header_for_body_and_head(body, head, 0);') == 2
    and 'clear_aircraft_model_obj(primedmodels[i]);' in B
    and 'modMpBotsSpawn(i);' not in B[B.find('void modMpBotsPrepareStage'):B.find('s32 modMpBotsGetSlotForChr')])
-ck('level reset reserves one exact animated model slot per bot',
-   'numAnimatedObjects += modMpBotsGetCount();' in P)
+ck('level reset reserves live and corpse animated-model slots per bot',
+   'numAnimatedObjects += modMpBotsGetCount() * 2;' in P)
 ck('initial bot instantiation happens after frontend cheat state is restored',
    L.find('cheatApplyFrontendSelectionsForStage();') < L.find('modMpBotsPrepareStage();'))
 ck('failed body+head instantiation always restores temporary numRecords',

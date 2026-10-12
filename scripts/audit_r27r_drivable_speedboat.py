@@ -350,8 +350,31 @@ ck("R16 preserves stronger minimum turn authority once moving",
    "else if (speedScale < 0.25f)" in P and
    "speedScale = 0.25f;" in P)
 
-ck("R16 slows boat acceleration for heavier water feel",
-   re.search(r"#define\s+DAM_DRIVABLE_BOAT_ACCEL\s+0\.40f", P) is not None)
+ck("R23 forward acceleration and speed exceed reverse while neutral brakes remain strong",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_ACCEL\s+0\.80f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_REVERSE_ACCEL\s+0\.36f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_REVERSE_SPEED\s+12\.5f", P) is not None and
+   "target < 0.0f" in P and "DAM_DRIVABLE_BOAT_DECEL" in P)
+
+ck("R23 carries live non-driver passengers with the boat's translation and rotation",
+   "propLevelModifierDamDrivableBoatCarryPassengers(" in P and
+   "i == g_LevelModifierDamDrivableBoatDriver" in P and
+   "rider->bonddead != FALSE" in P and
+   "rider->field_488.collision_position.x += dx" in P and
+   "rider->bondprevpos.x += dx" in P and
+   "rider->prop->pos.x += dx" in P)
+
+ck("R23 restricts carry to passengers supported on the real deck",
+   "propLevelModifierDamDrivableBoatDeckFloorAtLocal(" in
+      P[P.index("static void propLevelModifierDamDrivableBoatCarryPassengers("):P.index("void propLevelModifierDamDrivableBoatTick(void)")] and
+   "rider->stanHeight - decky" in P and
+   "rider->field_70 - decky" in P)
+
+ck("R23 carries riders after hull collision resolves, not during the speculative move",
+   P.find("propLevelModifierDamDrivableBoatCarryPassengers(\n        &oldpos") >
+   P.find("propLevelModifierDamDrivableBoatHullBlocked(\n            &oldpos") and
+   P.find("propLevelModifierDamDrivableBoatCarryPassengers(\n        &oldpos") <
+   P.find("propLevelModifierDamDrivableBoatPlaceDriver();"))
 
 ck("R16 lowers only the embarked driver base below the walking deck",
    re.search(r"#define\s+DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET\s+-12\.0f", P) is not None and

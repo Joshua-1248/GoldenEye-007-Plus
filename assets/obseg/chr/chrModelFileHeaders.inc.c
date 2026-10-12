@@ -97,3 +97,11 @@ char* HeadSwitchNames[] = {
 #include <assets/obseg/chr/headbrosnansnow/modelFileHeader.inc.c>
 #include <assets/obseg/chr/headbrosnan/modelFileHeader.inc.c>
 #include <assets/obseg/chr/spicebond/modelFileHeader.inc.c>
+#ifdef GE_MODDED_CHEATS
+/* Separate native head model for Josh_7774; appended after the retail headers. */
+#include <assets/obseg/chr/headjosh/modelFileHeader.inc.c>
+/* Additive copy of Shaun UV/head model for Tegguy1989. */
+#include <assets/obseg/chr/headtegguy/modelFileHeader.inc.c>
+#include <assets/obseg/chr/headgfsubdrag/modelFileHeader.inc.c>
+#include <assets/obseg/chr/headgftrevor/modelFileHeader.inc.c>
+#endif

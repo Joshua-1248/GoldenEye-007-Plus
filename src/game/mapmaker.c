@@ -245,6 +245,22 @@ extern OSMesgQueue g_ContInputMessageQueue;
 #define MM_MUSIC_FIRST M_SHORT_SOLO_DEATH
 #define MM_MUSIC_LAST  M_END_SOMETHING
 
+/* Shared Map Maker UI labels. All consumers use the same original text;
+ * avoid storing duplicate read-only character sequences in startup CDATA. */
+static const char g_MapMakerLabelUntitled[] = "Untitled";
+static const char g_MapMakerLabelStorageBusy[] = "Storage busy - try again";
+static const char g_MapMakerLabelUnknown[] = "Unknown";
+static const char g_MapMakerLabelAmmoMagazine[] = "Ammo Magazine";
+static const char g_MapMakerLabelWeaponItem[] = "Weapon / Item";
+static const char g_MapMakerLabelPickup[] = "Pickup";
+static const char g_MapMakerLabelEntity[] = "Entity";
+static const char g_MapMakerLabelPlayerStart[] = "Player Start";
+static const char g_MapMakerLabelBodyArmour[] = "Body Armour";
+static const char g_MapMakerLabelAmmoCrate[] = "Ammo Crate";
+static const char g_MapMakerLabelTexture[] = "Texture";
+static const char g_MapMakerLabelCreate[] = "Create";
+static const char g_MapMakerLabelBuild[] = "Build";
+
 /* GoldenEye setup records use PROPDEF_TYPE IDs 00..2F.  The Setup Editor
  * exposes these IDs directly, so Map Maker does the same instead of hiding
  * them behind the old eight-entry prototype enum.  Pickup-class setup records
@@ -257,8 +273,8 @@ static const char *g_MapMakerSetupTypeNames[PROPDEF_TINTED_GLASS + 1] = {
     "Key",                        /* 04 */
     "Alarm",                      /* 05 */
     "CCTV Camera",                /* 06 */
-    "Ammo Magazine",              /* 07 */
-    "Weapon / Item",              /* 08 */
+    g_MapMakerLabelAmmoMagazine,              /* 07 */
+    g_MapMakerLabelWeaponItem,              /* 08 */
     "Guard / Character",          /* 09 */
     "Single Monitor",             /* 0A */
     "Multi Monitor",              /* 0B */
@@ -270,8 +286,8 @@ static const char *g_MapMakerSetupTypeNames[PROPDEF_TINTED_GLASS + 1] = {
     "Hat",                        /* 11 */
     "Guard Attribute",            /* 12 */
     "Switch / Link",              /* 13 */
-    "Ammo Crate",                 /* 14 */
-    "Body Armour",                /* 15 */
+    g_MapMakerLabelAmmoCrate,                 /* 14 */
+    g_MapMakerLabelBodyArmour,                /* 15 */
     "Tag",                        /* 16 */
     "Objective Start",            /* 17 */
     "Objective End",              /* 18 */
@@ -305,7 +321,7 @@ static const char *g_MapMakerAmmoTypeNames[AMMOTYPE_MAX] = {
     "Rockets", "Remote Mine", "Proximity Mine", "Timed Mine", "Knife",
     "Grenade Round", "Magnum", "Golden Gun", "Darts", "Explosive Pen",
     "Bomb Case", "Flare", "Piton", "Dynamite", "Bug", "Micro Camera",
-    "GoldenEye Key", "Plastique", "Watch Laser", "Watch Magnet", "Unknown",
+    "GoldenEye Key", "Plastique", "Watch Laser", "Watch Magnet", g_MapMakerLabelUnknown,
     "Camera", "Tank Shells", "Token"
 };
 
@@ -320,13 +336,13 @@ static s32 mapmakerSetupTypeIsPickup(s32 type)
 
 static const char *mapmakerSetupTypeName(s32 type)
 {
-    if (type < 0 || type > PROPDEF_TINTED_GLASS) return "Unknown";
+    if (type < 0 || type > PROPDEF_TINTED_GLASS) return g_MapMakerLabelUnknown;
     return g_MapMakerSetupTypeNames[type];
 }
 
 static const char *mapmakerSetupTypeClassName(s32 type)
 {
-    if (mapmakerSetupTypeIsPickup(type)) return "Pickup";
+    if (mapmakerSetupTypeIsPickup(type)) return g_MapMakerLabelPickup;
     if (type >= PROPDEF_OBJECTIVE_START && type <= PROPDEF_WATCH_MENU_OBJECTIVE_TEXT) return "Objective";
     if (type == PROPDEF_DOOR_SCALE || type == PROPDEF_LINK || type == PROPDEF_GUARD_ATTRIBUTE
             || type == PROPDEF_SWITCH || type == PROPDEF_TAG || type == PROPDEF_RENAME
@@ -334,7 +350,7 @@ static const char *mapmakerSetupTypeClassName(s32 type)
         return "Modifier";
     if (type == PROPDEF_NOTHING || type == PROPDEF_DEBRIS || type == PROPDEF_UNK16 || type == PROPDEF_UNK41)
         return "Invalid";
-    return "Entity";
+    return g_MapMakerLabelEntity;
 }
 
 static s32 mapmakerPickupSetupType(s32 pickup)
@@ -353,11 +369,11 @@ static const char *mapmakerPickupTypeName(s32 pickup)
 {
     switch (pickup)
     {
-    case MAPPICKUP_AMMO_MAGAZINE: return "Ammo Magazine";
-    case MAPPICKUP_AMMO_CRATE: return "Ammo Crate";
+    case MAPPICKUP_AMMO_MAGAZINE: return g_MapMakerLabelAmmoMagazine;
+    case MAPPICKUP_AMMO_CRATE: return g_MapMakerLabelAmmoCrate;
     case MAPPICKUP_KEY: return "Key";
-    case MAPPICKUP_ARMOUR: return "Body Armour";
-    default: return "Weapon / Item";
+    case MAPPICKUP_ARMOUR: return g_MapMakerLabelBodyArmour;
+    default: return g_MapMakerLabelWeaponItem;
     }
 }
 
@@ -619,10 +635,10 @@ const char *mapmakerAdvancedGetMeshTypeName(void)
 const char *mapmakerAdvancedGetToolName(void)
 {
     static const char *names[MAPADV_TOOL_COUNT] = {
-        "Create", "Move", "Rotate", "Scale", "Vertex", "Room", "Portal", "Depth",
-        "Build", "Texture", "Entity", "Pickup", "Player Start"
+        g_MapMakerLabelCreate, "Move", "Rotate", "Scale", "Vertex", "Room", "Portal", "Depth",
+        g_MapMakerLabelBuild, g_MapMakerLabelTexture, g_MapMakerLabelEntity, g_MapMakerLabelPickup, g_MapMakerLabelPlayerStart
     };
-    if (g_MapMakerAdvancedTool < 0 || g_MapMakerAdvancedTool >= MAPADV_TOOL_COUNT) return "Create";
+    if (g_MapMakerAdvancedTool < 0 || g_MapMakerAdvancedTool >= MAPADV_TOOL_COUNT) return g_MapMakerLabelCreate;
     return names[g_MapMakerAdvancedTool];
 }
 
@@ -650,7 +666,7 @@ s32 mapmakerAdvancedIsDraggingVertex(void) { return g_MapMakerAdvancedDraggingVe
 static void mapmakerMarkDirty(void)
 {
     g_MapMakerDirty = 1;
-    strcpy(g_MapMakerCurrentName, "Untitled");
+    strcpy(g_MapMakerCurrentName, g_MapMakerLabelUntitled);
 }
 
 static u32 mapmakerCrc32(const u8 *data, s32 len)
@@ -1097,7 +1113,7 @@ static s32 mapmakerBuildSaveBlob(u8 *buffer, s32 capacity)
     header.object_count = (u16)g_MapMakerEntityCount;
     header.payload_size = (u32)(cursor - payload);
     header.payload_crc = mapmakerCrc32(payload, header.payload_size);
-    strncpy(header.name, g_MapMakerCurrentName[0] ? g_MapMakerCurrentName : "Untitled", sizeof(header.name) - 1);
+    strncpy(header.name, g_MapMakerCurrentName[0] ? g_MapMakerCurrentName : g_MapMakerLabelUntitled, sizeof(header.name) - 1);
     memcpy(buffer, &header, sizeof(header));
     g_MapMakerLastSaveBytes = (s32)sizeof(header) + (s32)header.payload_size;
     if (!mapmakerValidateSaveBlob(buffer, g_MapMakerLastSaveBytes)) return 0;
@@ -1149,7 +1165,7 @@ static s32 mapmakerApplyLegacySaveBlob(const u8 *buffer)
     memcpy(g_MapMakerCurrentName, header.name, sizeof(header.name));
     g_MapMakerCurrentName[sizeof(g_MapMakerCurrentName) - 1] = '\0';
     if (!g_MapMakerCurrentName[0])
-        strcpy(g_MapMakerCurrentName, "Untitled");
+        strcpy(g_MapMakerCurrentName, g_MapMakerLabelUntitled);
     g_MapMakerDirty = 0;
     g_MapMakerInitialized = 1;
     g_MapMakerSelectedModule = -1;
@@ -1249,7 +1265,7 @@ static s32 mapmakerApplyV8SaveBlob(const u8 *buffer, s32 available)
     memset(g_MapMakerCurrentName, 0, sizeof(g_MapMakerCurrentName));
     memcpy(g_MapMakerCurrentName, header.name, sizeof(header.name));
     g_MapMakerCurrentName[sizeof(g_MapMakerCurrentName) - 1] = '\0';
-    if (!g_MapMakerCurrentName[0]) strcpy(g_MapMakerCurrentName, "Untitled");
+    if (!g_MapMakerCurrentName[0]) strcpy(g_MapMakerCurrentName, g_MapMakerLabelUntitled);
 
     g_MapMakerSelectedModule = -1;
     g_MapMakerSelectedSurface = -1;
@@ -1555,7 +1571,7 @@ static s32 mapmakerSaveMap(void)
 
     if (g_MapMakerStorageBusy)
     {
-        strcpy(g_MapMakerStorageStatus, "Storage busy - try again");
+        strcpy(g_MapMakerStorageStatus, g_MapMakerLabelStorageBusy);
         return 0;
     }
     g_MapMakerStorageBusy = 1;
@@ -1635,7 +1651,7 @@ static s32 mapmakerLoadMapInternal(s32 allowSessionFallback)
 
     if (g_MapMakerStorageBusy)
     {
-        strcpy(g_MapMakerStorageStatus, "Storage busy - try again");
+        strcpy(g_MapMakerStorageStatus, g_MapMakerLabelStorageBusy);
         return 0;
     }
 
@@ -2794,24 +2810,15 @@ static Gfx *mapmakerDrawAdvancedMesh(Gfx *gdl, const MapMakerAdvancedMesh *mesh)
     return gdl;
 }
 
-static Gfx *mapmakerDrawAdvancedVertexHandle(Gfx *gdl, s32 vertexindex, s32 selected,
-        f32 dirx, f32 diry, f32 dirz)
+/* Camera-relative handle basis is identical for every vertex in a render pass. */
+static void mapmakerHandleBasis(f32 dirx, f32 diry, f32 dirz, f32 basis[5])
 {
-    MapMakerAdvancedVertex *src = &g_MapMakerAdvancedVertices[vertexindex];
-    Vtx *vtx = dynAllocateVertices(9);
     f32 rx = dirz;
-    f32 ry = 0.0f;
     f32 rz = -dirx;
     f32 rlen = sqrtf(rx * rx + rz * rz);
     f32 ux;
     f32 uy;
     f32 uz;
-    s32 i;
-    u8 r = selected ? 255 : 190;
-    u8 g = selected ? 224 : 190;
-    u8 b = selected ? 80 : 210;
-    static const f32 circlex[8] = {1.0f, 0.7071f, 0.0f, -0.7071f, -1.0f, -0.7071f, 0.0f, 0.7071f};
-    static const f32 circley[8] = {0.0f, 0.7071f, 1.0f, 0.7071f, 0.0f, -0.7071f, -1.0f, -0.7071f};
 
     if (rlen < 0.01f) { rx = 1.0f; rz = 0.0f; rlen = 1.0f; }
     rx /= rlen; rz /= rlen;
@@ -2821,6 +2828,30 @@ static Gfx *mapmakerDrawAdvancedVertexHandle(Gfx *gdl, s32 vertexindex, s32 sele
     rlen = sqrtf(ux * ux + uy * uy + uz * uz);
     if (rlen < 0.01f) { ux = 0.0f; uy = 1.0f; uz = 0.0f; }
     else { ux /= rlen; uy /= rlen; uz /= rlen; }
+    basis[0] = rx;
+    basis[1] = rz;
+    basis[2] = ux;
+    basis[3] = uy;
+    basis[4] = uz;
+}
+
+static Gfx *mapmakerDrawAdvancedVertexHandle(Gfx *gdl, s32 vertexindex, s32 selected,
+        const f32 basis[5])
+{
+    MapMakerAdvancedVertex *src = &g_MapMakerAdvancedVertices[vertexindex];
+    Vtx *vtx = dynAllocateVertices(9);
+    f32 rx = basis[0];
+    f32 ry = 0.0f;
+    f32 rz = basis[1];
+    f32 ux = basis[2];
+    f32 uy = basis[3];
+    f32 uz = basis[4];
+    s32 i;
+    u8 r = selected ? 255 : 190;
+    u8 g = selected ? 224 : 190;
+    u8 b = selected ? 80 : 210;
+    static const f32 circlex[8] = {1.0f, 0.7071f, 0.0f, -0.7071f, -1.0f, -0.7071f, 0.0f, 0.7071f};
+    static const f32 circley[8] = {0.0f, 0.7071f, 1.0f, 0.7071f, 0.0f, -0.7071f, -1.0f, -0.7071f};
 
     mapmakerSetVtx(&vtx[0], src->x, src->y, src->z, r, g, b, 255);
     for (i = 0; i < 8; i++)
@@ -2887,11 +2918,13 @@ static Gfx *mapmakerDrawAdvancedHandles(Gfx *gdl, f32 dirx, f32 diry, f32 dirz)
     MapMakerAdvancedMesh *mesh;
     s32 l;
     s32 shown = 0;
+    f32 basis[5];
 
     if (g_MapMakerAdvancedSelectedMesh < 0 || g_MapMakerAdvancedSelectedMesh >= g_MapMakerAdvancedMeshCount)
         return gdl;
     mesh = &g_MapMakerAdvancedMeshes[g_MapMakerAdvancedSelectedMesh];
     if (mapmakerAdvancedMeshIsDeleted(mesh)) return gdl;
+    mapmakerHandleBasis(dirx, diry, dirz, basis);
 
     /* High-poly helper primitives deliberately do not draw a handle for every
      * duplicated face vertex.  Cap the editor overlay to twelve handles so a Torus cannot blow
@@ -2905,7 +2938,7 @@ static Gfx *mapmakerDrawAdvancedHandles(Gfx *gdl, f32 dirx, f32 diry, f32 dirz)
             s32 vi = loop->first_vertex + j;
             if (dynGetFreeVtx() < (s32)(sizeof(Vtx) * 9 + 2048) || dynGetFreeGfx(gdl) < 96) return gdl;
             gdl = mapmakerDrawAdvancedVertexHandle(gdl, vi,
-                    vi == g_MapMakerAdvancedSelectedVertex, dirx, diry, dirz);
+                    vi == g_MapMakerAdvancedSelectedVertex, basis);
             shown++;
         }
     }
@@ -4110,7 +4143,7 @@ void mapmakerBasicInit(void)
         g_MapMakerAdvancedPortalCount = 0;
         for (i = 0; i < MAPMAKER_MATERIAL_SLOTS; i++)
             g_MapMakerMaterialTexture[i] = (u16)i;
-        strcpy(g_MapMakerCurrentName, "Untitled");
+        strcpy(g_MapMakerCurrentName, g_MapMakerLabelUntitled);
         g_MapMakerDirty = 1;
         g_MapMakerMusicTrack = g_musicXTrack1CurrentTrackNum;
         if (g_MapMakerMusicTrack < MM_MUSIC_FIRST || g_MapMakerMusicTrack > MM_MUSIC_LAST)
@@ -5236,11 +5269,11 @@ const char *mapmakerBasicGetStorageStatus(void) { return g_MapMakerStorageStatus
 s32 mapmakerBasicGetTool(void) { return g_MapMakerTool; }
 const char *mapmakerBasicGetToolName(void)
 {
-    if (g_MapMakerTool == MAPTOOL_TEXTURE) return "Texture";
-    if (g_MapMakerTool == MAPTOOL_ENTITY) return "Entity";
-    if (g_MapMakerTool == MAPTOOL_PICKUP) return "Pickup";
-    if (g_MapMakerTool == MAPTOOL_PLAYER_START) return "Player Start";
-    return "Build";
+    if (g_MapMakerTool == MAPTOOL_TEXTURE) return g_MapMakerLabelTexture;
+    if (g_MapMakerTool == MAPTOOL_ENTITY) return g_MapMakerLabelEntity;
+    if (g_MapMakerTool == MAPTOOL_PICKUP) return g_MapMakerLabelPickup;
+    if (g_MapMakerTool == MAPTOOL_PLAYER_START) return g_MapMakerLabelPlayerStart;
+    return g_MapMakerLabelBuild;
 }
 const char *mapmakerBasicGetPlacementModeName(void) { return g_MapMakerPlacementEdge ? "Edge" : "Center"; }
 const char *mapmakerBasicGetTextureFlipName(void)
@@ -5335,7 +5368,7 @@ const char *mapmakerBasicGetControlStyleName(void)
 
 const char *mapmakerBasicGetMapName(void)
 {
-    return (g_MapMakerInitialized && g_MapMakerCurrentName[0]) ? g_MapMakerCurrentName : "Untitled";
+    return (g_MapMakerInitialized && g_MapMakerCurrentName[0]) ? g_MapMakerCurrentName : g_MapMakerLabelUntitled;
 }
 
 s32 mapmakerBasicHasResidentMap(void)

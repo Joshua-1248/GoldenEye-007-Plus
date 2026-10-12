@@ -880,6 +880,11 @@ typedef enum FILEINDEXID
     BG_COURTYARD_ALL_P,
     BG_COURTYARD_ALL_P_STAN,
     MP_SETUPCOURTYARD,
+    /* New head resource after every previously allocated file ID. */
+    HEADJOSH,
+    HEADTEGGUY,
+    HEADGFSUBDRAG,
+    HEADGFTREVOR,
 #endif
     OBENDSEG
 } FILEINDEXID;

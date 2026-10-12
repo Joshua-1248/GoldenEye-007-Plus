@@ -63,7 +63,16 @@ void mempCheckMemflagTokens(s32 poolAreaStart, s32 poolAreaSize)
     if (poolSizes.me == 0)
     {
         poolSizes.mf = 0;
+#ifdef GE_MODDED_CHEATS
+        /* Plus title-language names grow the permanent boot allocations.
+         * Reserve 1 KiB of headroom before musicSeqPlayerInit requests its
+         * fixed 0x2E000-byte heap. Keep retail/unmodded allocation unchanged.
+         * Compile-time KiB constants preserve the compact original code path.
+         */
+        poolSizes.me = ((j_text_trigger ? 309 : 297) * 1024);
+#else
         poolSizes.me = ((j_text_trigger ? 308 : 296) * 1024);
+#endif
         poolSizes.ml = poolAreaSize - poolSizes.me;
     }
 

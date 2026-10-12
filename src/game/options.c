@@ -11,6 +11,9 @@
 #include "dyn.h"
 #include "file.h"
 #include "front.h"
+#ifdef GE_MODDED_CHEATS
+#include "mpbots.h"
+#endif
 #include "language.h"
 #include "lv.h"
 #include "player.h"
@@ -1192,6 +1195,10 @@ static CHEAT_ID modWatchCheatAtRow(s32 row)
         return CHEAT_LEVEL_NEVER_ENDS;
     if (row == CHEAT_LEVEL_NEVER_ENDS)
         return CHEAT_FREEZE_TIMER;
+    /* Keep the old rows and their saved IDs stable; use the newly freed
+     * final Watch row for the appended Max Head-On Mode cheat. */
+    if (row == CHEAT_FREEZE_TIMER)
+        return CHEAT_MAX_HEAD_ON_MODE;
     if (row < MODWATCH_TOGGLE_ROWS)
         return (CHEAT_ID)row;
     return CHEAT_INVALID;
@@ -1568,7 +1575,7 @@ void watch_special_options_navigation(void)
     else if (mode == MODWATCH_MODE_ENHANCEMENTS)
         rows = MODWATCH_ENHANCEMENTS_ROWS;
     else
-        rows = MODWATCH_OPTION_ROWS;
+        rows = MODWATCH_OPTION_ROWS + (gamemode == GAMEMODE_MULTI ? 1 : 0);
 
     if ((pressed & (U_CBUTTONS | U_JPAD)) || sub_GAME_7F0A5088())
     {
@@ -1671,6 +1678,11 @@ void watch_special_options_navigation(void)
         {
             modWatchCommitDeferredSettings();
             MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 18 && gamemode == GAMEMODE_MULTI)
+        {
+            g_ModMpFriendlyFireEnabled ^= 1;
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else
@@ -4926,7 +4938,7 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
     }
     else
     {
-        rowcount = MODWATCH_OPTION_ROWS;
+        rowcount = MODWATCH_OPTION_ROWS + (gamemode == GAMEMODE_MULTI ? 1 : 0);
         title = "SPECIAL OPTIONS";
     }
 
@@ -5058,6 +5070,8 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         else if (row == 14) { label = frontModGetOptionLabel(71); value = ">"; }
         else if (row == 15) { label = frontModGetOptionLabel(74); value = ">"; }
         else if (row == 16) { label = frontModGetOptionLabel(76); value = ">"; }
+        else if (row == 18 && gamemode == GAMEMODE_MULTI)
+            { label = "Friendly Fire"; value = g_ModMpFriendlyFireEnabled ? "ON" : "OFF"; }
         else { label = frontModGetOptionLabel(65); value = ">"; }
 
         drawy = y;

@@ -1230,6 +1230,7 @@ typedef enum CHEAT_IDS
     CHEAT_ULTRA_KINETICS,
     CHEAT_LEVEL_NEVER_ENDS,
     CHEAT_FREEZE_TIMER,
+    CHEAT_MAX_HEAD_ON_MODE,
 #endif
 
     CHEAT_INVALID,
@@ -3154,6 +3155,13 @@ enum CCRMLUT
         #endif
         HEAD_Natalya_Jungle_Fatigues,
         HEAD_END,
+#ifdef GE_MODDED_CHEATS
+        /* Append at the old terminator: every retail and existing mod ID stays put. */
+        HEAD_Male_Josh = HEAD_END,
+        HEAD_Male_Tegguy1989 = HEAD_Male_Josh + 1,
+        HEAD_Male_GFSubDrag = HEAD_Male_Tegguy1989 + 1,
+        HEAD_Male_GFTrevor = HEAD_Male_GFSubDrag + 1,
+#endif
         /*The following are some maybe helpfull counts (maybe GE doesnt need them, but thought Id ad while here)*/
         HEAD_COUNT        = HEAD_END - HEAD_START,         // Total number of heads
         HEAD_MALE_COUNT   = HEAD_F_START - HEAD_START,     // Total number of usable randon male heads

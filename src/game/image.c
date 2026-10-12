@@ -19,6 +19,66 @@ static struct texpool g_StageTexOverflowPool;
 static s32 g_StageTexOverflowReady;
 #endif
 
+#ifdef GE_MODDED_CHEATS
+/* Report exhausted pools to the Plus stage-loader without changing the
+ * retail fallback behavior for any other texture-loading caller. */
+static s32 g_TexPoolAllocationFailures;
+
+s32 texGetPoolAllocationFailures(void)
+{
+    return g_TexPoolAllocationFailures;
+}
+#endif
+
+
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+/* R31: the bot arena uses Rare's stage-lifetime two-ended allocation strategy.
+ * Scratch is NOT on the N64 thread stack and does not overlap permanent
+ * textures or a model's in-place decompression workspace. */
+extern u8 _modMpBotDecodeScratchStart[];
+extern s32 g_TexFormatBitsPerPixel[];
+static struct texpool *g_BotDynamicPool;
+static u8 *g_BotDynamicFloor;
+static s32 g_BotScratchActive;
+static s32 g_BotScratchOverflow;
+#define BOT_DECODE_CAPACITY 0x3000
+
+void texBindBotDynamicPool(struct texpool *pool)
+{
+    g_BotDynamicPool = pool;
+    g_BotDynamicFloor = pool->start;
+}
+
+void texSetBotDynamicFloor(u8 *floor)
+{
+    g_BotDynamicFloor = floor;
+    if (g_BotDynamicPool != NULL)
+        g_BotDynamicPool->leftpos = floor;
+}
+
+/* Conservatively bound the output BEFORE an inflation helper writes it.
+ * GE may generate additional mip levels after decoding the first level. */
+static s32 texBotScratchHasRoom(s32 used, s32 width, s32 height,
+    s32 format, s32 generatedlods)
+{
+    u32 estimate;
+    if (format < 0 || format >= 13 || width <= 0 || height <= 0)
+        return FALSE;
+    /* RGB24 is materialized as 32-bit pixels by GE's alignment helpers. */
+    estimate = (((u32)width + 15) & ~15U) * (u32)height
+        * (format == TEXFORMAT_RGB24 ? 4
+           : ((g_TexFormatBitsPerPixel[format] + 7) >> 3));
+    if (generatedlods)
+        estimate *= 2;
+    if (used < 0 || estimate + (u32)used + 0x300 >= BOT_DECODE_CAPACITY)
+    {
+        g_BotScratchOverflow = TRUE;
+        return FALSE;
+    }
+    return TRUE;
+}
+#endif
+
 // bss
 //8008C720
 struct texpool *ptr_texture_alloc_start;
@@ -264,6 +324,11 @@ s32 texInflateZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct texpoo
         {
             return j * 0;
         }
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+        if (g_BotScratchActive && !texBotScratchHasRoom(totalbytesout,
+            width, height, format, !arg2 && forcenumimages > 1))
+            return 0;
+#endif
 
         decompressdata(img_curpos, &scratch2, (struct huft *)&scratch);
         imagebytesout = texAlignIndices(scratch2, width, height, format, &dst[totalbytesout]);
@@ -940,6 +1005,11 @@ s32 texInflateNonZlib(u8 *src, u8 *dst, s32 arg2, s32 forcenumimages, struct tex
         {
             return 0;
         }
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+        if (g_BotScratchActive && !texBotScratchHasRoom(totalbytesout,
+            width, height, format, !arg2 && forcenumimages > 1))
+            return 0;
+#endif
 
         switch (compmethod)
         {
@@ -2351,6 +2421,21 @@ struct tex *texFindInPool(s32 texturenum, struct texpool *arg1)
         arg1 = &ptr_texture_alloc_start;
     }
 
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+    if (arg1 == g_BotDynamicPool)
+    {
+        cur = arg1->rightpos;
+        while (cur != arg1->end)
+        {
+            if (cur->texturenum == texturenum)
+                return cur;
+            if (cur->next == 0)
+                break;
+            cur = (struct tex *)((u32)cur->next | 0x80000000U);
+        }
+        return NULL;
+    }
+#endif
     end = arg1->end;
     cur = arg1->rightpos;
 
@@ -2495,6 +2580,66 @@ void texLoad(s32 *updateword, struct texpool *pool)
             lod = *compptr & 0x3f;
             compptr++;
 
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+            if (pool == g_BotDynamicPool)
+            {
+                struct tex temporary;
+                struct texpool staging;
+                struct tex *newtex;
+                u32 oldhigh;
+                u32 newhigh;
+                u32 allocbytes;
+                u32 copybytes;
+                u8 *pixels;
+
+                /* The tail descriptor and decoded payload are committed as a
+                 * single downward allocation.  Never leave the model and
+                 * texture fronts with hidden fixed partitions. */
+                bzero(&temporary, sizeof(temporary));
+                temporary.texturenum = g_TexNumToLoad;
+                staging.rightpos = &temporary;
+                staging.leftpos = _modMpBotDecodeScratchStart + 8;
+                g_BotScratchActive = TRUE;
+                g_BotScratchOverflow = FALSE;
+                if (iszlib)
+                    bytesout = texInflateZlib(compptr, staging.leftpos, sp14a8, lod, &staging);
+                else
+                    bytesout = texInflateNonZlib(compptr, staging.leftpos, sp14a8, lod, &staging);
+                g_BotScratchActive = FALSE;
+
+                if (g_BotScratchOverflow || bytesout <= 0
+                    || bytesout > BOT_DECODE_CAPACITY - 8)
+                {
+                    g_TexPoolAllocationFailures++;
+                    *updateword = osVirtualToPhysical(pool->start);
+                    return;
+                }
+
+                copybytes = ((u32)bytesout + 7U) & ~7U;
+                allocbytes = (copybytes + 8U + sizeof(struct tex) + 15U) & ~15U;
+                oldhigh = (u32)pool->rightpos;
+                newhigh = oldhigh - allocbytes;
+                if (newhigh > oldhigh || newhigh < (u32)g_BotDynamicFloor)
+                {
+                    g_TexPoolAllocationFailures++;
+                    *updateword = osVirtualToPhysical(pool->start);
+                    return;
+                }
+
+                newtex = (struct tex *)newhigh;
+                pixels = (u8 *)(newtex + 1) + 8;
+                *(s16 *)((u8 *)(newtex + 1)) = g_TexNumToLoad;
+                bcopy(staging.leftpos, pixels, bytesout);
+                *newtex = temporary;
+                newtex->data = pixels;
+                newtex->next = pool->rightpos == pool->end ? 0
+                    : ((u32)pool->rightpos & 0xffffffU);
+                pool->rightpos = newtex;
+                *updateword = osVirtualToPhysical(pixels);
+                return;
+            }
+#endif
+
             // Retail points the material at pool->start when the stage texture
             // pool is exhausted. That avoids a crash but deliberately renders
             // garbage texels. Physical/Expansion-Pak builds can keep the retail
@@ -2513,6 +2658,9 @@ void texLoad(s32 *updateword, struct texpool *pool)
             }
 #endif
             if ((!iszlib && (texFreeBytesInBuffer(pool) < 0x10CC)) || (iszlib && texFreeBytesInBuffer(pool) < 0xA28)) {
+#ifdef GE_MODDED_CHEATS
+                g_TexPoolAllocationFailures++;
+#endif
                 *updateword = osVirtualToPhysical(pool->start);
                 return;
             }

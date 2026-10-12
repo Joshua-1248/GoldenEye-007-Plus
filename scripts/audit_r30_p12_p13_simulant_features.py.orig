@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+root=Path(__file__).resolve().parents[1]
+
+def read(p): return (root/p).read_text(errors='replace')
+BOT=read('src/game/mpbots.c')
+BOTH=read('src/game/mpbots.h')
+FRONT=read('src/game/front.c')
+MP=read('src/game/mpmenu.c')
+AI=read('src/game/chrai.c')
+CHR=read('src/game/chr.c')
+CHRPROP=read('src/game/chrprop.c')
+TITLE=read('assets/obseg/text/LtitleE.c')
+
+checks=[]
+def ck(name, cond):
+    checks.append((name,bool(cond)))
+
+ck('Simulants cannot enter guard AI interpreter',
+   'modMpBotsGetSlotForChr(ChrEntityp) >= 0' in AI and 'return;' in AI[AI.find('modMpBotsGetSlotForChr(ChrEntityp) >= 0'):AI.find('modMpBotsGetSlotForChr(ChrEntityp) >= 0')+100])
+ck('bot shared/full tick gates split-screen animation/action',
+   'botMode' in CHR and 'if (botMode && !coopFullTick)' in CHR and 'if (coopFullTick)\n                    chrlvActionTick(chr);' in CHR)
+ck('spawn height snaps to STAN floor',
+   'spawnpos.y = stanGetPositionYValue(pad->stan, spawnpos.x, spawnpos.z);' in BOT)
+ck('corpse free notification drives delayed respawn',
+   'modMpBotsNotifyPropFreed(prop);' in CHRPROP and 'runtime->respawntimer = runtime->deathrecorded ? -1 : 0;' in BOT and 'runtime->respawntimer < 0' in BOT)
+ck('one-human score page reads only P1 in dedicated branch',
+   'if (player_count == 1)' in MP and 'scores[0], current_colour' in MP)
+ck('true one-player Co-Op scenario is allowed',
+   'return playercount >= 1 && playercount <= 4;' in FRONT)
+ck('generic six difficulty names are exact',
+   '"Very Easy", "Easy", "Normal", "Hard", "Very Hard", "Extreme"' in BOT)
+ck('Extreme aim row is zero-error while Very Hard keeps PerfectSim settle',
+   '{ 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(2.0f),   45' in BOT and '{ 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(0.0f),    0' in BOT)
+ck('default bot names are Bot 1 through Bot 8',
+   all(f'"Bot {i}"' in BOT for i in range(1,9)))
+ck('all 13 independent trait bits exist',
+   'MODBOT_TRAIT_COUNT          = 13' in BOTH and 'MODBOT_TRAIT_CHEAP          = 1 << 12' in BOTH)
+ck('Cheap alone supplies automatic starting weapon',
+   'if (config->traits & MODBOT_TRAIT_CHEAP)\n        weaponindex = modMpBotsChooseWeaponIndex(slot);' in BOT)
+ck('Speedy and Cheap stack with no cap',
+   'if (config->traits & MODBOT_TRAIT_SPEEDY) speed *= 2.0f;' in BOT and 'if (config->traits & MODBOT_TRAIT_CHEAP) speed *= 2.0f;' in BOT and '3.5 * 2 * 2 = 14x' in BOT)
+ck('Juggernaut uses PD TurtleSim fixed 3.5 multiplier',
+   'if (config->traits & MODBOT_TRAIT_JUGGERNAUT)' in BOT and 'speed *= 3.5f;' in BOT)
+ck('Armor Specialist actively selects armour pickup targets',
+   'modMpBotsPdFindArmorTarget' in BOT and 'moveprop = modMpBotsPdFindArmorTarget(slot);' in BOT)
+ck('targeting traits combine rather than exclusive else-if',
+   'Each targeting trait casts one vote' in BOT and '++votes[participant]' in BOT)
+ck('trait submenu has bottom descriptions and exact Cheap text',
+   'TITLE_STR_BOTTRAIT_PACIFIST_DESC+g_ModMpBotTraitChoice' in FRONT and 'Cheats without any consequences to it. Uses unfair tactics such as starting armed and moving at twice the normal speed.' in TITLE)
+ck('Rename Bot supports Z mode cycle, B delete, L/R caret and D-pad-only grid',
+   'g_ModMpBotRenameMode=(g_ModMpBotRenameMode+1)%3' in FRONT and 'if(pressed&B_BUTTON) modMpBotRenameDelete();' in FRONT and 'if(pressed&L_TRIG)' in FRONT and 'if(pressed&R_TRIG)' in FRONT and 'U_JPAD|D_JPAD|L_JPAD|R_JPAD' in FRONT)
+ck('rename keyboard begins lowercase and has 26 reachable symbol/number keys',
+   'return "abcdefghijklmnopqrstuvwxyz";' in FRONT and 'return "0123456789.,!?-+=/\\\\:;()@&#";' in FRONT)
+ck('bot character selector uses separate crosshair arrows without D-pad cycling',
+   'Character arrows are separate crosshair targets; no D-pad cycling.' in FRONT and 'modMpBotCycleCharacter(g_ModMpBotEditSlot,-1)' in FRONT and 'modMpBotCycleCharacter(g_ModMpBotEditSlot,1)' in FRONT)
+ck('P1 analog-right paths use direct positive stick threshold',
+   'joyGetStickX(0) > 30' in FRONT and 'joyGetStickX(i) > 30' in FRONT)
+ck('bot local audio includes hit, reload, swap/pickup and armour',
+   'BOND_GET_HIT1_SFX' in BOT and 'GUN_RIFLECOCK_SFX' in BOT and 'modMpBotsPlayLocalSfx' in BOT and 'ARMOUR_COLLECT_SFX' in BOT)
+
+failed=[n for n,ok in checks if not ok]
+for n,ok in checks:
+    print(f"[{'PASS' if ok else 'FAIL'}] {n}")
+print(f"\nR30 P12/P13 SIMULANT FEATURE AUDIT: {'PASS' if not failed else 'FAIL'} ({len(checks)-len(failed)}/{len(checks)})")
+if failed: sys.exit(1)

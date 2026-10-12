@@ -932,6 +932,9 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
     AircraftRecord *AircraftEntityp = NULL;
     AIRecord       *AiListp         = NULL;
     s32             Offset;
+#ifdef GE_MODDED_CHEATS
+    s32             coopUsedGadgetItem = -1;
+#endif
 
     if (EntityType == PROP_TYPE_CHR)
     {
@@ -2188,7 +2191,13 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AiIFBondCollectedObjectRecord *ai  = AiListp + Offset;
                     ObjectRecord                  *obj = objFindByTagId(ai->OBJECT_TAG);
-                    if (obj && obj->prop && bondinvHasPropInInv(obj->prop))
+                    if (obj && obj->prop
+                        && (bondinvHasPropInInv(obj->prop)
+#ifdef GE_MODDED_CHEATS
+                            || (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1
+                                && bondinvCoopAnyPlayerHasPropInInv(obj->prop))
+#endif
+                        ))
                     {
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }
@@ -2246,14 +2255,41 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 case AI_IFBondHasItemEquipped:
                 {
                     AiIFBondHasItemEquippedRecord *ai = AiListp + Offset;
-                    if (ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT) || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT)) // order matters
+                    bool equipped = ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNRIGHT)
+                        || ai->ITEM_NUM == getCurrentPlayerWeaponId(GUNLEFT);
+#ifdef GE_MODDED_CHEATS
+                    if (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1)
                     {
+                        s32 player;
+                        if (coopUsedGadgetItem >= 0)
+                        {
+                            /* This AI command follows a successful gadget-use
+                             * check in Facility/Frigate. Validate the gadget
+                             * that hit THIS object, not somebody else's gun. */
+                            equipped = coopUsedGadgetItem == ai->ITEM_NUM;
+                        }
+                        else
+                        {
+                            equipped = FALSE;
+                            for (player = 0; player < getPlayerCount(); player++)
+                            {
+                                struct player *p = g_playerPointers[player];
+                                if (p != NULL && !p->bonddead
+                                    && (p->hands[GUNRIGHT].weaponnum == ai->ITEM_NUM
+                                        || p->hands[GUNLEFT].weaponnum == ai->ITEM_NUM))
+                                {
+                                    equipped = TRUE;
+                                    break;
+                                }
+                            }
+                        }
+                        coopUsedGadgetItem = -1;
+                    }
+#endif
+                    if (equipped)
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
-                    }
                     else
-                    {
                         Offset += sizeof(AiIFBondHasItemEquippedRecord);
-                    }
                     break;
                 }
                 case AI_IFObjectExists:
@@ -2305,6 +2341,10 @@ void                   ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     ObjectRecord                     *obj = objFindByTagId(ai->OBJECT_TAG);
                     if (obj && obj->prop && (obj->state & PROPSTATE_ACTIVATED))
                     {
+#ifdef GE_MODDED_CHEATS
+                        if (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1)
+                            coopUsedGadgetItem = bondinvCoopTakeGadgetActivation(obj);
+#endif
                         obj->state &= ~PROPSTATE_ACTIVATED;
                         Offset = chraiGoToLabel(AiListp, Offset, ai->GOTOLABEL);
                     }

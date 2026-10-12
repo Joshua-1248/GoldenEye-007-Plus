@@ -10,14 +10,15 @@ checks=[]
 def ck(n,c):
     checks.append(bool(c)); print(('[PASS] ' if c else '[FAIL] ')+n)
 ck('invented stuck strafe remains absent', 'navrecoveryside' not in B and 'navrecovery60' not in B)
-ck('fixed 45 tick repath remains absent under STAN navigation', 'MODBOT_PD_NAV_REPATH_TICKS' not in B and 'runtime->navgoalstan != targetprop->stan' in B and 'waypointFindRoute(' not in B)
+ck('fixed 45 tick repath remains absent under STAN navigation', 'MODBOT_PD_NAV_REPATH_TICKS' not in B and ('runtime->navgoalstan != targetprop->stan' in B or 'runtime->navgoalstan != goaltile' in B) and 'waypointFindRoute(' not in B)
 ck('PD ten-age door probe is present', '(runtime->navage % 10) != 0' in B and 'sub_GAME_7F0B1410' in B and 'doorsChooseSwingDirection' in B)
 ck('bot death uses natural GE corpse lifecycle', 'MODBOT_RESPAWN_TICKS' not in B and 'modMpBotsQueueActorRemoval' not in B and 'chr->hidden |= CHRHIDDEN_REMOVE' not in B)
-ck('bot model textures use reserved private upper pool',
+ck('bot resources use bounded two-ended PD-style dynamic arena',
    '&g_ModMpBotTexturePool' in B
-   and '_modMpBotTextureCacheStart' in LD
-   and '_modMpBotTextureCacheEnd - 0x10000' in LD
-   and '== 0x10000' in LD)
+   and 'texBindBotDynamicPool(&g_ModMpBotTexturePool)' in B
+   and 'g_ModMpBotTexturePool.rightpos' in B
+   and '_modMpBotDecodeScratchStart = _modMpBotTextureCacheEnd - 0x3000;' in LD
+   and '_modMpBotModelCacheEnd = _modMpBotDecodeScratchStart;' in LD)
 ck('bots expose only live props to radar', 'modMpBotsGetBotProp' in B and 'chrIsDead(chr)' in B)
 ck('bot action/model animation fulltick is split-screen safe even in fastpaths',
    'botMode' in C

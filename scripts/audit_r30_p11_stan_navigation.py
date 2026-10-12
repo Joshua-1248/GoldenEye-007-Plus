@@ -40,12 +40,12 @@ ck('steering aims through portal centres and pulls inward to next tile centre',
    and 'goal.z = portal.z * 0.60f + center.z * 0.40f;' in B)
 ck('long-distance visible targets do not bypass the corridor',
    'MODBOT_STAN_DIRECT_RANGE_SQ' in B
-   and 'currenttile == targetprop->stan' in B
+   and ('currenttile == targetprop->stan' in B or 'currenttile == goaltile' in B)
    and '<= MODBOT_STAN_DIRECT_RANGE_SQ' in B)
 ck('corridor rebuild is event-driven instead of a periodic frame spike',
    'MODBOT_PD_NAV_REPATH_TICKS' not in B
    and 'g_GlobalTimer % participants' not in B
-   and 'runtime->navgoalstan != targetprop->stan' in B)
+   and ('runtime->navgoalstan != targetprop->stan' in B or 'runtime->navgoalstan != goaltile' in B))
 ck('truncated fixed route chunks rebuild from the live STAN',
    'if (currenttile != runtime->navgoalstan)' in B
    and B.count('modMpBotsPdNavBuildRoute(slot, targetprop)') >= 3)

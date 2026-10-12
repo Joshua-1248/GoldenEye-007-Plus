@@ -27,19 +27,78 @@ if [ -z "${DATASEG_LEN_HEX}" ]; then
 fi
 DATASEG_LEN=$((16#${DATASEG_LEN_HEX}))
 
+# APPBIN must still contain the temporary uncompressed csegment that objcopy
+# placed after the final ROM boundary. A finalized ROM does not contain it.
+# Fail *before* any extraction or compression if we were given such a file.
+BIN_SIZE=$(stat -c%s "$1") || exit 1
+DATASEG_END=$((DATASEG_START + DATASEG_LEN))
+if [ "${DATASEG_LEN}" -le 0 ] || [ "${BIN_SIZE}" -lt "${DATASEG_END}" ]; then
+    echo "ERROR: expected raw, linked ROM with ${DATASEG_LEN} csegment bytes from offset ${DATASEG_START}; file has only ${BIN_SIZE} bytes" >&2
+    echo "ERROR: cannot recompress an already-finalized ROM; rebuild APPBIN from ELF" >&2
+    exit 1
+fi
+
 #build/rebuild aaa_rip
 [ ! -x tools/aaa_rip/aaa_rip ] && make -C tools/aaa_rip
 
 echo "patching $1"
 echo "extract data segment"
-[ -x tools/aaa_rip/aaa_rip ] && tools/aaa_rip/aaa_rip $1 build/$2/data_seg ${DATASEG_START} ${DATASEG_LEN} || dd skip=${DATASEG_START} count=${DATASEG_LEN} if=$1 of=build/$2/data_seg bs=1
+rm -f "build/$2/data_seg"
+if [ -x tools/aaa_rip/aaa_rip ]; then
+    if ! tools/aaa_rip/aaa_rip "$1" "build/$2/data_seg" "${DATASEG_START}" "${DATASEG_LEN}"; then
+        echo "ERROR: failed to extract uncompressed CDATA" >&2
+        exit 1
+    fi
+else
+    if ! dd skip="${DATASEG_START}" count="${DATASEG_LEN}" if="$1" of="build/$2/data_seg" bs=1; then
+        echo "ERROR: failed to extract uncompressed CDATA" >&2
+        exit 1
+    fi
+fi
+EXTRACTED_SIZE=$(stat -c%s "build/$2/data_seg") || exit 1
+if [ "${EXTRACTED_SIZE}" -ne "${DATASEG_LEN}" ]; then
+    echo "ERROR: extracted ${EXTRACTED_SIZE} CDATA bytes; linker requires ${DATASEG_LEN}" >&2
+    exit 1
+fi
 
 echo "truncate $1 to 0x$(printf "%x\n" ${DATASEG_START})"
 cat $1 | head --bytes=${DATASEG_START} > $1.tmp
 
 echo "compress data segment"
-tools/1172compress.sh build/$2/data_seg build/$2/data_seg.rz --cdata-zopfli
-
+# An old data_seg.rz must NEVER be injected after a compressor error:
+# that mixes the last build's CDATA with the newly linked ROM.
+rm -f "build/$2/data_seg.rz"
+if ! tools/1172compress.sh "build/$2/data_seg" "build/$2/data_seg.rz" --cdata-zopfli; then
+    echo "ERROR: final CDATA compression failed; refusing to generate a ROM" >&2
+    rm -f "$1.tmp"
+    exit 1
+fi
+if [ ! -s "build/$2/data_seg.rz" ]; then
+    echo "ERROR: final CDATA compressor produced no output" >&2
+    rm -f "$1.tmp"
+    exit 1
+fi
+# Verify the exact current uncompressed segment, not just the output size.
+if ! python3 - "build/$2/data_seg" "build/$2/data_seg.rz" <<'CDATACHECK'
+import pathlib, sys, zlib
+original = pathlib.Path(sys.argv[1]).read_bytes()
+compressed = pathlib.Path(sys.argv[2]).read_bytes()
+if compressed[:2] != b"\x11\x72":
+    sys.exit("ERROR: unexpected CDATA format")
+decoder = zlib.decompressobj(-15)
+try:
+    decoded = decoder.decompress(compressed[2:]) + decoder.flush()
+except zlib.error as error:
+    sys.exit("ERROR: CDATA decompression failed: %s" % error)
+if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail or decoded != original:
+    sys.exit("ERROR: compressed CDATA does not match the current linked data segment")
+print("CDATA verified against current linked data segment (%d bytes)" % len(original))
+CDATACHECK
+then
+    echo "ERROR: final CDATA verification failed; refusing to generate a ROM" >&2
+    rm -f "$1.tmp"
+    exit 1
+fi
 
 echo "inject data segment"
 RZSIZE=$(stat -c%s "build/$2/data_seg.rz")

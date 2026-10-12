@@ -1,0 +1,21 @@
+--- scripts/audit_tp_tank_super_tank_v42.py
++++ scripts/audit_tp_tank_super_tank_v42.py
+@@ -27,15 +27,15 @@
+ ck('Third Person presentation is no longer disabled merely by tank occupancy',
+    'g_PlayerIsInTank != 0)\n    {\n        return FALSE;' not in bond[bond.find('s32 bondviewThirdPersonPresentationActive'):bond.find('s32 bondviewThirdPersonReticleOcclusionPassActive')])
+ ck('tank Third Person has dedicated farther vehicle camera',
+-   'tankcamera = (g_PlayerIsInTank != 0 && g_PlayerTankProp != NULL);' in bond and 'boom = 360.0f;' in bond and 'anchor.f[1] = g_CurrentPlayer->field_70 + 105.0f;' in bond)
++   'tankcamera = (g_PlayerIsInTank != 0 && g_PlayerTankProp != NULL);' in bond and 'boom = 384.0f;' in bond and 'anchor.f[1] = g_CurrentPlayer->field_70 + 105.0f;' in bond)
+ ck('tank Third Person camera is centered laterally',
+    'if (tankcamera)\n    {\n        horizontaloffset = 0.0f;' in bond)
+ ck('tank hand-held TP shots use exact visible muzzle origin',
+    'g_PlayerIsInTank != 0' in chrprop and 'shotdata.weapon != ITEM_TANKSHELLS' in chrprop and 'gunGetThirdPersonMuzzleOrigin(hand, &shotdata.gunpos)' in chrprop)
+ ck('tank shell keeps its dedicated vehicle shot path', 'shotdata.weapon != ITEM_TANKSHELLS' in chrprop)
+ ck('Super Tank defaults to retail multiplier when disabled', 'supertankmult = 1.0f;' in bond)
+-ck('Super Tank raises forward/reverse top speed by 1.5x', 'TANK_MAX_SPEED * supertankmult' in bond and 'supertankmult = 1.5f;' in bond)
+-ck('Super Tank raises hull turn response by 1.5x', '0.3f * supertankmult' in bond)
++ck('Super Tank raises forward/reverse top speed by 2.5x', 'TANK_MAX_SPEED * supertankmult' in bond and 'supertankmult = 2.5f;' in bond)
++ck('Super Tank raises hull turn response by 2.5x', '0.3f * supertankmult' in bond)
+ ck('V42 audit is mandatory build prerequisite', 'tp-tank-super-tank-v42-audit' in files['mk'].split('prerequisites:',1)[1].split('\n',1)[0])
+ failed=[d for d,o in checks if not o]
+ print(f"\nTP TANK/SUPER TANK V42 AUDIT: {'PASS' if not failed else 'FAIL'} ({len(checks)-len(failed)}/{len(checks)})")

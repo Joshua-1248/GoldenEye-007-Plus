@@ -1,0 +1,1709 @@
+#include <ultra64.h>
+#include <bondgame.h>
+#include <bondconstants.h>
+#include <bondaicommands.h>
+#include <bondtypes.h>
+#include <math.h>
+#include <random.h>
+#include "bondview.h"
+#include "chraction.h"
+#include "chrai.h"
+#include "chr.h"
+#include "file.h"
+#include "front.h"
+#include "gun.h"
+#include "lv.h"
+#include "math_atan2f.h"
+
+/*
+ * R27Z/R28 R3: do not remove math_atan2f.h.
+ * GoldenEye's active include/math.h does not prototype atan2f. IDO otherwise
+ * applies default argument promotion and implicit-int return ABI, corrupting
+ * targetyaw at runtime.
+ */
+#include "mp_weapon.h"
+#include "model.h"
+#include "mpbots.h"
+#include "objecthandler.h"
+#include "player.h"
+
+#ifdef GE_MODDED_CHEATS
+
+#define MODBOT_RESPAWN_TICKS 180
+#define MODBOT_TARGET_NONE (-1)
+#define MODBOT_ATTACKER_NONE (-1)
+#define MODBOT_PD_MAX_PARTICIPANTS (MAX_PLAYER_COUNT + MOD_MP_BOT_MAX)
+
+#define MODBOT_PD_DISTMODE_BACKUP  1
+#define MODBOT_PD_DISTMODE_OK      2
+#define MODBOT_PD_DISTMODE_ADVANCE 3
+#define MODBOT_PD_DISTMODE_GOTO    4
+
+#define MODBOT_PD_DISTCFG_CLOSE            0
+#define MODBOT_PD_DISTCFG_PISTOL           1
+#define MODBOT_PD_DISTCFG_DEFAULT          2
+#define MODBOT_PD_DISTCFG_SHOOTEXPLOSIVE   3
+#define MODBOT_PD_DISTCFG_KAZE             4
+#define MODBOT_PD_DISTCFG_FARSIGHT         5
+#define MODBOT_PD_DISTCFG_FOLLOW           6
+#define MODBOT_PD_DISTCFG_THROWEXPLOSIVE   7
+
+#define MODBOT_PD_DTOR(x) ((x) * (M_TAU_F / 360.0f))
+
+/*
+ * Direct GoldenEye adaptation of Perfect Dark's struct aibot fields used by
+ * bot.c/botcmd.c.  GoldenEye-only ownership/scoring fields stay at the top.
+ */
+struct ModMpBotRuntime
+{
+    ChrRecord *chr;
+    PropRecord *targetprop;
+    s16 lastattacker;
+    s16 vindicttarget;
+    s16 stalktarget;
+    s16 respawntimer;
+    u8 deathrecorded;
+    u8 pad0;
+    s32 kills;
+    s32 deaths;
+
+    f32 speedmultforwards;
+    f32 speedmultsideways;
+    s8 distmode;
+    u8 manualbackup;
+    s16 attackingparticipant;
+    s16 distoverridecode;
+    s16 pad1;
+    f32 roty;
+    f32 angleoffset;
+    f32 speedtheta;
+    f32 lookangle;
+    f32 moveratex;
+    f32 moveratez;
+    s32 distmodettl60;
+    s32 distoverridetimer60;
+    s32 shootdelaytimer60;
+    s32 targetlastseen60;
+    s32 lastseenanytarget60;
+    u8 targetinsight;
+    u8 pad2[3];
+    s32 queryplayernum;
+    s8 chrnumsbydistanceasc[MODBOT_PD_MAX_PARTICIPANTS];
+    f32 chrdistances[MODBOT_PD_MAX_PARTICIPANTS];
+    u8 chrsinsight[MODBOT_PD_MAX_PARTICIPANTS];
+    s32 chrslastseen60[MODBOT_PD_MAX_PARTICIPANTS];
+    f32 zeroangle;
+    f32 zerospeed;
+    f32 zeroinc;
+    s32 random3ttl60;
+    u32 random3;
+    f32 curzerotimer60;
+    s32 abortattacktimer60;
+    s32 realignangleframe;
+};
+
+struct ModMpBotPdDifficulty
+{
+    u8 shootdelay60;
+    f32 minzerospeed;
+    f32 maxzerospeed;
+    u16 zerotime60;
+    f32 turnunzeromult;
+    f32 zerocloakspeed;
+    f32 forcezerominspeed;
+    s32 dizzyamount;
+};
+
+u8 g_ModMpBotCount = 0;
+
+struct ModMpBotConfig g_ModMpBotConfigs[MOD_MP_BOT_MAX] = {
+    {0, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {1, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {2, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {3, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {4, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {5, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {6, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0},
+    {7, MODBOT_DIFFICULTY_NORMAL, MODBOT_TYPE_NONE, 0}
+};
+
+static struct ModMpBotRuntime g_ModMpBotRuntime[MOD_MP_BOT_MAX];
+static s32 g_ModMpBotHumanKills[MAX_PLAYER_COUNT];
+static s32 g_ModMpBotDamageOwner = -1;
+
+static const char *g_ModMpBotDifficultyNames[MODBOT_DIFFICULTY_MAX] = {
+    "Meat", "Easy", "Normal", "Hard", "Perfect", "Dark"
+};
+
+static const char *g_ModMpBotNeutralNames[MODBOT_DIFFICULTY_MAX] = {
+    "RookieBot", "EasyBot", "NormalBot", "HardBot", "VeteranBot", "OmnisciBot"
+};
+
+static const char *g_ModMpBotTypeNames[MODBOT_TYPE_MAX] = {
+    "None",
+    "MeleeBot",
+    "SpeedBot",
+    "VindictBot",
+    "PsychoBot",
+    "PacifistBot",
+    "IronBot",
+    "ArmorBot",
+    "TNTBot",
+    "QuarryBot",
+    "FearBot",
+    "UmpireBot",
+    "StalkerBot"
+};
+
+/* Perfect Dark bot.c difficulty table, NTSC timing. */
+static struct ModMpBotPdDifficulty g_ModMpBotPdDifficulties[MODBOT_DIFFICULTY_MAX] = {
+    {90, MODBOT_PD_DTOR(15.0f),  MODBOT_PD_DTOR(30.0f), 600, 10.0f, MODBOT_PD_DTOR(40.0f),   MODBOT_PD_DTOR(20.0f), 1000},
+    {60, MODBOT_PD_DTOR(7.0f),   MODBOT_PD_DTOR(14.0f), 360, 10.0f, MODBOT_PD_DTOR(28.5f),  MODBOT_PD_DTOR(8.0f),  1000},
+    {30, MODBOT_PD_DTOR(4.0f),   MODBOT_PD_DTOR(8.0f),  180, 4.0f,  MODBOT_PD_DTOR(20.0f),   MODBOT_PD_DTOR(5.0f),  1500},
+    {15, MODBOT_PD_DTOR(1.5f),   MODBOT_PD_DTOR(4.0f),   90, 2.0f,  MODBOT_PD_DTOR(14.0f),   MODBOT_PD_DTOR(2.0f),  2500},
+    { 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(2.0f),   45, 1.0f,  MODBOT_PD_DTOR(10.0f),   MODBOT_PD_DTOR(0.0f),  4000},
+    { 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(0.0f),    0, 0.0f,  MODBOT_PD_DTOR(8.0f),    MODBOT_PD_DTOR(0.0f),  4000}
+};
+
+/* Perfect Dark botcmd.c g_BotDistConfigs. */
+static f32 g_ModMpBotPdDistConfigs[][3] = {
+    {0.0f,    120.0f,  10000.0f},
+    {300.0f,  450.0f,   4500.0f},
+    {300.0f,  600.0f,   4500.0f},
+    {600.0f, 1200.0f,   4500.0f},
+    {150.0f,  250.0f,   4500.0f},
+    {1000.0f, 2000.0f,  3000.0f},
+    {0.0f,    250.0f,  10000.0f},
+    {450.0f,  700.0f,   4500.0f}
+};
+
+static s32 modMpBotsRuntimeAllowed(void)
+{
+    return gamemode == GAMEMODE_MULTI
+        && scenario != SCENARIO_COOP
+        && g_ModMpBotCount > 0;
+}
+
+s32 modMpBotsGetCount(void)
+{
+    return g_ModMpBotCount;
+}
+
+void modMpBotsSetCount(s32 count)
+{
+    if (count < 0)
+        count = 0;
+    if (count > MOD_MP_BOT_MAX)
+        count = MOD_MP_BOT_MAX;
+
+    g_ModMpBotCount = (u8)count;
+}
+
+void modMpBotsCycleCount(void)
+{
+    modMpBotsSetCount((g_ModMpBotCount + 1) % (MOD_MP_BOT_MAX + 1));
+}
+
+const char *modMpBotGetDifficultyName(s32 difficulty)
+{
+    if ((u32)difficulty >= MODBOT_DIFFICULTY_MAX)
+        difficulty = MODBOT_DIFFICULTY_NORMAL;
+
+    return g_ModMpBotDifficultyNames[difficulty];
+}
+
+const char *modMpBotGetTypeName(s32 type)
+{
+    if ((u32)type >= MODBOT_TYPE_MAX)
+        type = MODBOT_TYPE_NONE;
+
+    return g_ModMpBotTypeNames[type];
+}
+
+const char *modMpBotGetDisplayName(s32 slot)
+{
+    struct ModMpBotConfig *config;
+
+    if ((u32)slot >= MOD_MP_BOT_MAX)
+        return "Bot";
+
+    config = &g_ModMpBotConfigs[slot];
+
+    if (config->type == MODBOT_TYPE_NONE)
+    {
+        s32 difficulty = config->difficulty;
+        if ((u32)difficulty >= MODBOT_DIFFICULTY_MAX)
+            difficulty = MODBOT_DIFFICULTY_NORMAL;
+        return g_ModMpBotNeutralNames[difficulty];
+    }
+
+    return modMpBotGetTypeName(config->type);
+}
+
+void modMpBotCycleCharacter(s32 slot, s32 direction)
+{
+    s32 count;
+    s32 value;
+
+    if ((u32)slot >= MOD_MP_BOT_MAX)
+        return;
+
+    count = frontGetMpCharacterCount();
+    if (count <= 0)
+        return;
+
+    if (direction == 0)
+        direction = 1;
+
+    value = (s32)g_ModMpBotConfigs[slot].character + direction;
+    while (value < 0)
+        value += count;
+    while (value >= count)
+        value -= count;
+
+    g_ModMpBotConfigs[slot].character = (u8)value;
+}
+
+void modMpBotCycleDifficulty(s32 slot, s32 direction)
+{
+    s32 value;
+
+    if ((u32)slot >= MOD_MP_BOT_MAX)
+        return;
+
+    if (direction == 0)
+        direction = 1;
+
+    value = (s32)g_ModMpBotConfigs[slot].difficulty + direction;
+    while (value < 0)
+        value += MODBOT_DIFFICULTY_MAX;
+    while (value >= MODBOT_DIFFICULTY_MAX)
+        value -= MODBOT_DIFFICULTY_MAX;
+
+    g_ModMpBotConfigs[slot].difficulty = (u8)value;
+}
+
+void modMpBotCycleType(s32 slot, s32 direction)
+{
+    s32 value;
+
+    if ((u32)slot >= MOD_MP_BOT_MAX)
+        return;
+
+    if (direction == 0)
+        direction = 1;
+
+    value = (s32)g_ModMpBotConfigs[slot].type + direction;
+    while (value < 0)
+        value += MODBOT_TYPE_MAX;
+    while (value >= MODBOT_TYPE_MAX)
+        value -= MODBOT_TYPE_MAX;
+
+    g_ModMpBotConfigs[slot].type = (u8)value;
+}
+
+void modMpBotsResetRuntime(void)
+{
+    s32 i;
+    s32 j;
+
+    for (i = 0; i < MOD_MP_BOT_MAX; i++)
+    {
+        struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[i];
+
+        runtime->chr = NULL;
+        runtime->targetprop = NULL;
+        runtime->lastattacker = MODBOT_ATTACKER_NONE;
+        runtime->vindicttarget = MODBOT_TARGET_NONE;
+        runtime->stalktarget = MODBOT_TARGET_NONE;
+        runtime->respawntimer = 0;
+        runtime->deathrecorded = FALSE;
+        runtime->kills = 0;
+        runtime->deaths = 0;
+        runtime->speedmultforwards = 0.0f;
+        runtime->speedmultsideways = 0.0f;
+        runtime->distmode = -1;
+        runtime->manualbackup = FALSE;
+        runtime->attackingparticipant = -1;
+        runtime->distoverridecode = MODBOT_TARGET_NONE;
+        runtime->roty = 0.0f;
+        runtime->angleoffset = 0.0f;
+        runtime->speedtheta = 0.0f;
+        runtime->lookangle = 0.0f;
+        runtime->moveratex = 0.0f;
+        runtime->moveratez = 0.0f;
+        runtime->distmodettl60 = 0;
+        runtime->distoverridetimer60 = 0;
+        runtime->shootdelaytimer60 = 0;
+        runtime->targetlastseen60 = -1;
+        runtime->lastseenanytarget60 = -1;
+        runtime->targetinsight = FALSE;
+        runtime->queryplayernum = -1;
+        runtime->zeroangle = 0.0f;
+        runtime->zerospeed = 0.0f;
+        runtime->zeroinc = 0.0f;
+        runtime->random3ttl60 = 0;
+        runtime->random3 = randomGetNext();
+        runtime->curzerotimer60 = 0.0f;
+        runtime->abortattacktimer60 = -1;
+        runtime->realignangleframe = 0;
+
+        for (j = 0; j < MODBOT_PD_MAX_PARTICIPANTS; j++)
+        {
+            runtime->chrnumsbydistanceasc[j] = -1;
+            runtime->chrdistances[j] = 99999999.0f;
+            runtime->chrsinsight[j] = FALSE;
+            runtime->chrslastseen60[j] = -1;
+        }
+    }
+
+    for (i = 0; i < MAX_PLAYER_COUNT; i++)
+        g_ModMpBotHumanKills[i] = 0;
+
+    g_ModMpBotDamageOwner = -1;
+}
+
+
+s32 modMpBotsGetSlotForChr(ChrRecord *chr)
+{
+    s32 i;
+
+    if (chr == NULL)
+        return -1;
+
+    for (i = 0; i < MOD_MP_BOT_MAX; i++)
+    {
+        if (g_ModMpBotRuntime[i].chr == chr)
+            return i;
+    }
+
+    return -1;
+}
+
+PropRecord *modMpBotsGetTargetProp(ChrRecord *chr)
+{
+    s32 slot = modMpBotsGetSlotForChr(chr);
+
+    if (slot < 0)
+        return NULL;
+
+    return g_ModMpBotRuntime[slot].targetprop;
+}
+
+f32 modMpBotsGetMoveMultiplier(ChrRecord *chr)
+{
+    /*
+     * R30 P1: Perfect Dark applies SpeedSim/TurtleSim scaling inside
+     * bot_calculate_max_speed, not inside the generic chr GOPOS motor.
+     * Returning 1 here prevents GoldenEye's old compatibility hook from
+     * multiplying the PD lateral motor a second time.
+     */
+    return 1.0f;
+}
+
+
+
+/*
+ * Feed player-like forward/side input into GoldenEye's normal chr collision
+ * update.  This is the GoldenEye analogue of Perfect Dark's bot_update_lateral.
+ *
+ * IMPORTANT: this function only proposes X/Z.  sub_GAME_7F01FC10 still owns
+ * STAN validation, wall collision, floor support, gravity and room updates.
+ * Bots therefore do not teleport or bypass native collision.
+ */
+static f32 modMpBotsPdCalculateMaxSpeed(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    struct ModMpBotConfig *config = &g_ModMpBotConfigs[slot];
+    s32 difficulty = config->difficulty;
+    f32 pov = 1.0f;
+    f32 speed;
+
+    if ((u32)difficulty >= MODBOT_DIFFICULTY_MAX)
+        difficulty = MODBOT_DIFFICULTY_NORMAL;
+
+    /*
+     * PD uses g_HeadsAndBodies[bodynum].height / 159 here.  GoldenEye's MP
+     * character table already stores the corresponding normalized POV scale,
+     * so that is the compatibility-layer input to the same formula.
+     */
+    frontGetMpCharacterData(config->character, NULL, NULL, &pov);
+    if (pov <= 0.0f)
+        pov = 1.0f;
+
+    speed = pov;
+    speed = speed * 0.002830188954249f + 1.0f;
+
+    if (config->type == MODBOT_TYPE_IRON)
+    {
+        /* TurtleSim */
+        speed *= 3.5f;
+    }
+    else if (config->type == MODBOT_TYPE_SPEED)
+    {
+        /* SpeedSim */
+        speed *= 14.0f;
+    }
+    else
+    {
+        switch (difficulty)
+        {
+            case MODBOT_DIFFICULTY_MEAT:    speed *= 5.0f;  break;
+            case MODBOT_DIFFICULTY_EASY:    speed *= 6.2f;  break;
+            default:
+            case MODBOT_DIFFICULTY_NORMAL:  speed *= 7.6f;  break;
+            case MODBOT_DIFFICULTY_HARD:    speed *= 9.4f;  break;
+            case MODBOT_DIFFICULTY_PERFECT: speed *= 11.2f; break;
+            case MODBOT_DIFFICULTY_DARK:    speed *= 11.2f; break;
+        }
+    }
+
+    if (runtime->chr == NULL)
+        return 0.0f;
+
+    return speed;
+}
+
+/*
+ * Direct port of Perfect Dark bot.c:bot_update_lateral (NTSC 1.0 path), with
+ * GE's g_ClockTimer/g_GlobalTimerDelta substituted for lvupdate240 and
+ * lvupdate60freal.  Travel yaw is captured from GE's ACT_GOPOS model heading;
+ * R30's post-chr hook restores the independent PD look heading for rendering.
+ */
+s32 modMpBotsApplyLateral(ChrRecord *chr, coord3d *src, coord3d *dst)
+{
+    struct ModMpBotRuntime *runtime;
+    s32 slot;
+    s32 i;
+    s32 numupdates;
+    f32 cosine;
+    f32 sine;
+    f32 desiredx;
+    f32 desiredz;
+    f32 speedsideways;
+    f32 speedforwards;
+    f32 speed;
+    f32 tmp;
+    f32 movex = 0.0f;
+    f32 movez = 0.0f;
+
+    if (chr == NULL || src == NULL || dst == NULL || chr->model == NULL)
+        return FALSE;
+
+    slot = modMpBotsGetSlotForChr(chr);
+    if (slot < 0)
+        return FALSE;
+
+    runtime = &g_ModMpBotRuntime[slot];
+
+    if (chrIsDead(chr))
+    {
+        runtime->moveratex = 0.0f;
+        runtime->moveratez = 0.0f;
+        return FALSE;
+    }
+
+    /* PD does not move Simulants during its initial 145-frame spawn window. */
+    if (g_GlobalTimer < 145)
+    {
+        runtime->moveratex = 0.0f;
+        runtime->moveratez = 0.0f;
+        dst->x = src->x;
+        dst->z = src->z;
+        return TRUE;
+    }
+
+    /* GE pathing writes its travel heading to the model; this is PD aibot->roty. */
+    runtime->roty = getsubroty(chr->model);
+
+    speedsideways = runtime->speedmultsideways;
+    speedforwards = runtime->speedmultforwards;
+    speed = modMpBotsPdCalculateMaxSpeed(slot);
+
+    speedsideways *= speed;
+    speedforwards *= speed;
+
+    cosine = cosf(runtime->roty);
+    sine = sinf(runtime->roty);
+
+    desiredx = speedsideways * cosine + speedforwards * sine;
+    desiredz = -speedsideways * sine + speedforwards * cosine;
+
+    numupdates = g_ClockTimer;
+    if (numupdates <= 0)
+    {
+        dst->x = src->x;
+        dst->z = src->z;
+        return TRUE;
+    }
+
+    tmp = 0.055000007152557f * g_GlobalTimerDelta / (f32)numupdates;
+
+    for (i = 0; i < numupdates; i++)
+    {
+        runtime->moveratex = 0.945f * runtime->moveratex + desiredx;
+        runtime->moveratez = 0.945f * runtime->moveratez + desiredz;
+        movex += runtime->moveratex * tmp;
+        movez += runtime->moveratez * tmp;
+    }
+
+    dst->x = src->x + movex;
+    dst->z = src->z + movez;
+
+    return TRUE;
+}
+
+
+void modMpBotsSetDamageOwner(s32 slot)
+{
+    g_ModMpBotDamageOwner = ((u32)slot < MOD_MP_BOT_MAX) ? slot : -1;
+}
+
+void modMpBotsClearDamageOwner(void)
+{
+    g_ModMpBotDamageOwner = -1;
+}
+
+s32 modMpBotsGetDamageOwner(void)
+{
+    return g_ModMpBotDamageOwner;
+}
+
+static s16 modMpBotsTargetCodeFromChr(ChrRecord *chr)
+{
+    s32 slot;
+    s32 i;
+
+    if (chr == NULL || chr->prop == NULL)
+        return MODBOT_TARGET_NONE;
+
+    slot = modMpBotsGetSlotForChr(chr);
+    if (slot >= 0)
+        return (s16)(MOD_MP_BOT_BOT_TARGET_BASE + slot);
+
+    if (chr->prop->type == PROP_TYPE_VIEWER)
+    {
+        i = getPlayerPointerIndex(chr->prop);
+        if ((u32)i < MAX_PLAYER_COUNT)
+            return (s16)i;
+    }
+
+    return MODBOT_TARGET_NONE;
+}
+
+void modMpBotsNotifyHumanHit(ChrRecord *victim, s32 playernum)
+{
+    s32 slot = modMpBotsGetSlotForChr(victim);
+
+    if (slot >= 0 && (u32)playernum < MAX_PLAYER_COUNT)
+        g_ModMpBotRuntime[slot].lastattacker = (s16)playernum;
+}
+
+void modMpBotsNotifyBotHit(ChrRecord *victim, ChrRecord *attacker)
+{
+    s32 victimslot = modMpBotsGetSlotForChr(victim);
+    s32 attackerslot = modMpBotsGetSlotForChr(attacker);
+
+    if (victimslot >= 0 && attackerslot >= 0 && victimslot != attackerslot)
+        g_ModMpBotRuntime[victimslot].lastattacker = (s16)(MOD_MP_BOT_BOT_TARGET_BASE + attackerslot);
+}
+
+s32 modMpBotsGetHumanKills(s32 playernum)
+{
+    if ((u32)playernum >= MAX_PLAYER_COUNT)
+        return 0;
+
+    return g_ModMpBotHumanKills[playernum];
+}
+
+s32 modMpBotsGetBotKills(s32 slot)
+{
+    if ((u32)slot >= MOD_MP_BOT_MAX)
+        return 0;
+
+    return g_ModMpBotRuntime[slot].kills;
+}
+
+s32 modMpBotsGetBotDeaths(s32 slot)
+{
+    if ((u32)slot >= MOD_MP_BOT_MAX)
+        return 0;
+
+    return g_ModMpBotRuntime[slot].deaths;
+}
+
+void modMpBotsRecordBotKillOnHuman(s32 slot, s32 playernum)
+{
+    if ((u32)slot < MOD_MP_BOT_MAX && (u32)playernum < MAX_PLAYER_COUNT)
+        g_ModMpBotRuntime[slot].kills++;
+}
+
+void modMpBotsDamageViewer(s32 slot, PropRecord *viewer, ITEM_IDS weaponid, coord3d *direction)
+{
+    s32 oldplayer;
+    s32 victim;
+    f32 damage;
+
+    if ((u32)slot >= MOD_MP_BOT_MAX || viewer == NULL || viewer->type != PROP_TYPE_VIEWER)
+        return;
+
+    victim = getPlayerPointerIndex(viewer);
+    if ((u32)victim >= (u32)getPlayerCount())
+        return;
+
+    damage = 0.125f * gunItemGetDestructionAmount(weaponid) * g_AiDamageModifier * get_007_damage_mod();
+    if (weaponid == ITEM_SHOTGUN || weaponid == ITEM_AUTOSHOT)
+        damage *= 3.0f;
+
+    oldplayer = get_cur_playernum();
+    set_cur_player(victim);
+    modMpBotsSetDamageOwner(slot);
+    record_damage_kills(damage, direction->x, direction->z, victim, 1);
+    modMpBotsClearDamageOwner();
+    set_cur_player(oldplayer);
+}
+
+static PropRecord *modMpBotsResolveTargetCode(s16 code)
+{
+    s32 index;
+
+    if (code >= MOD_MP_BOT_BOT_TARGET_BASE)
+    {
+        index = code - MOD_MP_BOT_BOT_TARGET_BASE;
+        if ((u32)index < MOD_MP_BOT_MAX
+            && g_ModMpBotRuntime[index].chr != NULL
+            && g_ModMpBotRuntime[index].chr->prop != NULL
+            && !chrIsDead(g_ModMpBotRuntime[index].chr))
+            return g_ModMpBotRuntime[index].chr->prop;
+        return NULL;
+    }
+
+    if ((u32)code < (u32)getPlayerCount()
+        && g_playerPointers[code] != NULL
+        && g_playerPointers[code]->prop != NULL
+        && !g_playerPointers[code]->bonddead)
+        return g_playerPointers[code]->prop;
+
+    return NULL;
+}
+
+static f32 modMpBotsTargetHealth(PropRecord *prop)
+{
+    s32 playernum;
+    ChrRecord *chr;
+
+    if (prop == NULL)
+        return 999999.0f;
+
+    if (prop->type == PROP_TYPE_VIEWER)
+    {
+        playernum = getPlayerPointerIndex(prop);
+        if ((u32)playernum < (u32)getPlayerCount())
+            return g_playerPointers[playernum]->bondhealth + g_playerPointers[playernum]->bondarmour;
+        return 999999.0f;
+    }
+
+    if (prop->type == PROP_TYPE_CHR && prop->chr != NULL)
+    {
+        chr = prop->chr;
+        if (chr->maxdamage > 0.0f)
+            return (chr->maxdamage - chr->damage) / chr->maxdamage;
+        return 999999.0f;
+    }
+
+    return 999999.0f;
+}
+
+static s32 modMpBotsHumanScore(s32 playernum)
+{
+    s32 i;
+    s32 points = modMpBotsGetHumanKills(playernum);
+
+    if ((u32)playernum >= (u32)getPlayerCount())
+        return -9999;
+
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        if (i != playernum)
+            points += g_playerPlayerData[playernum].kill_counts[i];
+        else
+            points -= g_playerPlayerData[i].kill_counts[playernum];
+    }
+
+    return points;
+}
+
+
+
+
+static s32 modMpBotsWeaponIsExplosive(s32 item)
+{
+    return item == ITEM_ROCKETLAUNCH
+        || item == ITEM_GRENADELAUNCH
+        || item == ITEM_GRENADE
+        || item == ITEM_TIMEDMINE
+        || item == ITEM_PROXIMITYMINE
+        || item == ITEM_REMOTEMINE;
+}
+
+static s32 modMpBotsChooseWeaponIndex(s32 slot)
+{
+    struct s_mp_weapon_set *set = getPtrMPWeaponSetData();
+    s32 i;
+    s32 best = -1;
+
+    if (g_ModMpBotConfigs[slot].type == MODBOT_TYPE_MELEE)
+        return -1;
+
+    if (g_ModMpBotConfigs[slot].type == MODBOT_TYPE_TNT)
+    {
+        for (i = 7; i >= 0; i--)
+        {
+            if (set[i].allowpickup && modMpBotsWeaponIsExplosive(set[i].itemID)
+                && (set[i].itemID == ITEM_ROCKETLAUNCH || set[i].itemID == ITEM_GRENADELAUNCH))
+                return i;
+        }
+    }
+
+    for (i = 7; i >= 0; i--)
+    {
+        if (set[i].allowpickup && set[i].itemID != ITEM_UNARMED
+            && !modMpBotsWeaponIsExplosive(set[i].itemID))
+        {
+            best = i;
+            break;
+        }
+    }
+
+    if (best < 0)
+    {
+        for (i = 7; i >= 0; i--)
+        {
+            if (set[i].allowpickup && set[i].itemID != ITEM_UNARMED)
+                return i;
+        }
+    }
+
+    return best;
+}
+
+static s32 modMpBotsSpawn(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    struct ModMpBotConfig *config = &g_ModMpBotConfigs[slot];
+    struct s_mp_weapon_set *set;
+    PadRecord *pad;
+    PropRecord *prop;
+    ChrRecord *chr;
+    s32 body;
+    s32 head;
+    s32 weaponindex;
+    f32 angle;
+
+    if (startpadcount <= 0 || !frontGetMpCharacterData(config->character, &body, &head, NULL))
+        return FALSE;
+
+    pad = g_Startpad[(slot + (randomGetNext() % (u32)startpadcount)) % startpadcount];
+    if (pad == NULL || pad->stan == NULL)
+        return FALSE;
+
+    angle = atan2f(pad->look.x, pad->look.z);
+    prop = chrSpawnAtCoord(body, head, &pad->pos, pad->stan, angle, NULL, 0);
+    if (prop == NULL || prop->chr == NULL)
+        return FALSE;
+
+    chr = prop->chr;
+    /* R30 P1: aim/movement difficulty now lives in the PD bot state. */
+    chr->accuracyrating = 0;
+    chr->speedrating = 0;
+    chrSetMaxDamage(chr, 4.0f);
+    chr->damage = 0.0f;
+    chr->chrflags |= CHRFLAG_CAN_SHOOT_CHRS;
+
+    /* PD ShieldSim/TurtleSim durability maps to GoldenEye's native character
+     * armor representation: negative chr->damage, exposed by chrGetArmor(). */
+    if (config->type == MODBOT_TYPE_ARMOR)
+        chrAddHealth(chr, 4.0f);
+    else if (config->type == MODBOT_TYPE_IRON)
+        chrAddHealth(chr, 8.0f);
+
+    runtime->chr = chr;
+    runtime->targetprop = NULL;
+    runtime->lastattacker = MODBOT_ATTACKER_NONE;
+    runtime->respawntimer = 0;
+    runtime->deathrecorded = FALSE;
+    runtime->speedmultforwards = 0.0f;
+    runtime->speedmultsideways = 0.0f;
+    runtime->distmode = -1;
+    runtime->manualbackup = FALSE;
+    runtime->attackingparticipant = -1;
+    runtime->distoverridecode = MODBOT_TARGET_NONE;
+    runtime->roty = angle;
+    runtime->angleoffset = 0.0f;
+    runtime->speedtheta = 0.0f;
+    runtime->lookangle = angle;
+    runtime->moveratex = 0.0f;
+    runtime->moveratez = 0.0f;
+    runtime->distmodettl60 = 0;
+    runtime->distoverridetimer60 = 0;
+    runtime->shootdelaytimer60 = 0;
+    runtime->targetlastseen60 = -1;
+    runtime->lastseenanytarget60 = -1;
+    runtime->targetinsight = FALSE;
+    runtime->queryplayernum = -1;
+    runtime->zeroangle = 0.0f;
+    runtime->zerospeed = 0.0f;
+    runtime->zeroinc = 0.0f;
+    runtime->random3ttl60 = 0;
+    runtime->random3 = randomGetNext();
+    runtime->curzerotimer60 = 0.0f;
+    runtime->abortattacktimer60 = -1;
+    runtime->realignangleframe = g_GlobalTimer;
+
+    {
+        s32 j;
+        for (j = 0; j < MODBOT_PD_MAX_PARTICIPANTS; j++)
+        {
+            runtime->chrnumsbydistanceasc[j] = -1;
+            runtime->chrdistances[j] = 99999999.0f;
+            runtime->chrsinsight[j] = FALSE;
+            runtime->chrslastseen60[j] = -1;
+        }
+    }
+
+    check_set_actor_standing_still(chr, 0x10, (s32)(angle * M_U16_MAX_VALUE_F / M_TAU_F));
+
+    weaponindex = modMpBotsChooseWeaponIndex(slot);
+    if (weaponindex >= 0)
+    {
+        set = getPtrMPWeaponSetData();
+        chrGiveWeapon(chr, set[weaponindex].propID, (ITEM_IDS)set[weaponindex].itemID, 0);
+    }
+
+    return TRUE;
+}
+
+static void modMpBotsRemoveActor(s32 slot)
+{
+    ChrRecord *chr = g_ModMpBotRuntime[slot].chr;
+    PropRecord *prop;
+
+    if (chr == NULL)
+        return;
+
+    prop = chr->prop;
+    if (prop != NULL && chr->model != NULL)
+    {
+        chrpropCleanupForRemoval(prop);
+        chrpropDelist(prop);
+        chrpropDisable(prop);
+        chrpropFree(prop);
+    }
+
+    g_ModMpBotRuntime[slot].chr = NULL;
+    g_ModMpBotRuntime[slot].targetprop = NULL;
+}
+
+static void modMpBotsRecordDeath(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    s32 attacker = runtime->lastattacker;
+
+    runtime->deaths++;
+
+    if (g_ModMpBotConfigs[slot].type == MODBOT_TYPE_VINDICT
+        && attacker != MODBOT_ATTACKER_NONE)
+    {
+        runtime->vindicttarget = (s16)attacker;
+    }
+
+    if (g_ModMpBotConfigs[slot].type == MODBOT_TYPE_STALKER
+        && runtime->stalktarget == MODBOT_TARGET_NONE
+        && attacker != MODBOT_ATTACKER_NONE)
+    {
+        /* FeudSim latches an opponent; last killer is PD's preferred seed. */
+        runtime->stalktarget = (s16)attacker;
+    }
+
+    if ((u32)attacker < MAX_PLAYER_COUNT)
+    {
+        g_ModMpBotHumanKills[attacker]++;
+    }
+    else if (attacker >= MOD_MP_BOT_BOT_TARGET_BASE)
+    {
+        s32 killerslot = attacker - MOD_MP_BOT_BOT_TARGET_BASE;
+        if ((u32)killerslot < MOD_MP_BOT_MAX && killerslot != slot)
+            g_ModMpBotRuntime[killerslot].kills++;
+    }
+}
+
+
+
+
+/* R30 P1 helpers: direct translations of PD bot.c/botcmd.c semantics. */
+static f32 modMpBotsPdNormalizeAngle(f32 angle)
+{
+    if (angle >= M_TAU_F)
+        angle -= M_TAU_F;
+    else if (angle < 0.0f)
+        angle += M_TAU_F;
+    return angle;
+}
+
+static f32 modMpBotsPdAngleDelta(f32 from, f32 to)
+{
+    f32 delta = to - from;
+    if (delta < -M_PI_F)
+        delta += M_TAU_F;
+    else if (delta >= M_PI_F)
+        delta -= M_TAU_F;
+    return delta;
+}
+
+static s32 modMpBotsPdPropAlive(PropRecord *prop)
+{
+    s32 playernum;
+
+    if (prop == NULL)
+        return FALSE;
+
+    if (prop->type == PROP_TYPE_VIEWER)
+    {
+        playernum = getPlayerPointerIndex(prop);
+        return (u32)playernum < (u32)getPlayerCount()
+            && g_playerPointers[playernum] != NULL
+            && !g_playerPointers[playernum]->bonddead;
+    }
+
+    return prop->type == PROP_TYPE_CHR && prop->chr != NULL && !chrIsDead(prop->chr);
+}
+
+static PropRecord *modMpBotsPdGetParticipantProp(s32 participant)
+{
+    s32 slot;
+
+    if ((u32)participant < MAX_PLAYER_COUNT)
+    {
+        if ((u32)participant < (u32)getPlayerCount()
+            && g_playerPointers[participant] != NULL
+            && g_playerPointers[participant]->prop != NULL
+            && !g_playerPointers[participant]->bonddead)
+            return g_playerPointers[participant]->prop;
+        return NULL;
+    }
+
+    slot = participant - MAX_PLAYER_COUNT;
+    if ((u32)slot < MOD_MP_BOT_MAX
+        && g_ModMpBotRuntime[slot].chr != NULL
+        && g_ModMpBotRuntime[slot].chr->prop != NULL
+        && !chrIsDead(g_ModMpBotRuntime[slot].chr))
+        return g_ModMpBotRuntime[slot].chr->prop;
+
+    return NULL;
+}
+
+static s32 modMpBotsPdFindParticipant(PropRecord *prop)
+{
+    s32 i;
+
+    if (prop == NULL)
+        return -1;
+
+    if (prop->type == PROP_TYPE_VIEWER)
+        return getPlayerPointerIndex(prop);
+
+    if (prop->type == PROP_TYPE_CHR && prop->chr != NULL)
+    {
+        i = modMpBotsGetSlotForChr(prop->chr);
+        if (i >= 0)
+            return MAX_PLAYER_COUNT + i;
+    }
+
+    return -1;
+}
+
+static s16 modMpBotsPdTargetCodeForProp(PropRecord *prop)
+{
+    s32 participant = modMpBotsPdFindParticipant(prop);
+    if (participant < 0)
+        return MODBOT_TARGET_NONE;
+    if (participant < MAX_PLAYER_COUNT)
+        return (s16)participant;
+    return (s16)(MOD_MP_BOT_BOT_TARGET_BASE + participant - MAX_PLAYER_COUNT);
+}
+
+static f32 modMpBotsPdDistance(ChrRecord *chr, PropRecord *prop)
+{
+    f32 dx = prop->pos.x - chr->prop->pos.x;
+    f32 dy = prop->pos.y - chr->prop->pos.y;
+    f32 dz = prop->pos.z - chr->prop->pos.z;
+    return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
+static s32 modMpBotsPdHasSight(ChrRecord *chr, PropRecord *prop)
+{
+    if (chr == NULL || chr->prop == NULL || chr->prop->stan == NULL
+        || prop == NULL || prop->stan == NULL)
+        return FALSE;
+
+    /* GE compatibility shim for PD chr_has_los_to_chr. */
+    return check_if_position_in_same_room(chr, &prop->pos, prop->stan);
+}
+
+static s32 modMpBotsPdTargetIsArmed(PropRecord *prop)
+{
+    s32 playernum;
+
+    if (prop == NULL)
+        return FALSE;
+
+    if (prop->type == PROP_TYPE_VIEWER)
+    {
+        playernum = getPlayerPointerIndex(prop);
+        if ((u32)playernum >= (u32)getPlayerCount() || g_playerPointers[playernum] == NULL)
+            return FALSE;
+        return g_playerPointers[playernum]->hands[GUNRIGHT].weaponnum != ITEM_UNARMED
+            && g_playerPointers[playernum]->hands[GUNRIGHT].weaponnum != ITEM_FIST;
+    }
+
+    if (prop->type == PROP_TYPE_CHR && prop->chr != NULL)
+        return chrGetEquippedWeaponProp(prop->chr, GUNRIGHT) != NULL
+            || chrGetEquippedWeaponProp(prop->chr, GUNLEFT) != NULL;
+
+    return FALSE;
+}
+
+static s32 modMpBotsPdPassesPeaceCheck(s32 slot, PropRecord *prop)
+{
+    if (g_ModMpBotConfigs[slot].type == MODBOT_TYPE_PACIFIST)
+        return modMpBotsPdTargetIsArmed(prop);
+    return TRUE;
+}
+
+static void modMpBotsPdSetTarget(s32 slot, PropRecord *prop)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    s32 participant = modMpBotsPdFindParticipant(prop);
+    s32 changed = runtime->targetprop != prop;
+
+    if (participant >= 0)
+    {
+        runtime->targetinsight = runtime->chrsinsight[participant];
+        runtime->targetlastseen60 = runtime->chrslastseen60[participant];
+    }
+    else
+    {
+        runtime->targetinsight = FALSE;
+        runtime->targetlastseen60 = -1;
+    }
+
+    if (runtime->targetlastseen60 > runtime->lastseenanytarget60)
+        runtime->lastseenanytarget60 = runtime->targetlastseen60;
+
+    runtime->targetprop = prop;
+
+    if (changed)
+    {
+        runtime->shootdelaytimer60 = 0;
+    }
+    else if (runtime->targetinsight)
+    {
+        runtime->shootdelaytimer60 += g_ClockTimer;
+    }
+    else
+    {
+        runtime->shootdelaytimer60 -= g_ClockTimer;
+        if (runtime->shootdelaytimer60 < 0)
+            runtime->shootdelaytimer60 = 0;
+    }
+}
+
+static void modMpBotsPdUpdateZeroAngle(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    struct ModMpBotPdDifficulty *diff;
+    s32 difficulty = g_ModMpBotConfigs[slot].difficulty;
+    s32 i;
+    f32 minspeed;
+    f32 maxspeed;
+    f32 tmp;
+    f32 frac;
+
+    if ((u32)difficulty >= MODBOT_DIFFICULTY_MAX)
+        difficulty = MODBOT_DIFFICULTY_NORMAL;
+
+    diff = &g_ModMpBotPdDifficulties[difficulty];
+    runtime->random3ttl60 -= g_ClockTimer;
+
+    if (runtime->random3ttl60 <= 0)
+    {
+        runtime->random3 = randomGetNext();
+        runtime->random3ttl60 = 20 + (s32)(randomGetNext() % 20U);
+    }
+
+    if (g_ClockTimer > 0)
+    {
+        if (runtime->targetinsight)
+            runtime->curzerotimer60 += g_GlobalTimerDelta;
+        else
+            runtime->curzerotimer60 -= g_GlobalTimerDelta;
+
+        tmp = diff->turnunzeromult * (runtime->speedtheta * g_GlobalTimerDelta);
+        if (tmp < 0.0f)
+            tmp = -tmp;
+        runtime->curzerotimer60 -= tmp;
+    }
+
+    if (runtime->curzerotimer60 > runtime->shootdelaytimer60)
+        runtime->curzerotimer60 = runtime->shootdelaytimer60;
+    if (runtime->curzerotimer60 < 0.0f)
+        runtime->curzerotimer60 = 0.0f;
+
+    if (runtime->curzerotimer60 >= diff->zerotime60)
+    {
+        runtime->curzerotimer60 = diff->zerotime60;
+        minspeed = 0.0f;
+        maxspeed = 0.0f;
+    }
+    else
+    {
+        frac = (diff->zerotime60 - runtime->curzerotimer60) / (f32)diff->zerotime60;
+        minspeed = diff->minzerospeed * frac;
+        maxspeed = diff->maxzerospeed * frac;
+    }
+
+    if (maxspeed < diff->forcezerominspeed)
+        maxspeed = diff->forcezerominspeed;
+
+    runtime->zeroinc = (maxspeed - minspeed)
+        * (runtime->random3 % 0x10000) * (1.0f / 65535.0f) + minspeed;
+
+    if (runtime->random3 & 0x10000)
+        runtime->zeroinc = -runtime->zeroinc;
+
+    for (i = 0; i < g_ClockTimer; i++)
+        runtime->zerospeed = runtime->zerospeed * 0.97500002384186f + runtime->zeroinc;
+
+    runtime->zeroangle = runtime->zerospeed * 0.024999976158142f;
+}
+
+static void modMpBotsPdChooseGeneralTarget(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    PropRecord *candidate;
+    PropRecord *closestoutofsight = NULL;
+    s32 distancesdone[MODBOT_PD_MAX_PARTICIPANTS];
+    s32 selfparticipant = MAX_PLAYER_COUNT + slot;
+    s32 difficulty = g_ModMpBotConfigs[slot].difficulty;
+    s32 query;
+    s32 tries;
+    s32 i;
+    s32 j;
+
+    if ((u32)difficulty >= MODBOT_DIFFICULTY_MAX)
+        difficulty = MODBOT_DIFFICULTY_NORMAL;
+
+    /* PD amortises LOS/distance work by updating one multiplayer chr per tick. */
+    query = runtime->queryplayernum;
+    for (tries = 0; tries < MODBOT_PD_MAX_PARTICIPANTS; tries++)
+    {
+        query = (query + 1) % MODBOT_PD_MAX_PARTICIPANTS;
+        candidate = modMpBotsPdGetParticipantProp(query);
+        if (candidate != NULL && query != selfparticipant)
+        {
+            runtime->queryplayernum = query;
+            runtime->chrdistances[query] = modMpBotsPdDistance(runtime->chr, candidate);
+            runtime->chrsinsight[query] = modMpBotsPdHasSight(runtime->chr, candidate);
+            break;
+        }
+    }
+
+    for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+    {
+        if (runtime->chrsinsight[i])
+            runtime->chrslastseen60[i] = g_GlobalTimer;
+        distancesdone[i] = FALSE;
+        runtime->chrnumsbydistanceasc[i] = -1;
+    }
+
+    for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+    {
+        s32 closest = -1;
+        f32 closestdistance = 0.0f;
+
+        for (j = 0; j < MODBOT_PD_MAX_PARTICIPANTS; j++)
+        {
+            candidate = modMpBotsPdGetParticipantProp(j);
+            if (!distancesdone[j] && j != selfparticipant && candidate != NULL
+                && (closest < 0 || runtime->chrdistances[j] < closestdistance))
+            {
+                closest = j;
+                closestdistance = runtime->chrdistances[j];
+            }
+        }
+
+        if (closest >= 0)
+        {
+            runtime->chrnumsbydistanceasc[i] = (s8)closest;
+            distancesdone[closest] = TRUE;
+        }
+    }
+
+    modMpBotsPdUpdateZeroAngle(slot);
+
+    if (runtime->targetprop != NULL)
+    {
+        if (!modMpBotsPdPropAlive(runtime->targetprop)
+            || !modMpBotsPdPassesPeaceCheck(slot, runtime->targetprop))
+            runtime->targetprop = NULL;
+    }
+
+    if (runtime->targetprop == NULL)
+    {
+        for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+        {
+            s32 participant = runtime->chrnumsbydistanceasc[i];
+            if (participant < 0)
+                continue;
+
+            candidate = modMpBotsPdGetParticipantProp(participant);
+            if (candidate == NULL || !modMpBotsPdPassesPeaceCheck(slot, candidate))
+                continue;
+
+            if (runtime->chrsinsight[participant])
+            {
+                modMpBotsPdSetTarget(slot, candidate);
+                return;
+            }
+
+            if (difficulty == MODBOT_DIFFICULTY_MEAT || difficulty == MODBOT_DIFFICULTY_EASY)
+            {
+                modMpBotsPdSetTarget(slot, candidate);
+                return;
+            }
+
+            if (closestoutofsight == NULL)
+                closestoutofsight = candidate;
+        }
+
+        modMpBotsPdSetTarget(slot, closestoutofsight);
+        return;
+    }
+
+    i = modMpBotsPdFindParticipant(runtime->targetprop);
+    if (i >= 0 && runtime->chrsinsight[i])
+    {
+        modMpBotsPdSetTarget(slot, runtime->targetprop);
+        return;
+    }
+
+    /* PD opportunistically changes to another visible enemy by distance. */
+    for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+    {
+        s32 participant = runtime->chrnumsbydistanceasc[i];
+        if (participant < 0 || !runtime->chrsinsight[participant])
+            continue;
+
+        candidate = modMpBotsPdGetParticipantProp(participant);
+        if (candidate != NULL && modMpBotsPdPassesPeaceCheck(slot, candidate))
+        {
+            modMpBotsPdSetTarget(slot, candidate);
+            return;
+        }
+    }
+
+    modMpBotsPdSetTarget(slot, runtime->targetprop);
+}
+
+static PropRecord *modMpBotsPdChoosePersonalityAttack(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    struct ModMpBotConfig *config = &g_ModMpBotConfigs[slot];
+    PropRecord *candidate;
+    PropRecord *best = NULL;
+    f32 besthealth = 0.0f;
+    f32 health;
+    s32 bestscore = -99999;
+    s32 score;
+    s32 i;
+
+    if (config->type == MODBOT_TYPE_VINDICT)
+    {
+        candidate = modMpBotsResolveTargetCode(runtime->vindicttarget);
+        if (candidate != NULL)
+            return candidate;
+    }
+    else if (config->type == MODBOT_TYPE_STALKER)
+    {
+        candidate = modMpBotsResolveTargetCode(runtime->stalktarget);
+        if (candidate != NULL)
+            return candidate;
+    }
+    else if (config->type == MODBOT_TYPE_UMPIRE)
+    {
+        for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+        {
+            candidate = modMpBotsPdGetParticipantProp(i);
+            if (candidate == NULL || candidate == runtime->chr->prop)
+                continue;
+
+            if (i < MAX_PLAYER_COUNT)
+                score = modMpBotsHumanScore(i);
+            else
+                score = g_ModMpBotRuntime[i - MAX_PLAYER_COUNT].kills;
+
+            if (best == NULL || score > bestscore)
+            {
+                best = candidate;
+                bestscore = score;
+            }
+        }
+        if (best != NULL)
+            return best;
+    }
+    else if (config->type == MODBOT_TYPE_QUARRY)
+    {
+        for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+        {
+            candidate = modMpBotsPdGetParticipantProp(i);
+            if (candidate == NULL || candidate == runtime->chr->prop)
+                continue;
+            health = modMpBotsTargetHealth(candidate);
+            if (best == NULL || health < besthealth)
+            {
+                best = candidate;
+                besthealth = health;
+            }
+        }
+        if (best != NULL)
+            return best;
+    }
+
+    /*
+     * CowardSim's weapon-strength veto is intentionally deferred to the R30
+     * botinv tranche; do not invent a replacement score. PeaceSim is already
+     * exact here because GE can identify unarmed targets directly.
+     */
+    return runtime->targetprop;
+}
+
+static s32 modMpBotsPdGetDistConfig(s32 slot)
+{
+    s32 type = g_ModMpBotConfigs[slot].type;
+
+    if (type == MODBOT_TYPE_PSYCHO)
+        return MODBOT_PD_DISTCFG_KAZE;
+    if (type == MODBOT_TYPE_MELEE)
+        return MODBOT_PD_DISTCFG_CLOSE;
+    if (type == MODBOT_TYPE_TNT)
+        return MODBOT_PD_DISTCFG_SHOOTEXPLOSIVE;
+
+    return MODBOT_PD_DISTCFG_DEFAULT;
+}
+
+static void modMpBotsPdStopAtTravelYaw(struct ModMpBotRuntime *runtime)
+{
+    s32 angle16 = (s32)(runtime->roty * M_U16_MAX_VALUE_F / M_TAU_F);
+    check_set_actor_standing_still(runtime->chr, 0x10, angle16);
+}
+
+static void modMpBotsPdTickDistMode(s32 slot, PropRecord *targetprop)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    struct ModMpBotConfig *config = &g_ModMpBotConfigs[slot];
+    f32 *limits = g_ModMpBotPdDistConfigs[modMpBotsPdGetDistConfig(slot)];
+    f32 distance;
+    f32 minattackdistance;
+    f32 maxattackdistance;
+    f32 limit3;
+    s32 targetparticipant;
+    s16 targetcode;
+    s32 insight;
+    s32 prevmode = runtime->distmode;
+    s32 newmode;
+
+    if (!modMpBotsPdPropAlive(targetprop))
+        return;
+
+    targetparticipant = modMpBotsPdFindParticipant(targetprop);
+    insight = targetparticipant >= 0 ? runtime->chrsinsight[targetparticipant] : FALSE;
+    targetcode = modMpBotsPdTargetCodeForProp(targetprop);
+    distance = modMpBotsPdDistance(runtime->chr, targetprop);
+    minattackdistance = limits[0];
+    maxattackdistance = limits[1];
+    limit3 = limits[2];
+
+    if (config->difficulty == MODBOT_DIFFICULTY_MEAT)
+        minattackdistance *= 0.35f;
+    else if (config->difficulty == MODBOT_DIFFICULTY_EASY)
+        minattackdistance *= 0.5f;
+
+    if (runtime->distmode == MODBOT_PD_DISTMODE_BACKUP)
+        minattackdistance += 25.0f;
+    else if (runtime->distmode == MODBOT_PD_DISTMODE_ADVANCE
+        || runtime->distmode == MODBOT_PD_DISTMODE_GOTO)
+        maxattackdistance -= 25.0f;
+
+    if (distance < minattackdistance)
+        newmode = MODBOT_PD_DISTMODE_BACKUP;
+    else if (distance < maxattackdistance)
+        newmode = MODBOT_PD_DISTMODE_OK;
+    else if (distance < limit3)
+        newmode = MODBOT_PD_DISTMODE_ADVANCE;
+    else
+        newmode = MODBOT_PD_DISTMODE_GOTO;
+
+    if (!(newmode == MODBOT_PD_DISTMODE_BACKUP && insight
+        && runtime->distoverridecode == targetcode))
+    {
+        runtime->distoverridecode = MODBOT_TARGET_NONE;
+        runtime->distoverridetimer60 = 0;
+    }
+
+    if (newmode == MODBOT_PD_DISTMODE_OK)
+    {
+        if (!insight)
+            newmode = MODBOT_PD_DISTMODE_ADVANCE;
+    }
+    else if (newmode == MODBOT_PD_DISTMODE_BACKUP)
+    {
+        if (!insight)
+        {
+            newmode = MODBOT_PD_DISTMODE_ADVANCE;
+            runtime->distoverridecode = targetcode;
+            runtime->distoverridetimer60 = 20 + (s32)(randomGetNext() % 120U);
+        }
+        else if (runtime->distoverridecode != MODBOT_TARGET_NONE)
+        {
+            if (g_ClockTimer < runtime->distoverridetimer60)
+            {
+                runtime->distoverridetimer60 -= g_ClockTimer;
+                newmode = MODBOT_PD_DISTMODE_OK;
+            }
+            else
+            {
+                runtime->distoverridecode = MODBOT_TARGET_NONE;
+                runtime->distoverridetimer60 = 0;
+            }
+        }
+    }
+
+    runtime->distmode = (s8)newmode;
+
+    if (runtime->distmodettl60 >= 0)
+        runtime->distmodettl60 -= g_ClockTimer;
+
+    if (newmode != prevmode
+        || (newmode != MODBOT_PD_DISTMODE_OK
+            && (runtime->chr->actiontype == ACT_STAND || runtime->distmodettl60 <= 0)))
+    {
+        switch (newmode)
+        {
+            case MODBOT_PD_DISTMODE_BACKUP:
+            {
+                f32 dx = targetprop->pos.x - runtime->chr->prop->pos.x;
+                f32 dz = targetprop->pos.z - runtime->chr->prop->pos.z;
+                runtime->manualbackup = TRUE;
+                runtime->roty = atan2f(dx, dz);
+                modMpBotsPdStopAtTravelYaw(runtime);
+                break;
+            }
+            case MODBOT_PD_DISTMODE_OK:
+                runtime->manualbackup = FALSE;
+                modMpBotsPdStopAtTravelYaw(runtime);
+                break;
+            case MODBOT_PD_DISTMODE_ADVANCE:
+            case MODBOT_PD_DISTMODE_GOTO:
+                runtime->manualbackup = FALSE;
+                plot_course_for_actor(runtime->chr, &targetprop->pos, targetprop->stan, SPEED_RUN);
+                runtime->roty = getsubroty(runtime->chr->model);
+                break;
+        }
+
+        runtime->distmodettl60 = 60;
+    }
+}
+
+static void modMpBotsPdTickCore(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    PropRecord *attackprop;
+    PropRecord *aimprop;
+    f32 oldangle;
+    f32 targetangle;
+    f32 tweenangle;
+    f32 diffangle;
+    f32 newangle;
+    f32 dx;
+    f32 dz;
+
+    /* Restore PD's hidden travel heading before GE advances ACT_GOPOS. */
+    setsubroty(runtime->chr->model, runtime->roty);
+
+    modMpBotsPdChooseGeneralTarget(slot);
+    attackprop = modMpBotsPdChoosePersonalityAttack(slot);
+
+    if (attackprop != NULL && g_ModMpBotConfigs[slot].type == MODBOT_TYPE_STALKER
+        && runtime->stalktarget == MODBOT_TARGET_NONE)
+        runtime->stalktarget = modMpBotsPdTargetCodeForProp(attackprop);
+
+    runtime->attackingparticipant = (s16)modMpBotsPdFindParticipant(attackprop);
+
+    if (attackprop != NULL)
+        modMpBotsPdTickDistMode(slot, attackprop);
+
+    oldangle = runtime->lookangle;
+    aimprop = runtime->targetprop;
+
+    if (aimprop != NULL && runtime->targetinsight)
+    {
+        dx = aimprop->pos.x - runtime->chr->prop->pos.x;
+        dz = aimprop->pos.z - runtime->chr->prop->pos.z;
+        targetangle = atan2f(dx, dz) + runtime->zeroangle;
+        targetangle = modMpBotsPdNormalizeAngle(targetangle);
+    }
+    else
+    {
+        targetangle = runtime->roty;
+    }
+
+    tweenangle = g_GlobalTimerDelta * 0.061590049415827f;
+    diffangle = modMpBotsPdAngleDelta(oldangle, targetangle);
+
+    if (diffangle >= 0.0f)
+    {
+        if (diffangle <= tweenangle)
+            newangle = targetangle;
+        else
+            newangle = modMpBotsPdNormalizeAngle(oldangle + tweenangle);
+    }
+    else
+    {
+        if (diffangle >= -tweenangle)
+            newangle = targetangle;
+        else
+            newangle = modMpBotsPdNormalizeAngle(oldangle - tweenangle);
+    }
+
+    runtime->speedtheta = modMpBotsPdAngleDelta(oldangle, newangle);
+    if (g_GlobalTimerDelta > 0.0f)
+    {
+        runtime->speedtheta /= g_GlobalTimerDelta;
+        runtime->speedtheta *= 16.236389160156f;
+    }
+    else
+    {
+        runtime->speedtheta = 0.0f;
+    }
+
+    runtime->lookangle = newangle;
+
+    if (runtime->manualbackup)
+    {
+        runtime->speedmultforwards = -1.0f;
+        runtime->speedmultsideways = 0.0f;
+    }
+    else if (runtime->chr->actiontype == ACT_GOPOS)
+    {
+        runtime->speedmultforwards = 1.0f;
+        runtime->speedmultsideways = 0.0f;
+    }
+    else
+    {
+        runtime->speedmultforwards = 0.0f;
+        runtime->speedmultsideways = 0.0f;
+        runtime->realignangleframe = g_GlobalTimer;
+    }
+
+    /*
+     * P1 intentionally does not fire.  PD botact/botinv weapon state is the
+     * next tranche; using GoldenEye guard ACT_ATTACK here would no longer be a
+     * faithful Simulant backport.
+     */
+}
+
+void modMpBotsTick(void)
+{
+    struct ModMpBotRuntime *runtime;
+    s32 i;
+
+    if (!modMpBotsRuntimeAllowed() || startpadcount <= 0)
+        return;
+
+    for (i = 0; i < g_ModMpBotCount; i++)
+    {
+        runtime = &g_ModMpBotRuntime[i];
+
+        if (runtime->chr == NULL || runtime->chr->model == NULL || runtime->chr->prop == NULL)
+        {
+            runtime->chr = NULL;
+            runtime->targetprop = NULL;
+            if (runtime->respawntimer > 0)
+            {
+                runtime->respawntimer -= g_ClockTimer;
+                continue;
+            }
+            modMpBotsSpawn(i);
+            continue;
+        }
+
+        if (chrIsDead(runtime->chr))
+        {
+            runtime->speedmultforwards = 0.0f;
+            runtime->speedmultsideways = 0.0f;
+            runtime->moveratex = 0.0f;
+            runtime->moveratez = 0.0f;
+
+            if (!runtime->deathrecorded)
+            {
+                modMpBotsRecordDeath(i);
+                runtime->deathrecorded = TRUE;
+                runtime->respawntimer = MODBOT_RESPAWN_TICKS;
+            }
+            else
+            {
+                runtime->respawntimer -= g_ClockTimer;
+                if (runtime->respawntimer <= 0)
+                {
+                    modMpBotsRemoveActor(i);
+                    runtime->respawntimer = 1;
+                }
+            }
+            continue;
+        }
+
+        runtime->deathrecorded = FALSE;
+        modMpBotsPdTickCore(i);
+    }
+}
+
+void modMpBotsPostChrTick(void)
+{
+    struct ModMpBotRuntime *runtime;
+    s32 i;
+
+    if (!modMpBotsRuntimeAllowed())
+        return;
+
+    for (i = 0; i < g_ModMpBotCount; i++)
+    {
+        runtime = &g_ModMpBotRuntime[i];
+
+        if (runtime->chr == NULL || runtime->chr->model == NULL || chrIsDead(runtime->chr))
+            continue;
+
+        /*
+         * GE ACT_GOPOS just updated the model with its route/travel heading.
+         * Save that as PD aibot->roty, then restore PD aibot->lookangle as the
+         * visible heading.  The later animation tranche will also port PD's
+         * angleoffset/player_choose_third_person_animation step.
+         */
+        if (!runtime->manualbackup && runtime->chr->actiontype == ACT_GOPOS)
+            runtime->roty = getsubroty(runtime->chr->model);
+
+        setsubroty(runtime->chr->model, runtime->lookangle);
+    }
+}
+
+
+#endif

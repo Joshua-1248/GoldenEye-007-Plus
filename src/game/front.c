@@ -298,6 +298,7 @@ s32 highlight_noradar;
 #ifdef GE_MODDED_CHEATS
 s32 highlight_viewportlock;
 s32 highlight_killcount;
+s32 highlight_friendlyfire;
 #endif
 s32 mp_player_options_player;
 s32 mp_player_options_highlight;
@@ -644,6 +645,18 @@ struct mp_stage_setup multi_stage_setups[] = {
 
 s32 num_chars_selectable_mp = 8;
 
+#ifdef GE_MODDED_CHEATS
+#define MP_JOSH_7774_HEAD HEAD_Male_Josh
+#define MP_TEGGUY1989_HEAD HEAD_Male_Tegguy1989
+#define MP_GFSUBDRAG_HEAD HEAD_Male_GFSubDrag
+#define MP_GFTREVOR_HEAD HEAD_Male_GFTrevor
+#else
+#define MP_JOSH_7774_HEAD HEAD_Male_Dwayne
+#define MP_TEGGUY1989_HEAD HEAD_Male_Shaun
+#define MP_GFSUBDRAG_HEAD HEAD_Male_Shaun
+#define MP_GFTREVOR_HEAD HEAD_Male_Shaun
+#endif
+
 #ifdef BUGFIX_R0
 struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_184_BOND), MALE,   IMG_MPC_BROSNAN, BODY_Brosnan_Tuxedo,                   HEAD_Male_Brosnan_Tuxedo, 1.0},
@@ -710,7 +723,10 @@ struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_224_MARION), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Marion_Rosika, 1.0446},
     {getStringID(LTITLE, TITLE_STR_225_MANDY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Mandy, 1.0446},
     {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446},
-    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, HEAD_Male_Dwayne, 1.0}
+    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_JOSH_7774_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_TEGGUY1989), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_TEGGUY1989_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_GF_SUBDRAG), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFSUBDRAG_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_GF_TREVOR), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFTREVOR_HEAD, 1.0}
 };
 #else
 struct MP_selectable_chars mp_chr_setup[] = {
@@ -778,7 +794,10 @@ struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_224_MARION), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Marion_Rosika, 1.0446},
     {getStringID(LTITLE, TITLE_STR_225_MANDY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Mandy, 1.0446},
     {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446},
-    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, HEAD_Male_Dwayne, 1.0}
+    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_JOSH_7774_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_TEGGUY1989), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_TEGGUY1989_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_GF_SUBDRAG), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFSUBDRAG_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_GF_TREVOR), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFTREVOR_HEAD, 1.0}
 };
 #endif
 
@@ -5778,6 +5797,7 @@ void init_menu_mp_settings(void)
     highlight_noradar = FALSE;
     highlight_viewportlock = FALSE;
     highlight_killcount = FALSE;
+    highlight_friendlyfire = FALSE;
     load_walletbond();
 }
 
@@ -5804,10 +5824,15 @@ void interface_menu_mp_settings(void)
         highlight_noradar = FALSE;
         highlight_viewportlock = FALSE;
         highlight_killcount = FALSE;
+        highlight_friendlyfire = FALSE;
 
         if (frontCheckCursorOnPreviousTab())
         {
             tab_prev_highlight = TRUE;
+        }
+        else if (cursor_v_pos >= 0xf2)
+        {
+            highlight_friendlyfire = TRUE;
         }
         else if (cursor_v_pos >= 0xde)
         {
@@ -5892,6 +5917,10 @@ void interface_menu_mp_settings(void)
         {
             g_MpKillCountMessageEnabled ^= 1;
         }
+        else if (highlight_friendlyfire)
+        {
+            g_ModMpFriendlyFireEnabled ^= 1;
+        }
     }
 }
 
@@ -5921,14 +5950,14 @@ Gfx *constructor_menu_mp_settings(Gfx *DL)
     if (_highlight) DL = microcode_constructor_related_to_menus(DL, 0x37, y - 1, tw + 0x3c, y + 0xe, 0x32); \
     DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, (_enabled) ? 0xff : 0x70, viGetX(), viGetY(), 0, 0)
 
-    /* Six rows fit the folder without pushing the new global HUD toggle into
-     * the Previous-tab footer. */
+    /* Seven selectable multiplayer settings, with independent live friendly fire. */
     MPSETTINGS_ROW(langGet(getStringID(LTITLE, TITLE_STR_83_HEALTH)), 0x7a, highlight_health, unlock_handicap);
     MPSETTINGS_ROW(langGet(getStringID(LTITLE, TITLE_STR_286_CONTROLSTYLE)), 0x8e, highlight_controlstyle, unlock_control_style);
     MPSETTINGS_ROW((u8 *)"Player Options", 0xa2, highlight_aimadjustment, TRUE);
     MPSETTINGS_ROW(cheatGetMenuTextPointer(CHEAT_NO_RADAR_MP), 0xb6, highlight_noradar, frontCheckIfCheatIsUnlocked(CHEAT_NO_RADAR_MP));
     MPSETTINGS_ROW((u8 *)"Lock Viewport", 0xca, highlight_viewportlock, TRUE);
     MPSETTINGS_ROW((u8 *)frontModGetOptionLabel(45), 0xde, highlight_killcount, TRUE);
+    MPSETTINGS_ROW((u8 *)"Friendly Fire", 0xf2, highlight_friendlyfire, TRUE);
 #undef MPSETTINGS_ROW
 
     text = langGet(g_CheatActivated[CHEAT_NO_RADAR_MP] ? getStringID(LTITLE, TITLE_STR_115_ON) : getStringID(LTITLE, TITLE_STR_116_OFF));
@@ -5943,6 +5972,10 @@ Gfx *constructor_menu_mp_settings(Gfx *DL)
 
     text = langGet(g_MpKillCountMessageEnabled ? getStringID(LTITLE, TITLE_STR_115_ON) : getStringID(LTITLE, TITLE_STR_116_OFF));
     x = 0x120; y = 0xde;
+    DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+
+    text = (u8 *)(g_ModMpFriendlyFireEnabled ? "ON" : "OFF");
+    x = 0x120; y = 0xf2;
     DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
 
     DL = frontAddPreviousTabText(DL);
@@ -5987,6 +6020,10 @@ void interface_menu_mp_bot_settings(void)
         if (row >= 0 && row < MOD_MP_BOT_MAX)
             g_ModMpBotSettingsChoice = row;
     }
+    else if (!tab_prev_highlight && cursor_h_pos >= 53.0f
+        && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 0x119 && cursor_v_pos < 0x12d)
+        g_ModMpBotSettingsChoice = MOD_MP_BOT_MAX;
 
     if (pressed & B_BUTTON)
     {
@@ -5999,6 +6036,14 @@ void interface_menu_mp_bot_settings(void)
     {
         sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         frontChangeMenu(MENU_MP_OPTIONS, FALSE);
+        return;
+    }
+
+    if (g_ModMpBotSettingsChoice == MOD_MP_BOT_MAX
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        g_ModMpBotDamageSoundEnabled ^= 1;
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         return;
     }
 
@@ -6066,6 +6111,21 @@ Gfx *constructor_menu_mp_bot_settings(Gfx *DL)
             viGetX(), viGetY(), 0, 0);
     }
 
+    y = 0x11a;
+    textMeasure(&th, &tw, (u8 *)"Taking Damage Sound (Bots)",
+        ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+    if (g_ModMpBotSettingsChoice == MOD_MP_BOT_MAX)
+        DL = microcode_constructor_related_to_menus(DL,
+            0x37, y - 1, tw + 0x3c, y + 0xe, 0x32);
+    x = 0x39;
+    DL = frontPrintText(DL, &x, &y, (u8 *)"Taking Damage Sound (Bots)",
+        ptrFontZurichBoldChars, ptrFontZurichBold, 0xff,
+        viGetX(), viGetY(), 0, 0);
+    x = 0x160;
+    DL = frontPrintText(DL, &x, &y, (u8 *)(g_ModMpBotDamageSoundEnabled ? "On" : "Off"),
+        ptrFontZurichBoldChars, ptrFontZurichBold, 0xff,
+        viGetX(), viGetY(), 0, 0);
+
     DL = frontAddPreviousTabText(DL);
     DL = frontDrawCursor(DL);
     return DL;
@@ -6117,7 +6177,7 @@ void interface_menu_mp_bot_edit(void)
 Gfx *constructor_menu_mp_bot_edit(Gfx *DL)
 {
     char title[40]; const char *value; s32 x,y,th,tw,row;
-    static const char *labels[4] = {"Rename Bot", "Character", "Difficulty", "Personality Traits"};
+    static const char *labels[4] = {"Rename Bot", "Character", "Difficulty", "Traits"};
     DL=viSetFillColor(DL,0,0,0); DL=viFillScreen(DL); DL=frontSetupMenuBackground(DL); DL=microcode_constructor(DL);
     sprintf(title,"%s Settings",modMpBotGetDisplayName(g_ModMpBotEditSlot)); x=0x37; y=0x68;
     DL=frontPrintText(DL,&x,&y,(u8*)title,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
@@ -6160,13 +6220,13 @@ void interface_menu_mp_bot_traits(void)
     s32 choice=-1;
     viSetFovY(FOV_Y_F);viSetAspect(ASPECT_RATIO_SD);viSetZRange(100.0f,10000.0f);viSetUseZBuf(0);
     tab_prev_highlight=frontCheckCursorOnPreviousTab();
-    if(!tab_prev_highlight && cursor_v_pos>=0x70 && cursor_v_pos<0xd2)
+    if(!tab_prev_highlight && cursor_v_pos>=0x60 && cursor_v_pos<0xb4)
     {
-        row=((s32)cursor_v_pos-0x70)/0x0e;
+        row=((s32)cursor_v_pos-0x60)/0x0c;
         if(row>=0 && row<7)
         {
             if(cursor_h_pos>=0x35 && cursor_h_pos<0xc8) choice=row;
-            else if(cursor_h_pos>=0xd8 && cursor_h_pos<0x18c && row<6) choice=7+row;
+            else if(cursor_h_pos>=0xd8 && cursor_h_pos<0x18c && row<7) choice=7+row;
         }
     }
     if(choice>=0 && choice<MODBOT_TRAIT_COUNT) g_ModMpBotTraitChoice=choice;
@@ -6178,22 +6238,46 @@ void interface_menu_mp_bot_traits(void)
     }
     disable_all_switches(walletinst[0]);set_item_visibility_in_objinstance(walletinst[0],SW_TABS,1);set_item_visibility_in_objinstance(walletinst[0],SW_PAPER,1);set_item_visibility_in_objinstance(walletinst[0],SW_OHMSS,1);set_item_visibility_in_objinstance(walletinst[0],SW_CONFIDENTIAL2,1);frontUpdateControlStickPosition();
 }
+/* Long Traits descriptions reside in physical game .text, not startup CDATA. */
+extern const char * const g_ModMpBotTraitDescriptions[MODBOT_TRAIT_COUNT];
+
 Gfx *constructor_menu_mp_bot_traits(Gfx *DL)
 {
-    s32 x,y,th,tw,i,row;const char *text;u16 bit;char wrapped[192];
+    s32 x,y,th,tw,i,row;const char *text;u16 bit;char wrapped[256];
     DL=viSetFillColor(DL,0,0,0);DL=viFillScreen(DL);DL=frontSetupMenuBackground(DL);DL=microcode_constructor(DL);
-    x=0x37;y=0x55;DL=frontPrintText(DL,&x,&y,(u8*)"PERSONALITY TRAITS",ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
+    x=0x37;y=0x49;DL=frontPrintText(DL,&x,&y,(u8*)"TRAITS",ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
     for(i=0;i<MODBOT_TRAIT_COUNT;i++)
     {
-        row=i<7?i:i-7;x=i<7?0x37:0xdc;y=0x70+row*0x0e;text=modMpBotGetTraitName(i);
+        row=i<7?i:i-7;x=i<7?0x37:0xdc;y=0x60+row*0x0c;text=modMpBotGetTraitName(i);
         textMeasure(&th,&tw,(u8*)text,ptrFontZurichBoldChars,ptrFontZurichBold,0);
         if(i==g_ModMpBotTraitChoice&&!frontCheckCursorOnPreviousTab())DL=microcode_constructor_related_to_menus(DL,x-2,y-1,x+tw+5,y+0xd,0x32);
         DL=frontPrintText(DL,&x,&y,(u8*)text,ptrFontZurichBoldChars,ptrFontZurichBold,0xff,viGetX(),viGetY(),0,0);
         bit=(u16)(1U<<i);x=i<7?0xb3:0x158;text=(g_ModMpBotConfigs[g_ModMpBotEditSlot].traits&bit)?"Yes":"No";
         DL=frontPrintText(DL,&x,&y,(u8*)text,ptrFontZurichBoldChars,ptrFontZurichBold,(g_ModMpBotConfigs[g_ModMpBotEditSlot].traits&bit)?0xA00000FF:0xff,viGetX(),viGetY(),0,0);
     }
-    text=langGet(getStringID(LTITLE,TITLE_STR_BOTTRAIT_PACIFIST_DESC+g_ModMpBotTraitChoice));textWrap(0x140,(u8*)text,(u8*)wrapped,ptrFontBankGothicChars,ptrFontBankGothic);
-    x=0x39;y=0xd3;DL=frontPrintText(DL,&x,&y,(u8*)wrapped,ptrFontBankGothicChars,ptrFontBankGothic,0xff,viGetX(),viGetY(),0,0);
+    /* Wrap inside the paper, then center each physical line separately.
+     * The former 0x17c wrap could extend beyond the folder's right edge. */
+    text=(u32)g_ModMpBotTraitChoice<MODBOT_TRAIT_COUNT ? g_ModMpBotTraitDescriptions[g_ModMpBotTraitChoice] : "";
+    textWrap(0x118,(u8*)text,(u8*)wrapped,ptrFontBankGothicChars,ptrFontBankGothic);
+    {
+        char *line=wrapped;
+        s32 linenum=0;
+        while(line!=NULL && *line && linenum<7)
+        {
+            char *end=line;
+            char *next=NULL;
+            while(*end && *end!='\n') end++;
+            if(*end=='\n') next=end+1;
+            *end='\0';
+            while(end>line && end[-1]==' ') *--end='\0';
+            textMeasure(&th,&tw,(u8*)line,ptrFontBankGothicChars,ptrFontBankGothic,0);
+            x=0xe0-(tw>>1);
+            y=0xb7+linenum*0x10;
+            DL=frontPrintText(DL,&x,&y,(u8*)line,ptrFontBankGothicChars,ptrFontBankGothic,0xff,viGetX(),viGetY(),0,0);
+            line=next;
+            linenum++;
+        }
+    }
     DL=frontAddPreviousTabText(DL);DL=frontDrawCursor(DL);return DL;
 }
 
@@ -9667,6 +9751,7 @@ static s32 frontModIsHiddenCheat(s32 cheat)
         case CHEAT_ULTRA_KINETICS:
         case CHEAT_LEVEL_NEVER_ENDS:
         case CHEAT_FREEZE_TIMER:
+        case CHEAT_MAX_HEAD_ON_MODE:
         case CHEAT_SUPER_TANK:
         case CHEAT_MIRRORED_LEVELS:
             return TRUE;
@@ -9697,6 +9782,7 @@ u8 *frontModGetCheatMenuText(s32 cheat)
         case CHEAT_ULTRA_KINETICS: return (u8 *)"Ultra Kinetics";
         case CHEAT_LEVEL_NEVER_ENDS: return (u8 *)"Level Never Ends";
         case CHEAT_FREEZE_TIMER: return (u8 *)"Freeze Timer";
+        case CHEAT_MAX_HEAD_ON_MODE: return (u8 *)"Max Head-On";
         case CHEAT_SUPER_TANK: return (u8 *)"Super Tank";
         case CHEAT_MIRRORED_LEVELS: return (u8 *)"Mirrored Levels";
     }
@@ -9710,6 +9796,7 @@ static void frontModBuildCheatPage(s32 page)
         CHEAT_KINETIC_EXPLOSIONS,
         CHEAT_ULTRA_KINETICS,
         CHEAT_SUPER_TANK,
+        CHEAT_MAX_HEAD_ON_MODE,
         CHEAT_MIRRORED_LEVELS,
         CHEAT_LEVEL_NEVER_ENDS,
         CHEAT_FREEZE_TIMER,

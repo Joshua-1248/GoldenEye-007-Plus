@@ -5,6 +5,9 @@
 #include "bondconstants.h"
 #include "bondview.h"
 #include "gun.h"
+#ifdef GE_MODDED_CHEATS
+#include "front.h"
+#endif
 #include "player.h"
 
 
@@ -235,7 +238,41 @@ void init_player_BONDdata_stats(void)
 
     sp24 = hand_data_dummy;
 
-    g_CurrentPlayer->ptr_hand_weapon_buffer[GUNRIGHT] = mempAllocBytesInBank(size_item_buffer[0], MEMPOOL_STAGE);
+#if defined(GE_MODDED_CHEATS) && defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+    /* P26 R8: when exactly two human players are in campaign Co-Op, the
+     * dedicated four-slot MP off-hand reservation only uses slots 0 and 1.
+     * Keep BOTH players' right-hand buffers in idle slots 2 and 3, without
+     * shrinking either hand or touching any Co-Op GFX/VTX memory.  This
+     * returns two complete 0x14820-byte allocations to MEMPOOL_STAGE for
+     * level initialization and bot animated-model instances.  Every other
+     * player count and mode retains its existing allocation behavior. */
+    if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP
+        && getPlayerCount() == 2 && get_cur_playernum() >= 0
+        && get_cur_playernum() < 2)
+    {
+        extern u8 _mpLeftWeaponBuffersStart[];
+        extern u8 _mpLeftWeaponBuffersEnd[];
+        u32 stride = size_item_buffer[1];
+        u32 slot = (u32)get_cur_playernum() + 2U;
+
+        /* Ensure this configuration still fits if hand-buffer sizes change
+         * in a future build; never use an active player's slot or cross the
+         * linker-owned reservation boundary. */
+        if (size_item_buffer[0] <= stride && stride > 0
+            && (u32)(_mpLeftWeaponBuffersEnd - _mpLeftWeaponBuffersStart)
+                >= (slot + 1U) * stride)
+            g_CurrentPlayer->ptr_hand_weapon_buffer[GUNRIGHT] =
+                _mpLeftWeaponBuffersStart + slot * stride;
+        else
+            g_CurrentPlayer->ptr_hand_weapon_buffer[GUNRIGHT] =
+                mempAllocBytesInBank(size_item_buffer[0], MEMPOOL_STAGE);
+    }
+    else
+#endif
+    {
+        g_CurrentPlayer->ptr_hand_weapon_buffer[GUNRIGHT] =
+            mempAllocBytesInBank(size_item_buffer[0], MEMPOOL_STAGE);
+    }
 
     if (getPlayerCount() == 1)
     {

@@ -30,11 +30,71 @@ static u8 g_MissionItemModeActive[4];
 static PropRecord *g_CoopSharedProps[COOP_SHARED_PROP_MAX];
 static u8 g_CoopSharedItems[ITEM_IDS_MAX];
 static s32 g_CoopSharedPropCount;
+static s32 g_CoopSharingProp;
+static u8 g_CoopInventoryReconcileClock;
+/* PROPDEF_RENAME records are parsed once during setup, when the last Bond
+ * is the current player. They describe the SAME world props for every
+ * Co-Op human; store the shared head so earlier players can resolve keys
+ * and mission gadgets to their proper inventory names and weapon IDs. */
+static textoverride *g_CoopMissionTextOverrides;
+
+/* Remember the gadget which actually activated a scripted objective, not the
+ * weapon held by whichever player the background AI happens to be ticking.
+ * Four Co-Op humans can act on different props during one simulation frame. */
+#define COOP_GADGET_ACTIVATIONS 8
+static ObjectRecord *g_CoopGadgetObjects[COOP_GADGET_ACTIVATIONS];
+static s16 g_CoopGadgetItems[COOP_GADGET_ACTIVATIONS];
+static u8 g_CoopGadgetNext;
+
+void bondinvCoopRecordGadgetActivation(ObjectRecord *obj, ITEM_IDS item)
+{
+    s32 i;
+
+    if (obj == NULL || get_scenario() != SCENARIO_COOP)
+        return;
+
+    for (i = 0; i < COOP_GADGET_ACTIVATIONS; i++)
+    {
+        if (g_CoopGadgetObjects[i] == obj)
+            break;
+    }
+
+    if (i == COOP_GADGET_ACTIVATIONS)
+    {
+        i = g_CoopGadgetNext;
+        g_CoopGadgetNext = (g_CoopGadgetNext + 1) % COOP_GADGET_ACTIVATIONS;
+    }
+
+    g_CoopGadgetObjects[i] = obj;
+    g_CoopGadgetItems[i] = item;
+}
+
+s32 bondinvCoopTakeGadgetActivation(ObjectRecord *obj)
+{
+    s32 i;
+
+    for (i = 0; i < COOP_GADGET_ACTIVATIONS; i++)
+    {
+        if (obj != NULL && g_CoopGadgetObjects[i] == obj)
+        {
+            s32 item = g_CoopGadgetItems[i];
+            g_CoopGadgetObjects[i] = NULL;
+            return item;
+        }
+    }
+
+    return -1;
+}
 
 void bondinvResetCoopSharedProps(void)
 {
     g_CoopSharedPropCount = 0;
+    g_CoopSharingProp = FALSE;
+    g_CoopInventoryReconcileClock = 0;
+    g_CoopMissionTextOverrides = NULL;
     bzero(g_CoopSharedItems, sizeof(g_CoopSharedItems));
+    bzero(g_CoopGadgetObjects, sizeof(g_CoopGadgetObjects));
+    g_CoopGadgetNext = 0;
 }
 
 void bondinvShareCoopItem(ITEM_IDS item)
@@ -69,24 +129,127 @@ void bondinvShareCoopProp(PropRecord *prop)
 {
     s32 savedplayer = get_cur_playernum();
     s32 i;
+    s32 alreadyregistered = FALSE;
 
-    /* A TICKOP_GIVETOPLAYER mission prop is detached on pickup, so the same
-     * physical prop cannot normally be registered twice. */
-    if (g_CoopSharedPropCount < COOP_SHARED_PROP_MAX)
-    {
-        g_CoopSharedProps[g_CoopSharedPropCount++] = prop;
-    }
+    if (prop == NULL || get_scenario() != SCENARIO_COOP)
+        return;
 
-    for (i = 0; i < getPlayerCount(); i++)
+    for (i = 0; i < g_CoopSharedPropCount; i++)
     {
-        if (i != savedplayer)
+        if (g_CoopSharedProps[i] == prop)
         {
-            set_cur_player(i);
-            bondinvAddPropToInv(prop);
+            alreadyregistered = TRUE;
+            break;
         }
     }
 
+    if (!alreadyregistered && g_CoopSharedPropCount < COOP_SHARED_PROP_MAX)
+        g_CoopSharedProps[g_CoopSharedPropCount++] = prop;
+
+    /* Mission props must be available to every player even if the source is
+     * an AI command rather than an ordinary walk-over pickup. Guard against
+     * recursively propagating the grants we are performing here. */
+    g_CoopSharingProp = TRUE;
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        if (g_playerPointers[i] != NULL && i != savedplayer)
+        {
+            set_cur_player(i);
+            if (!bondinvHasPropInInv(prop))
+                bondinvAddPropToInv(prop);
+        }
+    }
     set_cur_player(savedplayer);
+    g_CoopSharingProp = FALSE;
+}
+
+int bondinvHasInvItem(ITEM_IDS item);
+
+/* R12 R1: The pickup path is not sufficient to guarantee four independent
+ * Bond inventories contain the same mission item.  In particular, a scripted
+ * collection can run under the last player context. Reconcile the actual
+ * inventories, rather than trusting a one-time grant to reach every Bond.
+ * The sweep is stage-local, bounded, and runs once per twelve live ticks. */
+void bondinvCoopReconcileTeamInventory(void)
+{
+    s32 savedplayer;
+    s32 count;
+    s32 i;
+    s32 j;
+
+    if (get_scenario() != SCENARIO_COOP
+        || (count = getPlayerCount()) < 2 || g_CoopSharingProp)
+        return;
+
+    if (++g_CoopInventoryReconcileClock < 12)
+        return;
+    g_CoopInventoryReconcileClock = 0;
+
+    savedplayer = get_cur_playernum();
+    g_CoopSharingProp = TRUE;
+
+    /* Harvest items from each live inventory, including items whose initial
+     * pickup never reached the shared registry. Ignore ordinary guns/ammo. */
+    for (i = 0; i < count; i++)
+    {
+        struct player *p = g_playerPointers[i];
+        InvItem *first;
+        InvItem *entry;
+        s32 n;
+
+        if (p == NULL || p->p_itemcur == NULL || p->equipmaxitems <= 0)
+            continue;
+
+        first = p->ptr_inventory_first_in_cycle;
+        entry = first;
+        for (n = 0; entry != NULL && n < p->equipmaxitems; n++)
+        {
+            if (entry->type == INV_ITEM_WEAPON)
+            {
+                s32 id = entry->type_inv_item.type_weap.weapon;
+                if (id >= ITEM_BOMBCASE && id <= ITEM_KEYBOLT)
+                    g_CoopSharedItems[id] = TRUE;
+            }
+            else if (entry->type == INV_ITEM_PROP)
+            {
+                PropRecord *prop = entry->type_inv_item.type_prop.prop;
+                if (prop != NULL && prop->obj != NULL
+                    && (prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON)
+                    && (prop->obj->type != PROPDEF_COLLECTABLE
+                        || (((WeaponObjRecord *)prop->obj)->weaponnum >= ITEM_BOMBCASE
+                            && ((WeaponObjRecord *)prop->obj)->weaponnum <= ITEM_KEYBOLT)))
+                {
+                    for (j = 0; j < g_CoopSharedPropCount; j++)
+                        if (g_CoopSharedProps[j] == prop)
+                            break;
+                    if (j == g_CoopSharedPropCount
+                        && g_CoopSharedPropCount < COOP_SHARED_PROP_MAX)
+                        g_CoopSharedProps[g_CoopSharedPropCount++] = prop;
+                }
+            }
+            entry = entry->next;
+            if (entry == first)
+                break;
+        }
+    }
+
+    /* Every human gets an actual inventory entry, not merely a shared
+     * objective flag. This also repairs entries lost through respawn/reset. */
+    for (i = 0; i < count; i++)
+    {
+        struct player *p = g_playerPointers[i];
+        if (p == NULL || p->p_itemcur == NULL || p->equipmaxitems <= 0)
+            continue;
+        set_cur_player(i);
+        for (j = 0; j < g_CoopSharedPropCount; j++)
+            if (!bondinvHasPropInInv(g_CoopSharedProps[j]))
+                bondinvAddPropToInv(g_CoopSharedProps[j]);
+        for (j = ITEM_BOMBCASE; j <= ITEM_KEYBOLT; j++)
+            if (g_CoopSharedItems[j] && !bondinvHasInvItem(j))
+                bondinvAddInvItem(j);
+    }
+    set_cur_player(savedplayer);
+    g_CoopSharingProp = FALSE;
 }
 
 static s32 bondinvHandIsReloading(enum GUNHAND hand)
@@ -630,6 +793,14 @@ int bondinvAddPropToInv(PropRecord *prop)
 {
     InvItem *item;
 
+#ifdef GE_MODDED_CHEATS
+    /* A shared mission prop is still one inventory entry per human. Avoid
+     * duplicates when a pickup path and AI script both grant the same prop. */
+    if (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1
+        && bondinvHasPropInInv(prop))
+        return TRUE;
+#endif
+
     item = bondinvGetNextAvailItem();
 
     if (item)
@@ -637,6 +808,17 @@ int bondinvAddPropToInv(PropRecord *prop)
         item->type                         = INV_ITEM_PROP;
         item->type_inv_item.type_prop.prop = prop;
         bondinvInsertItem(item);
+#ifdef GE_MODDED_CHEATS
+        /* Centralize team propagation. Facility's scripted key/decoder grants
+         * must not depend on reaching propPickupByPlayer's optional hook. */
+        if (!g_CoopSharingProp && get_scenario() == SCENARIO_COOP
+            && getPlayerCount() > 1
+            && prop != NULL && prop->obj != NULL
+            && (prop->obj->type != PROPDEF_COLLECTABLE
+                || (((WeaponObjRecord *)prop->obj)->weaponnum >= ITEM_BOMBCASE
+                    && ((WeaponObjRecord *)prop->obj)->weaponnum <= ITEM_KEYBOLT)))
+            bondinvShareCoopProp(prop);
+#endif
     }
 
     return TRUE;
@@ -1387,9 +1569,21 @@ InvItem *bondinvGetItemByIndex(s32 index)
     return NULL;
 }
 
+/* A prop-inventory entry must resolve through the stage's setup rename
+ * records, not just the current viewport's private Bond metadata. This also
+ * survives a Co-Op player's bondinvReinitInv() on respawn. */
+static textoverride *bondinvGetTextOverrideHead(void)
+{
+#ifdef GE_MODDED_CHEATS
+    if (g_CoopMissionTextOverrides != NULL && get_scenario() == SCENARIO_COOP)
+        return g_CoopMissionTextOverrides;
+#endif
+    return g_CurrentPlayer->textoverrides;
+}
+
 textoverride *bondinvGetTextbyObj(ObjectRecord *obj)
 {
-    textoverride *override = g_CurrentPlayer->textoverrides;
+    textoverride *override = bondinvGetTextOverrideHead();
 
     while (override)
     {
@@ -1406,7 +1600,7 @@ textoverride *bondinvGetTextbyObj(ObjectRecord *obj)
 
 textoverride *bondinvGetTextbyWeaponID(ITEM_IDS weaponnum)
 {
-    textoverride *override = g_CurrentPlayer->textoverrides;
+    textoverride *override = bondinvGetTextOverrideHead();
 
     while (override)
     {
@@ -1787,6 +1981,12 @@ void bondinvAddTextOverride(textoverride *override)
 {
     override->next                 = g_CurrentPlayer->textoverrides;
     g_CurrentPlayer->textoverrides = override;
+#ifdef GE_MODDED_CHEATS
+    /* Level setup currently runs under the last active player. The linked
+     * records themselves are stage-global, not owned by that player. */
+    if (get_scenario() == SCENARIO_COOP)
+        g_CoopMissionTextOverrides = override;
+#endif
 }
 
 int bondinvGetCurEquippedItem(void)

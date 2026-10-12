@@ -878,6 +878,10 @@ struct fileentry file_resource_table[] = {
     {BG_COURTYARD_ALL_P, "cb", &bg_courtyard_all_p_seg},
     {BG_COURTYARD_ALL_P_STAN, "cs", &Tbg_courtyard_all_p_stanZ},
     {MP_SETUPCOURTYARD, "Ump_cZ", &Ump_setupcourtyardZ},
+    {HEADJOSH, "CheadjoshZ", &CheadjoshZ},
+    {HEADTEGGUY, "CheadtegguyZ", &CheadtegguyZ},
+    {HEADGFSUBDRAG, "CheadgfsubdragZ", &CheadgfsubdragZ},
+    {HEADGFTREVOR, "CheadgftrevorZ", &CheadgftrevorZ},
 #endif
     
     {OBENDSEG, "ob/ob_end.seg", &ob__ob_end_seg},

@@ -1,0 +1,25 @@
+--- scripts/audit_special_options_aa_crouch_v40.py
++++ scripts/audit_special_options_aa_crouch_v40.py
+@@ -13,22 +13,6 @@
+ MAKE=(R/'Makefile').read_text(errors='replace')
+ checks=[]
+ def ck(n,c):
+-    if n == 'Anti-Aliasing is exposed through Enhancements in main and Patches in SP/MP watch' and not c:
+-        enh_start = FRONT.find('void interface_menu_enhancements_options(void)')
+-        enh_ctor = FRONT.find('Gfx *constructor_menu_enhancements_options(Gfx *DL)')
+-        enh_toggle = FRONT.find('g_ModAntiAliasingEnabled ^= 1;', enh_start)
+-        enh_label = FRONT.find('frontModGetOptionLabel(50)', enh_ctor)
+-        c = (enh_start >= 0
+-             and enh_ctor > enh_start
+-             and enh_toggle > enh_start
+-             and enh_toggle < enh_ctor
+-             and enh_label > enh_ctor
+-             and 'frontModGetOptionLabel(50)' in OPT
+-             and 'g_ModAntiAliasingEnabled ^= 1;' in OPT
+-             and 'value = g_ModAntiAliasingEnabled ? "on" : "off";' in OPT
+-             and 'frontModGetOptionLabel(50)' in MP
+-             and 'g_ModAntiAliasingEnabled ^= 1;' in MP
+-             and 'return g_ModAntiAliasingEnabled != 0;' in MP)
+     checks.append((n,bool(c))); print(('[PASS] ' if c else '[FAIL] ')+n)
+ ck('positive Special Options labels are present', all(x in SPEC for x in ['Damage Hitstun','Damage Knockback','Noise Dithering']))
+ ck('Directional Shoulder compact label remains', 'Directional Shoulder' in SPEC and 'Directional Shoulder View Toggle' not in SPEC)

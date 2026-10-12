@@ -8,6 +8,24 @@ $(BUILD_DIR)/$(OBSEG_DIR)/chr/%.rz: $(BUILD_DIR)/$(OBSEG_DIR)/chr/%.bin
 $(BUILD_DIR)/$(OBSEG_DIR)/chr/%.bin: $(BUILD_DIR)/$(OBSEG_DIR)/chr/%.elf
 	$(OBJCOPY) $< $@ -O binary
 
+# Josh_7774: the entire native head is held in Model.c's .data words.
+# The regular ELF-to-binary extraction can also include a linker-generated
+# .got tail, which is NOT part of the model and corrupts the GDL end boundary.
+# Make this an exact-target rule: no other character resource is changed.
+$(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadjoshZ.bin: $(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadjoshZ.elf
+	$(OBJCOPY) -j .data $< $@ -O binary
+
+# New Tegguy1989 head uses the same exact .data extraction as Josh;
+# never include linker-generated GOT bytes in the native model resource.
+$(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadtegguyZ.bin: $(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadtegguyZ.elf
+	$(OBJCOPY) -j .data $< $@ -O binary
+
+# Goldfinger 64 standalone heads: native .data only (no linker-generated GOT).
+$(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadgfsubdragZ.bin: $(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadgfsubdragZ.elf
+	$(OBJCOPY) -j .data $< $@ -O binary
+$(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadgftrevorZ.bin: $(BUILD_DIR)/$(OBSEG_DIR)/chr/CheadgftrevorZ.elf
+	$(OBJCOPY) -j .data $< $@ -O binary
+
 # Build .elf from Model.o (and Switches.o if it exists)
 # The pattern C%Z.elf extracts the chr name from the target
 $(BUILD_DIR)/$(OBSEG_DIR)/chr/C%Z.elf: $(BUILD_DIR)/$(OBSEG_DIR)/chr/%/Model.o

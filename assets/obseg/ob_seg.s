@@ -953,6 +953,13 @@ Tbg_courtyard_all_p_stanZ:
 Ump_setupcourtyardZ:
 .incbin "assets/obseg/setup/Ump_setupcourtyardZ.rz"
 .balign 16
+/* The new Josh head is an appended resource; Lee and Dwayne remain untouched. */
+obseg_file_Z chr, CheadjoshZ
+/* Standalone Tegguy1989 head; retail Shaun is unchanged. */
+obseg_file_Z chr, CheadtegguyZ
+/* Goldfinger 64: additive Hall-of-Famers head models. */
+obseg_file_Z chr, CheadgfsubdragZ
+obseg_file_Z chr, CheadgftrevorZ
 #endif
 
 .global ob__ob_end_seg

@@ -33,6 +33,7 @@
 #include "math_atan2f.h"
 #include "matrixmath.h"
 #ifdef GE_MODDED_CHEATS
+#include "cheat.h"
 #include "mirroredlevels.h"
 #include "levelmodifiers.h"
 #include "mpbots.h"
@@ -111,6 +112,88 @@
     ((MOD_EXPERIMENTAL_JUMP_HEIGHT + 0.5f * 1.388889f * MOD_EXPERIMENTAL_JUMP_FAST_TICKS * MOD_EXPERIMENTAL_JUMP_FAST_TICKS) / MOD_EXPERIMENTAL_JUMP_FAST_TICKS)
 static u8 g_ModExperimentalJumpRequestMask;
 #endif
+#ifdef GE_MODDED_CHEATS
+/* Max Head-On Mode intentionally recreates the run-over SFX retrigger from
+ * jkdansereau/goldeneye-pc-port issue #115 (D425). The original port bug
+ * retriggered these sounds every frame while a dying guard remained beneath
+ * the tank. Bound it to 60 game ticks (~1.0s), and never change tank damage,
+ * corpse flags, or the retail one-shot audio when the cheat is off.
+ *
+ * Only a few guards can be under the tank at once; use eight fixed BSS
+ * slots rather than allocating memory or extending ChrRecord/ROM assets.
+ */
+#define MAX_HEADON_SLOTS 8
+#define MAX_HEADON_TICKS 60
+#define MAX_HEADON_INTERVAL 2
+struct MaxHeadOnSoundBurst
+{
+    struct ChrRecord *chr;
+    u32 start_tick;
+    u32 last_tick;
+};
+static struct MaxHeadOnSoundBurst g_MaxHeadOnSoundBursts[MAX_HEADON_SLOTS];
+
+static void maxHeadOnBegin(struct ChrRecord *chr)
+{
+    s32 i;
+    s32 free_slot = -1;
+
+    if (!cheatIsActive(CHEAT_MAX_HEAD_ON_MODE))
+        return;
+
+    for (i = 0; i < MAX_HEADON_SLOTS; i++)
+    {
+        struct MaxHeadOnSoundBurst *burst = &g_MaxHeadOnSoundBursts[i];
+        if (burst->chr == chr &&
+            (u32)(g_GlobalTimer - burst->start_tick) < MAX_HEADON_TICKS)
+            return;
+        if (free_slot < 0 && (burst->chr == NULL ||
+            (u32)(g_GlobalTimer - burst->start_tick) >= MAX_HEADON_TICKS))
+            free_slot = i;
+    }
+
+    if (free_slot >= 0)
+    {
+        struct MaxHeadOnSoundBurst *burst = &g_MaxHeadOnSoundBursts[free_slot];
+        burst->chr = chr;
+        burst->start_tick = (u32)g_GlobalTimer;
+        burst->last_tick = (u32)g_GlobalTimer;
+    }
+}
+
+static void maxHeadOnRepeat(struct ChrRecord *chr, struct coord3d *pos)
+{
+    s32 i;
+
+    if (!cheatIsActive(CHEAT_MAX_HEAD_ON_MODE))
+        return;
+
+    for (i = 0; i < MAX_HEADON_SLOTS; i++)
+    {
+        struct MaxHeadOnSoundBurst *burst = &g_MaxHeadOnSoundBursts[i];
+        u32 elapsed;
+        if (burst->chr != chr)
+            continue;
+        elapsed = (u32)(g_GlobalTimer - burst->start_tick);
+        if (elapsed == 0 || elapsed >= MAX_HEADON_TICKS ||
+            (u32)(g_GlobalTimer - burst->last_tick) < MAX_HEADON_INTERVAL)
+            return;
+
+        burst->last_tick = (u32)g_GlobalTimer;
+        /* Retain the original frame-dependent selection from the port bug.
+         * Retrigger the existing positional samples, with no pitch edits or
+         * extra damage; multiple sounds may overlap as in the reference. */
+        if ((D_80048380 % 3) < 2)
+            chrobjSndCreatePostEventDefault(
+                sndPlaySfx(g_musicSfxBufferPtr, CRUSHED_YELL_SFX, NULL), pos);
+        if ((D_80048380 % 3) > 0)
+            chrobjSndCreatePostEventDefault(
+                sndPlaySfx(g_musicSfxBufferPtr, TANK_CRUSH_MAN_SFX, NULL), pos);
+        return;
+    }
+}
+#endif
+
 /*these*/
 #define MAXTALKMESSLEN 150
 #define MAXMESSAGELEN 100
@@ -9232,6 +9315,9 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
 #endif
                             {
                                 sp6C->chrflags |= CHRFLAG_01000000;
+#ifdef GE_MODDED_CHEATS
+                                maxHeadOnBegin(sp6C);
+#endif
                                 if ((D_80048380 % 3) < 2)
                                 {
                                     chrobjSndCreatePostEventDefault(sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, CRUSHED_YELL_SFX, NULL), &prop->pos);
@@ -9241,6 +9327,11 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
                                     chrobjSndCreatePostEventDefault(sndPlaySfx((struct ALBankAlt_s *) g_musicSfxBufferPtr, TANK_CRUSH_MAN_SFX, NULL), &prop->pos);
                                 }
                             }
+#ifdef GE_MODDED_CHEATS
+                            /* Subsequent tank/guard overlap frames only. Stop as soon
+                             * as the tank leaves the body or the brief burst ends. */
+                            maxHeadOnRepeat(sp6C, &prop->pos);
+#endif
                         }
                     }
 
@@ -12010,6 +12101,12 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
     s32 sp28;
 #ifdef GE_MODDED_CHEATS
     s32 bot_damage_owner = modMpBotsGetDamageOwner();
+    /* Block participant-on-participant damage before rumble, armour,
+     * damage flash or kill-stat bookkeeping. Self damage is unaffected. */
+    if ((bot_damage_owner >= 0 && modMpBotsFriendlyFireBlocksCoopAlly())
+        || (g_ModMpHumanDamageAttack
+            && modMpBotsFriendlyFireBlocksHuman(playerid, get_cur_playernum())))
+        return;
 #endif
 
     if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x0)
@@ -12773,6 +12870,9 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
     s32 view_top;
     s32 view_top_offset;
     s32 view_left_offset;
+#ifdef GE_MODDED_CHEATS
+    s32 fourplayer_locked_door;
+#endif
 
     if ((g_CurrentPlayer->hudmessoff == FALSE) && (g_CurrentPlayer->bondmesscnt >= 0) && (g_CurrentPlayer->mpmenuon == FALSE))
     {
@@ -12796,9 +12896,21 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
             view_left_offset = 0;
             view_top_offset = 0;
 #ifdef GE_MODDED_CHEATS
-            /* RC5: quarter-screen pickup/objective text uses tighter native
-             * Bank Gothic tracking so messages fit the small viewport cleanly. */
-            if (getPlayerCount() > 1)
+            /* The locked-door prompt is a bottom HUD message, not a top
+             * notification.  Give only that prompt compact letter spacing. */
+            fourplayer_locked_door = getPlayerCount() == 4
+                && strcmp(stringbuffer_lowerleft[status_bar_text_buffer_index],
+                    langGet(0xA440)) == 0;
+            if (getPlayerCount() == 4)
+            {
+                /* Four-player Co-Op pickups share the compact HUD tracking
+                 * already confirmed for the locked-door prompt. Keep normal
+                 * competitive multiplayer tracking and 1P HUD unchanged. */
+                setTextSpacingInverted((fourplayer_locked_door
+                    || (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP))
+                    ? 1 : 3);
+            }
+            else if (getPlayerCount() > 1)
             {
                 setTextSpacingInverted(2);
             }
@@ -12818,6 +12930,23 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
                 view_left = viGetViewLeft() + 0x1E;
             }
 
+#ifdef GE_MODDED_CHEATS
+            if (getPlayerCount() == 4)
+            {
+                /* Keep pickup messages three pixels from the left edge of
+                 * their own viewport, regardless of player-number parity. */
+                view_left = viGetViewLeft() + 3;
+                /* Match R12's Co-Op pickup lane: move only non-door
+                 * notices four game pixels right, without moving the door
+                 * message or any single-player/competitive HUD text. */
+                if (gamemode == GAMEMODE_MULTI
+                    && get_scenario() == SCENARIO_COOP
+                    && !fourplayer_locked_door)
+                {
+                    view_left += 4;
+                }
+            }
+#endif
             view_horiz = view_left + view_left_offset;
 
             if (getPlayerCount() < 3)
@@ -12846,6 +12975,29 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
                          + BONDVIEW_VIEW_TOP_OFFSET_3;
             }
 
+#ifdef GE_MODDED_CHEATS
+            if (getPlayerCount() == 4)
+            {
+                /* Top-left pickup lane, beneath the independent top-message
+                 * lane.  This is the bottom edge used by hudmsgBottomRender. */
+                view_top = viGetViewTop() + 24 + view_top_offset;
+            }
+            if (getPlayerCount() == 4
+                && gamemode == GAMEMODE_MULTI
+                && get_scenario() == SCENARIO_COOP
+                && !fourplayer_locked_door)
+            {
+                /* Co-Op pickup messages share the locked-door prompt's
+                 * corrected top-left lane, without affecting other modes. */
+                view_top = viGetViewTop() + 4 + view_top_offset;
+            }
+            if (fourplayer_locked_door)
+            {
+                /* Move this prompt 20 game pixels upward, but preserve its
+                 * measured height so it is not clipped at the top edge. */
+                view_top = viGetViewTop() + 4 + view_top_offset;
+            }
+#endif
             view_vert = view_top - view_top_offset;
             arg0 = draw_blackbox_to_screen(arg0, (s32) &view_left, (s32) &view_vert, (s32) &view_horiz, (s32) &view_top);
             arg0 = combiner_bayer_lod_perspective(textRenderOutlined(arg0, &view_left, &view_vert, stringbuffer_lowerleft[status_bar_text_buffer_index], BONDVIEW_2ND_FONTTABLE(status_bar_text_buffer_index), BONDVIEW_1ST_FONTTABLE(status_bar_text_buffer_index), -1, 0x646464FFU, (s16) (s32) viGetX(), (s16) viGetY(), 0, 0));

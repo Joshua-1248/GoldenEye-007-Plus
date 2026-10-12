@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import math
+import re
+import sys
+
+R = Path(__file__).resolve().parents[1]
+
+F2H = (R/"src/game/file2.h").read_text(errors="replace")
+F2  = (R/"src/game/file2.c").read_text(errors="replace")
+SP  = (R/"src/game/spectrum.c").read_text(errors="replace")
+FR  = (R/"src/game/front.c").read_text(errors="replace")
+O   = (R/"src/game/options.c").read_text(errors="replace")
+MP  = (R/"src/game/mpmenu.c").read_text(errors="replace")
+BV  = (R/"src/game/bondview2.c").read_text(errors="replace")
+BC  = (R/"src/bondconstants.h").read_text(errors="replace")
+MK  = (R/"Makefile").read_text(errors="replace")
+
+checks=[]
+
+def ck(name, cond):
+    cond=bool(cond)
+    checks.append((name,cond))
+    print(("[PASS] " if cond else "[FAIL] ")+name)
+
+ck("Experimental Jumping runtime option is independent and defaults Off",
+   "#define MODOPT3_EXPERIMENTAL_JUMP       0x02" in F2H
+   and "DEFAULT_MOD_OPTIONS3" in F2H
+   and "MODOPT3_EXPERIMENTAL_JUMP" not in
+       next((x for x in F2H.splitlines() if x.startswith("#define DEFAULT_MOD_OPTIONS3")), ""))
+
+ck("runtime API preserves MODOPT3 signature",
+   "s32 modExperimentalJumpEnabled(void)" in F2
+   and "void modSetExperimentalJumpEnabled(s32 enabled)" in F2
+   and "MODOPT3_SIGNATURE_MASK" in F2)
+
+ck("EEPROM/SRAM journal uses free flags bit 0x40",
+   "#define GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP 0x40" in F2
+   and "record->flags & GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP" in F2
+   and "record.flags |= GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP" in F2)
+
+ck("generic legacy mirror writes preserve authoritative Jump flag",
+   "current->flags & GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP" in F2
+   and "record.flags &= ~GE_SRAM_EXT_FLAG_EXPERIMENTAL_JUMP" in F2)
+
+ck("old/no-extension paths force Jumping Off instead of reading camera signature bit 1",
+   "g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;" in F2
+   and "g_ModGameplayOptions3 &= ~MODOPT3_EXPERIMENTAL_JUMP;" in FR)
+
+ck("packed labels expose Experimental and Jumping (Press L)",
+   "index == 74" in SP and "index == 75" in SP
+   and "0x45787065" in SP and "0x4A756D70" in SP)
+
+ck("main Special Options appends Experimental submenu row",
+   "page2labels[11] = {12,13,14,15,30,16,8,29,52,73,74}" in FR
+   and "MENU_EXPERIMENTAL_OPTIONS" in BC
+   and "frontChangeMenu(MENU_EXPERIMENTAL_OPTIONS, FALSE);" in FR)
+
+ck("frontend Experimental submenu is one save-backed On/Off row",
+   "void interface_menu_experimental_options(void)" in FR
+   and "Gfx *constructor_menu_experimental_options" in FR
+   and "modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());" in FR
+   and "g_ModOptionsDirty = TRUE;" in FR)
+
+ck("SP Watch appends Experimental after Debug and before Cheats",
+   "#define MODWATCH_OPTION_ROWS 17" in O
+   and "#define MODWATCH_MODE_EXPERIMENTAL 0x600" in O
+   and "MODWATCH_STATE = MODWATCH_MODE_EXPERIMENTAL;" in O
+   and "row == 15" in O
+   and "frontModGetOptionLabel(74)" in O
+   and "frontModGetOptionLabel(75)" in O)
+
+ck("SP Experimental toggle follows deferred-save policy",
+   "modWatchToggleExperimentalOption" in O
+   and "g_ModWatchSettingsDirty = TRUE;" in O
+   and "modWatchCommitDeferredSettings();" in O)
+
+ck("MP/Co-op Watch appends Experimental mode 8 after Debug",
+   "if (mode == 2) return 18;" in MP
+   and "if (mode == 8) return 1;" in MP
+   and "mpcfg_mode[player]=8" in MP
+   and "mpcfg_row[player]=16" in MP
+   and 'mpcfg_mode[curplayernum] == 8 ? "EXPERIMENTAL"' in MP)
+
+ck("MP Experimental toggle follows deferred-save policy",
+   "mpwatchConfigToggleExperimental" in MP
+   and "mpcfg_globals_dirty = TRUE;" in MP
+   and "mpwatchConfigStoreGlobals();" in MP)
+
+ck("fresh L queues a per-player jump request",
+   "g_ModExperimentalJumpRequestMask |= 1u << get_cur_playernum();" in BV
+   and "((buttons & ~oldbuttons) & L_TRIG)" in BV)
+
+ck("Jumping steals L from manual-aim/inventory mapping only while enabled",
+   "if (modExperimentalJumpEnabled())" in BV
+   and "aimButtons &= ~L_TRIG;" in BV
+   and "invButtons &= ~L_TRIG;" in BV)
+
+ck("Jumping steals L from TP B+L shoulder handling while enabled",
+   BV.count("freshshoulder &= ~L_TRIG;") >= 2)
+
+# Scope ordering checks to the actual vertical-update function. bondview2.c
+# contains other Map Maker/Fly references earlier in the file, so whole-file
+# BV.find() ordering is not meaningful here.
+_y0 = BV.find("void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)")
+_y1 = BV.find("void bondviewUpdatePlayerCollisionPositionFields(void)", _y0)
+_Y = BV[_y0:_y1] if _y0 >= 0 and _y1 > _y0 else ""
+
+_jump_consume = _Y.find("g_ModExperimentalJumpRequestMask &=")
+_mapmaker_early = _Y.find("mapmakerNativeTestActive()")
+_fly_early = _Y.find("CHEAT_FLY_MODE")
+_noclip_early = _Y.find("CHEAT_NO_CLIPPING")
+
+ck("jump request is consumed before Fly/NoClip/MapMaker vertical early returns",
+   _jump_consume >= 0
+   and _mapmaker_early > _jump_consume
+   and _fly_early > _jump_consume
+   and _noclip_early > _jump_consume)
+
+ck("jump requires grounded live player with a valid STAN and not tank",
+   "g_CurrentPlayer->field_7C == 0.0f" in BV
+   and "g_CurrentPlayer->field_488.current_tile_ptr != NULL" in BV
+   and "g_PlayerIsInTank == 0" in BV
+   and "g_CurrentPlayer->bonddead == FALSE" in BV)
+
+ck("jump height requirement is encoded as 256.0f",
+   "#define MOD_EXPERIMENTAL_JUMP_HEIGHT 256.0f" in BV
+   and "MOD_EXPERIMENTAL_JUMP_VELOCITY_NORMAL" in BV
+   and "MOD_EXPERIMENTAL_JUMP_VELOCITY_FAST" in BV)
+
+# Independently verify the two sampled apex formulas.
+okphysics=True
+for gravity,ticks in ((0.27777779,43),(1.388889,19)):
+    v=(256.0 + 0.5*gravity*ticks*ticks)/ticks
+    y=0.0
+    maxy=0.0
+    for _ in range(ticks+5):
+        v2=v-gravity
+        y+=(v+v2)*0.5
+        v=v2
+        maxy=max(maxy,y)
+    okphysics = okphysics and abs(maxy-256.0) < 0.001
+
+ck("GoldenEye trapezoid integration peaks at 256.000 in normal and Fast-Bond gravity",
+   okphysics)
+
+# R27U R4 R1: IDO/C89 requires local declarations before executable statements.
+_load0 = F2.find("s32 fileLoadExtendedSettings(save_data *save)")
+_load1 = F2.find("void fileStoreExtendedSettings(save_data *save)", _load0)
+_LOAD = F2[_load0:_load1] if _load0 >= 0 and _load1 > _load0 else ""
+_decl_pos = _LOAD.find("u32 folder;")
+_default_pos = _LOAD.find("modSetExperimentalJumpEnabled(FALSE);")
+
+ck("extended-settings loader keeps C89 declarations before Experimental default",
+   _decl_pos >= 0 and _default_pos > _decl_pos)
+
+pr=next((x for x in MK.splitlines() if x.startswith("prerequisites:")),"")
+ck("R27U audit is mandatory",
+   "r27u-experimental-jumping-audit:" in MK
+   and "r27u-experimental-jumping-audit" in pr)
+
+bad=[name for name,ok in checks if not ok]
+print()
+print("R27U EXPERIMENTAL JUMPING AUDIT: "
+      + ("PASS" if not bad else "FAIL")
+      + f" ({len(checks)-len(bad)}/{len(checks)})")
+if bad:
+    for name in bad:
+        print(" - "+name)
+    sys.exit(1)

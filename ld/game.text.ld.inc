@@ -42,6 +42,9 @@
       build/OUTCODE/src/game/cleanplayersound.o (.text);
       build/OUTCODE/src/game/title.o (.text);
       build/OUTCODE/src/game/front.o (.text);
+#ifdef GE_MODDED_CHEATS
+      build/OUTCODE/src/game/modbot_trait_descriptions.o (.text);
+#endif
 #ifdef GE_MAP_MAKER
       build/OUTCODE/src/game/mapmaker.o (.text);
 #endif

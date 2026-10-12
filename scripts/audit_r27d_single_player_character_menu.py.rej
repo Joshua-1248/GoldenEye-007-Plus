@@ -1,0 +1,5 @@
+--- scripts/audit_r27d_single_player_character_menu.py
++++ scripts/audit_r27d_single_player_character_menu.py
+@@ -1 +1 @@
+-ck('Single-Player Character is an appended frontend menu',
++ck('Single-Player Options is an appended frontend menu',

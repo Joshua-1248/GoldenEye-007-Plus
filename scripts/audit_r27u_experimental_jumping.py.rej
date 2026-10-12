@@ -1,0 +1,7 @@
+--- scripts/audit_r27u_experimental_jumping.py
++++ scripts/audit_r27u_experimental_jumping.py
+@@ -1,3 +1,3 @@
+ ck("main Special Options appends Experimental submenu row",
+-   "page2labels[11] = {12,13,14,15,30,16,8,29,52,73,74}" in FR
++   "page2labels[10] = {12,13,14,15,30,16,8,29,74,76}" in FR
+    and "MENU_EXPERIMENTAL_OPTIONS" in BC

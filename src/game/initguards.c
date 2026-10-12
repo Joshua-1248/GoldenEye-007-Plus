@@ -4,6 +4,7 @@
 #include <random.h>
 #include "chr.h"
 #include "chrobjdata.h"
+#include "game/front.h"
 #include "initguards.h"
 #ifdef GE_MODDED_CHEATS
 #include "mpbots.h"
@@ -34,7 +35,17 @@ void alloc_init_GUARDdata_entries(s32 count)
 {
     s32 i;
     
-    g_NumChrSlots = count + 10; //special guards?
+    /* Keep all ten original temporary character slots, including the final
+     * two which chrSpawnAtCoord deliberately protects.  Simulants require
+     * their own persistent ChrRecords, and GE retains dead ChrRecords until
+     * each corpse finishes its native cleanup.  Reserve one live and one
+     * overlapping corpse record per configured bot at stage setup; this is
+     * needed in both competitive MP and multiplayer Co-Op. */
+    g_NumChrSlots = count + 10;
+#ifdef GE_MODDED_CHEATS
+    if (gamemode == GAMEMODE_MULTI)
+        g_NumChrSlots += modMpBotsGetCount() * 2;
+#endif
 
     g_ChrSlots = mempAllocBytesInBank(align_addr_zero(g_NumChrSlots * sizeof(ChrRecord)), MEMPOOL_STAGE);
 #ifdef GE_MODDED_CHEATS

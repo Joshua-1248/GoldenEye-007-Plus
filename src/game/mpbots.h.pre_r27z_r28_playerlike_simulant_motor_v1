@@ -1,0 +1,86 @@
+#ifndef _GAME_MPBOTS_H_
+#define _GAME_MPBOTS_H_
+
+#include <ultra64.h>
+#include <bondtypes.h>
+
+#ifdef GE_MODDED_CHEATS
+
+#define MOD_MP_BOT_MAX 8
+#define MOD_MP_BOT_HUMAN_TARGET_BASE 0
+#define MOD_MP_BOT_BOT_TARGET_BASE MAX_PLAYER_COUNT
+
+typedef enum ModMpBotDifficulty
+{
+    MODBOT_DIFFICULTY_MEAT = 0,
+    MODBOT_DIFFICULTY_EASY,
+    MODBOT_DIFFICULTY_NORMAL,
+    MODBOT_DIFFICULTY_HARD,
+    MODBOT_DIFFICULTY_PERFECT,
+    MODBOT_DIFFICULTY_DARK,
+    MODBOT_DIFFICULTY_MAX
+} ModMpBotDifficulty;
+
+typedef enum ModMpBotType
+{
+    MODBOT_TYPE_NONE = 0,
+    MODBOT_TYPE_MELEE,
+    MODBOT_TYPE_SPEED,
+    MODBOT_TYPE_VINDICT,
+    MODBOT_TYPE_PSYCHO,
+    MODBOT_TYPE_PACIFIST,
+    MODBOT_TYPE_IRON,
+    MODBOT_TYPE_ARMOR,
+    MODBOT_TYPE_TNT,
+    MODBOT_TYPE_QUARRY,
+    MODBOT_TYPE_FEAR,
+    MODBOT_TYPE_UMPIRE,
+    MODBOT_TYPE_STALKER,
+    MODBOT_TYPE_MAX
+} ModMpBotType;
+
+struct ModMpBotConfig
+{
+    u8 character;
+    u8 difficulty;
+    u8 type;
+    u8 reserved;
+};
+
+extern u8 g_ModMpBotCount;
+extern struct ModMpBotConfig g_ModMpBotConfigs[MOD_MP_BOT_MAX];
+
+s32 modMpBotsGetCount(void);
+void modMpBotsSetCount(s32 count);
+void modMpBotsCycleCount(void);
+
+const char *modMpBotGetDifficultyName(s32 difficulty);
+const char *modMpBotGetTypeName(s32 type);
+const char *modMpBotGetDisplayName(s32 slot);
+
+void modMpBotCycleCharacter(s32 slot, s32 direction);
+void modMpBotCycleDifficulty(s32 slot, s32 direction);
+void modMpBotCycleType(s32 slot, s32 direction);
+
+void modMpBotsResetRuntime(void);
+void modMpBotsTick(void);
+
+s32 modMpBotsGetSlotForChr(ChrRecord *chr);
+PropRecord *modMpBotsGetTargetProp(ChrRecord *chr);
+f32 modMpBotsGetMoveMultiplier(ChrRecord *chr);
+
+void modMpBotsNotifyHumanHit(ChrRecord *victim, s32 playernum);
+void modMpBotsNotifyBotHit(ChrRecord *victim, ChrRecord *attacker);
+void modMpBotsSetDamageOwner(s32 slot);
+void modMpBotsClearDamageOwner(void);
+s32 modMpBotsGetDamageOwner(void);
+void modMpBotsDamageViewer(s32 slot, PropRecord *viewer, ITEM_IDS weaponid, coord3d *direction);
+
+s32 modMpBotsGetHumanKills(s32 playernum);
+s32 modMpBotsGetBotKills(s32 slot);
+s32 modMpBotsGetBotDeaths(s32 slot);
+void modMpBotsRecordBotKillOnHuman(s32 slot, s32 playernum);
+
+#endif
+
+#endif

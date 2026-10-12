@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hard build guard for the historical Auto Shotgun-safe 0x1172 pipeline."""
 from pathlib import Path
-import subprocess, tempfile, sys
+import re, subprocess, tempfile, sys
 
 ROOT = Path(__file__).resolve().parents[1]
 COMP = ROOT / 'tools' / '1172compress.sh'
@@ -29,8 +29,23 @@ dt = CDATA.read_text(errors='replace')
 require('--cdata-zopfli' in ct, 'compressor lacks explicit cdata-only Zopfli mode')
 require('GE_ZOPFLI_1172' in ct and 'Intentionally ignore' in ct, 'environment override guard missing')
 require('GZ="gzip"' not in ct and "GZ='gzip'" not in ct, 'ordinary resource compressor may fall back to system gzip')
-require('tools/1172compress.sh build/$2/data_seg build/$2/data_seg.rz --cdata-zopfli' in dt,
-        'final cdata is not using explicit cdata-only Zopfli mode')
+# R9 R2 correctly checks compressor status and refuses stale CDATA. Recognize
+# the guarded invocation instead of requiring the older unchecked literal line.
+# The mode is still explicitly cdata-only: ordinary 0x1172 asset rules must not
+# inherit Turtledeflate or Zopfli settings.
+require(re.search(
+    r'(?m)^\s*if\s+!\s+tools/1172compress\.sh\s+'
+    r'"?build/\$2/data_seg"?\s+"?build/\$2/data_seg\.rz"?'
+    r'\s+--cdata-zopfli;\s*then\s*$', dt) is not None,
+    'final cdata must use checked, explicit cdata-only Zopfli mode')
+require('rm -f "build/$2/data_seg.rz"' in dt and
+        'ERROR: final CDATA compression failed' in dt and
+        'ERROR: final CDATA compressor produced no output' in dt and
+        'ERROR: final CDATA verification failed' in dt and
+        'if ! python3 - "build/$2/data_seg" "build/$2/data_seg.rz"' in dt and
+        'decoded != original' in dt and
+        'decoder.eof' in dt,
+        'final cdata must reject stale, missing or mismatched compressed segments')
 for mf in ASSET_MAKES:
     require(mf.exists(), f'missing asset makefile {mf.relative_to(ROOT)}')
     txt = mf.read_text(errors='replace')
@@ -45,6 +60,8 @@ with tempfile.TemporaryDirectory() as td:
     env = dict(__import__('os').environ)
     env['GE_ZOPFLI_1172'] = 'YES'
     env['GZ'] = '/bin/gzip'
+    env['GE_CDATA_TURTLE'] = '1'
+    env['GE_CDATA_TURTLE_BIN'] = '/nonexistent-turtledeflate-must-not-be-used-for-assets'
     subprocess.run([str(COMP), str(src), str(out)], cwd=ROOT, env=env, check=True,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     subprocess.run([str(GZIP), '--no-name', '--best', '-c', str(src)], cwd=ROOT, check=True,
@@ -57,4 +74,5 @@ with tempfile.TemporaryDirectory() as td:
 print('AUTOSHOT PIPELINE AUDIT: PASS')
 print('  ordinary 0x1172 resources: locked to bundled historical gzip/raw-DEFLATE')
 print('  environment overrides: ignored for ordinary resources')
-print('  final cdata/data_seg: explicit --cdata-zopfli only')
+print('  final cdata/data_seg: guarded --cdata-zopfli with optional Turtledeflate')
+print('  stale/missing/mismatched final CDATA: fatal build error')

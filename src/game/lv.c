@@ -1209,6 +1209,14 @@ void lvlManageMpGame(void)
 #endif
 #endif
     g_GlobalTimer += g_ClockTimer;
+#ifdef GE_MODDED_CHEATS
+    /* Repair missed Co-Op mission props without touching the Frigate
+     * per-object gadget activation or the normal competitive inventory. */
+    if (g_ClockTimer > 0 && gamemode == GAMEMODE_MULTI
+        && get_scenario() == SCENARIO_COOP)
+        bondinvCoopReconcileTeamInventory();
+#endif
+
     if ((g_CurrentStageToLoad != LEVELID_TITLE) && (D_80048394 == 0) && (g_ClockTimer > 0))
     {
         if (g_AppendCheatSinglePlayer != 0

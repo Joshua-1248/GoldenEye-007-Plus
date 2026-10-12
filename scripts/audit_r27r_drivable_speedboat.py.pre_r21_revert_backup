@@ -1,0 +1,534 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+import re
+
+R = Path(__file__).resolve().parents[1]
+LM = (R/"src/game/levelmodifiers.c").read_text(errors="replace")
+P  = (R/"src/game/prop.c").read_text(errors="replace")
+B  = (R/"src/game/bondview2.c").read_text(errors="replace")
+MK = (R/"Makefile").read_text(errors="replace")
+
+checks=[]
+def ck(name, cond):
+    cond=bool(cond)
+    checks.append((name,cond))
+    print(("[PASS] " if cond else "[FAIL] ")+name)
+
+ck("Dam exposes three modifiers including Drivable Speedboat",
+   "return g_LevelModifierDamRuntimeAvailable ? 3 : 0;" in LM and
+   '"Drivable Speedboat"' in LM)
+
+ck("Drivable Speedboat is latched ACTIVATE/ACTIVE in-game",
+   "levelModifiersGetDamDrivableSpeedboatPolicy" in LM and
+   "return LEVELMOD_POLICY_LATCHED;" in
+       LM[LM.find("levelModifiersGetDamDrivableSpeedboatPolicy"):
+          LM.find("levelModifiersGetCurrentStageModifierName")] and
+   'g_LevelModifierDamDrivableSpeedboatActive ? "ACTIVE" : "ACTIVATE"' in LM)
+
+ck("active Drivable Speedboat is locked against toggle-off",
+   "index == 2" in LM and
+   "g_LevelModifierDamDrivableSpeedboatActive" in LM and
+   "return levelModifiersActivateDamDrivableSpeedboat();" in LM)
+
+ck("frontend preload still permits pre-stage On/Off selection",
+   "g_LevelModifierDamDrivableSpeedboatPreload" in LM and
+   "levelModifiersSetDamDrivableSpeedboatPreload" in LM)
+
+ck("one additional Dam object slot is reserved",
+   "return 4; /* two restored doors + static speedboat + drivable speedboat */" in LM)
+
+ck("drivable boat is an additional PROP_SPEEDBOAT clone",
+   "g_LevelModifierDamDrivableBoatRuntime = g_LevelModifierDamBoatTemplate;" in P and
+   "propLevelModifierActivateDamDrivableSpeedboat" in P)
+
+ck("requested spawn transform is exact",
+   "DAM_DRIVABLE_BOAT_START_X        448.0f" in P and
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P and
+   "DAM_DRIVABLE_BOAT_START_Z      -7200.0f" in P and
+   "DAM_DRIVABLE_BOAT_START_HEADING  M_PI_F" in P)
+
+ck("boat top speed is 25.0 and above retail Tank max",
+   "DAM_DRIVABLE_BOAT_MAX_SPEED       25.0f" in P)
+
+ck("Tank B enter/exit interaction is reused for boat",
+   "propLevelModifierDamDrivableBoatCanCurrentPlayerEnter()" in B and
+   "propLevelModifierDamDrivableBoatEnterCurrentPlayer();" in B and
+   "propLevelModifierDamDrivableBoatExitCurrentPlayer();" in B)
+
+ck("boat uses Tank-family temporary audio with independent handles",
+   "TRUCK_RUN_SFX" in P and
+   "TANK_SFX" in P and
+   "g_LevelModifierDamDrivableBoatSfx[2]" in P and
+   "TRUCK_START_SFX, NULL" not in P)
+
+ck("pause and stage cleanup stop boat audio",
+   "propLevelModifierDamDrivableBoatStopAudio();" in B and
+   "propLevelModifierFreeDamDrivableBoat();" in P)
+
+ck("driving bypasses ordinary on-foot translation",
+   "propLevelModifierDamDrivableBoatSetControls(" in B and
+   "propLevelModifierDamDrivableBoatTick();" in B)
+
+ck("driver/deck Y support prevents immediate gravity snap",
+   "propLevelModifierDamDrivableBoatCurrentPlayerSupported()" in B and
+   "propLevelModifierDamDrivableBoatDriverY()" in B)
+
+prereq = next((x for x in MK.splitlines() if x.startswith("prerequisites:")), "")
+ck("R27R audit is mandatory",
+   "r27r-drivable-speedboat-audit:" in MK and
+   "r27r-drivable-speedboat-audit" in prereq)
+
+
+ck("dock-side boarding radius and Y tolerance are widened",
+   any("DAM_DRIVABLE_BOAT_ENTRY_RADIUS" in line and "360.0f" in line
+       for line in P.splitlines()) and
+   any("DAM_DRIVABLE_BOAT_ENTRY_Y_RANGE" in line and "220.0f" in line
+       for line in P.splitlines()))
+
+ck("driver yaw follows hull heading after eased entry",
+   "headingDeltaDeg = headingdeg - oldHeadingDeg;" in P and
+   "g_CurrentPlayer->vv_theta += headingDeltaDeg;" in P and
+   "g_CurrentPlayer->field_488.theta_transform.x" in P)
+
+ck("all boat loop SFX are tracked and hard-stopped on exit",
+   "sndCreatePostEvent(g_LevelModifierDamDrivableBoatSfx[i], 8, 0);" in P and
+   "TRUCK_START_SFX, NULL" not in P)
+
+ck("drivable speedboat is invincible to gunfire and explosions",
+   "PROPFLAG_INVINCIBLE" in P and
+   "PROPFLAG2_00004000 | PROPFLAG2_00200000" in P)
+
+ck("boat hull movement is swept against real background geometry",
+   "propLevelModifierDamDrivableBoatHullBlocked" in P and
+   "bgTestBulletHitBackground" in P and
+   "chrpropRayIntersectsRoomBbox" in P)
+
+
+ck("R4 flips only the speedboat model forward axis",
+   "DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET" in P and
+   "M_TAU_F - g_LevelModifierDamDrivableBoatHeading" in P)
+
+ck("R4 disables stock boat object prism for player boarding",
+   "g_LevelModifierDamDrivableBoatRuntime.state |= PROPSTATE_20;" in P)
+
+ck("R4 has custom land-to-deck and deck-to-STAN movement handoff",
+   "propLevelModifierDamDrivableBoatHandleFootMovement" in P and
+   "propLevelModifierDamDrivableBoatTryLandTransfer" in P and
+   "stanFindGroundAtCyl" in P)
+
+ck("R4 hooks custom boat foot movement before ordinary Bond collision",
+   "propLevelModifierDamDrivableBoatHandleFootMovement(&move_offset)" in B)
+
+ck("R4 uses Tank-style eased entry yaw instead of instant snap",
+   "g_LevelModifierDamDrivableBoatEnterBlend" in P and
+   "DAM_DRIVABLE_BOAT_ENTER_TICKS" in P and
+   "cosf(g_LevelModifierDamDrivableBoatEnterBlend" in P)
+
+ck("R4/R11 uses separate water envelope plus multi-height hard hull collision",
+   "g_LevelModifierDamDrivableBoatUseWaterEnvelope" in P and
+   "propLevelModifierDamDrivableBoatWaterSurfacePresent" in P and
+   "f32 yoffsets[3];" in P and
+   "for (h = 0; h < 3; h++)" in P and
+   "for (i = 0; i < 9; i++)" in P and
+   "propLevelModifierDamDrivableBoatBgSegmentBlocked" in P)
+
+ck("R4 keeps Room 81 STAN while providing portal visibility anchor",
+   "current_tile_ptr->room == 0x51" in B and
+   "g_CurrentSetup.pads[111].stan" in B)
+
+
+ck("R5/R6/R16/R17 keeps center/end/driver heights independently tuned",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET\s+8\.0f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET\s+55\.0f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET\s+-12\.0f", P) is not None)
+
+ck("R5/R17 uses explicit three-zone rectangular deck support",
+   "propLevelModifierDamDrivableBoatDeckYOffsetForLocalZ" in P and
+   "DAM_DRIVABLE_BOAT_DECK_WALK_HALF_X" in P and
+   "DAM_DRIVABLE_BOAT_DECK_CENTER_HALF_Z" in P and
+   "return DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET;" in P and
+   "return DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET;" in P)
+
+ck("R5 boarding keeps exact requested XZ without clamp teleport",
+   "clampedX" not in P and "clampedZ" not in P and
+   "collision_position.x = candidate.x;" in P and
+   "collision_position.z = candidate.z;" in P)
+
+ck("R5/R6 uses explicit boat-local transition coverage",
+   "DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN" in P and
+   "candidateInShell" in P and
+   "propLevelModifierDamDrivableBoatDeckFloorAtWorld" in P)
+
+ck("R5/R6 land handoff keeps exact candidate position",
+   "propLevelModifierDamDrivableBoatTryLandTransfer" in P and
+   "collision_position.x = candidate->x;" in P and
+   "collision_position.z = candidate->z;" in P)
+
+ck("R5 feeds boat floor into native Bond gravity integration",
+   "propLevelModifierDamDrivableBoatGetWalkFloor" in B and
+   "r27rBoatWalkFloorActive" in B and
+   "use_stanHeight = 1;" in B and
+   "R27R_R5_SMOOTH_BOAT_WALK_VOLUME" in B)
+
+ck("R5 walking handler no longer zeros vertical velocity or snaps field70",
+   "g_CurrentPlayer->field_7C = 0.0f;" not in P[P.find("s32 propLevelModifierDamDrivableBoatHandleFootMovement("):P.find("s32 propLevelModifierDamDrivableBoatCurrentPlayerSupported(")] and
+   "g_CurrentPlayer->field_70 =" not in P[P.find("s32 propLevelModifierDamDrivableBoatHandleFootMovement("):P.find("s32 propLevelModifierDamDrivableBoatCurrentPlayerSupported(")])
+
+
+ck("R6/R11 transition shell remains larger than R5",
+   "DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN      84.0f" in P)
+
+ck("R6/R9/R19 transition corridor remains gated by valid above-water STAN",
+   "propLevelModifierDamDrivableBoatNearbyValidStan" in P and
+   "propLevelModifierDamDrivableBoatStickyWorldLandAt" in P and
+   "DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y" in P and
+   "candidateStickyStan" in P and
+   re.search(r"candidateInShell\s*\|\|\s*candidateInClipHalo", P) is not None)
+
+ck("R6 direct world STAN handoff retains exact candidate XZ",
+   "propLevelModifierDamDrivableBoatWorldLandAt" in P and
+   "collision_position.x = candidate->x;" in P and
+   "collision_position.z = candidate->z;" in P)
+
+ck("R6/R16/R17 center wooden deck stays +8 while embarked driver stays -12",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET\s+8\.0f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET\s+-12\.0f", P) is not None)
+
+ck("R6 bow and stern retain raised +55 deck profile",
+   "DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET     55.0f" in P)
+
+
+ck("R7 transition coverage is rectangular in boat-local space",
+   "propLevelModifierDamDrivableBoatTransitionRectAtWorld" in P and
+   "DAM_DRIVABLE_BOAT_TRANSITION_HALF_X" in P and
+   "DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z" in P and
+   "> DAM_DRIVABLE_BOAT_TRANSITION_HALF_X" in P and
+   "> DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z" in P)
+
+ck("R7 rectangular coverage is larger than the real deck",
+   "(DAM_DRIVABLE_BOAT_DECK_HALF_X + DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN)" in P and
+   "(DAM_DRIVABLE_BOAT_DECK_HALF_Z + DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN)" in P)
+
+ck("R7 movement and walk-floor both use rectangular transition coverage",
+   "propLevelModifierDamDrivableBoatTransitionRectAtWorld(\n            &pos, &deckY)" in
+       P[P.find("s32 propLevelModifierDamDrivableBoatGetWalkFloor(f32 *floorY)"):
+         P.find("s32 propLevelModifierDamDrivableBoatHandleFootMovement(")] and
+   P[P.find("s32 propLevelModifierDamDrivableBoatHandleFootMovement("):
+     P.find("s32 propLevelModifierDamDrivableBoatCurrentPlayerSupported(void)")].count(
+         "propLevelModifierDamDrivableBoatTransitionRectAtWorld(") >= 2)
+
+ck("R7/R8 drivable boat Y is -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+ck("R7 preserves R6 water rejection threshold while lowering boat",
+   "DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y       -676.0f" in P and
+   "groundY > DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y" in P)
+
+
+ck("R9 clipping-relaxation halo follows Bond collision radius",
+   "DAM_DRIVABLE_BOAT_CLIP_RELAX_EXTRA" in P and
+   "field_488.collision_radius" in P and
+   "propLevelModifierDamDrivableBoatTransitionClipHaloAtWorld" in P)
+
+ck("R9/R13/R19 clip-halo relaxation remains STAN-gated",
+   "candidateInClipHalo" in P and
+   "candidateStickyStan" in P and
+   "propLevelModifierDamDrivableBoatStickyWorldLandAt" in P and
+   "propLevelModifierDamDrivableBoatNearbyValidStan" in P and
+   "DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y" in P)
+
+ck("R9 boat entry stores exact starting position and does not snap immediately",
+   "g_LevelModifierDamDrivableBoatEnterStartPos =" in P and
+   "Do not place the driver here." in P)
+
+ck("R9 boat entry position uses 45-tick cosine interpolation",
+   "g_LevelModifierDamDrivableBoatEnterStartPos.x" in P and
+   "cosf(g_LevelModifierDamDrivableBoatEnterBlend" in P and
+   "DAM_DRIVABLE_BOAT_ENTER_TICKS" in P)
+
+ck("R9 entry Y is preserved instead of snapped to final driver Y",
+   "propLevelModifierDamDrivableBoatEntering()" in B and
+   "cosine-interpolated entry Y" in B)
+
+ck("R9 steering input is smoothed before hull yaw",
+   "g_LevelModifierDamDrivableBoatSteeringApplied" in P and
+   "DAM_DRIVABLE_BOAT_STEER_RESPONSE" in P and
+   "steeringTarget = g_LevelModifierDamDrivableBoatSteering;" in P)
+
+ck("R9 keeps the boat stationary while Bond is entering",
+   "if (propLevelModifierDamDrivableBoatEntering())" in P and
+   "target = 0.0f;" in P)
+
+ck("R9 preserves final boat Y -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+
+ck("R10/R12 retains Room-23 data but no longer hard-gates movement with STAN",
+   "DAM_DRIVABLE_BOAT_WATER_ROOM              0x23" in P and
+   "propLevelModifierDamDrivableBoatInWaterRoom" in P and
+   "R27R R12: do NOT gate vehicle movement on STAN room 0x23." in P)
+
+ck("R10/R12 Room-23 helper remains available but dormant",
+   "rooms[0] = DAM_DRIVABLE_BOAT_WATER_ROOM;" in P and
+   "stanFindGroundAtCyl(&probe, 8.0f, rooms, &groundY)" in P)
+
+ck("R12 hard hull collision is movement authority without STAN Room-23 gate",
+   "R27R R12: do NOT gate vehicle movement on STAN room 0x23." in P and
+   "if (!propLevelModifierDamDrivableBoatHullBlocked(" in P)
+
+ck("R10 retains final boat Y -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+
+ck("R11/R11R1 hard hull collision is explicit rectangular boat-local geometry",
+   "DAM_DRIVABLE_BOAT_HULL_HALF_X            88.0f" in P and
+   "DAM_DRIVABLE_BOAT_HULL_HALF_Z            220.0f" in P and
+   "xmin = -DAM_DRIVABLE_BOAT_HULL_HALF_X;" in P and
+   "zmax =  DAM_DRIVABLE_BOAT_HULL_HALF_Z;" in P)
+
+ck("R11/R11R1 rectangular hull remains slightly longer than the 210-unit deck half-length",
+   "DAM_DRIVABLE_BOAT_HULL_HALF_Z            220.0f" in P and
+   "DAM_DRIVABLE_BOAT_DECK_HALF_Z" in P)
+
+ck("R11 hard hull still samples corners edge midpoints and center at three heights",
+   "f32 lx[9];" in P and
+   "f32 lz[9];" in P and
+   "f32 yoffsets[3];" in P and
+   "for (h = 0; h < 3; h++)" in P and
+   "for (i = 0; i < 9; i++)" in P)
+
+ck("R11 rectangular transition coverage margin is 84",
+   "DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN      84.0f" in P)
+
+ck("R11 preserves final boat Y -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+
+ck("R11R1 restores dock clearance while keeping rectangular hull",
+   "DAM_DRIVABLE_BOAT_HULL_HALF_X            88.0f" in P and
+   "DAM_DRIVABLE_BOAT_HULL_HALF_Z            220.0f" in P)
+
+ck("R11R1 preserves larger 84-unit player transition coverage",
+   "DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN      84.0f" in P)
+
+ck("R11R1 preserves final boat Y -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+
+ck("R12 removes Room-23 STAN gating from Tick movement acceptance",
+   "R27R R12: do NOT gate vehicle movement on STAN room 0x23." in P and
+   "if (!propLevelModifierDamDrivableBoatHullBlocked(" in P)
+
+ck("R12 preserves rectangular hull and expanded transition coverage",
+   "DAM_DRIVABLE_BOAT_HULL_HALF_X            88.0f" in P and
+   "DAM_DRIVABLE_BOAT_HULL_HALF_Z            220.0f" in P and
+   "DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN      84.0f" in P)
+
+ck("R12 preserves final boat Y -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+
+ck("R13 adds boat-local deck edge wall-slide",
+   "propLevelModifierDamDrivableBoatTryDeckWallSlide" in P and
+   "currentLocalX" in P and
+   "currentLocalZ" in P and
+   "fullLocalX" in P and
+   "fullLocalZ" in P)
+
+ck("R13 tests X-only and Z-only deck movement instead of clamping",
+   "xcandidate" in P and
+   "zcandidate" in P and
+   "xValid = propLevelModifierDamDrivableBoatDeckFloorAtWorld" in P and
+   "zValid = propLevelModifierDamDrivableBoatDeckFloorAtWorld" in P)
+
+ck("R13/R19 keeps tangential wall-slide movement at unsupported water edges",
+   "propLevelModifierDamDrivableBoatTryDeckWallSlide" in P and
+   re.search(
+       r"if\s*\(currentOnDeck\s*&&\s*"
+       r"propLevelModifierDamDrivableBoatTryDeckWallSlide\s*\(",
+       P) is not None and
+   "xcandidate" in P and
+   "zcandidate" in P)
+
+ck("R13 does not zero player movement velocity at deck edges",
+   "No speed/velocity fields are cleared here" in P)
+
+ck("R13/R19 preserves unsupported-water walk-off blocking",
+   re.search(r"if\s*\(candidateInShell\s*\|\|\s*candidateInClipHalo\)", P)
+       is not None and
+   "propLevelModifierDamDrivableBoatNearbyValidStan" in P and
+   "propLevelModifierDamDrivableBoatTryDeckWallSlide" in P and
+   "DAM_DRIVABLE_BOAT_FOOT_OWNER_BOAT" in P)
+
+
+ck("R15 embark Y interpolation uses Bond base Y rather than eye Y",
+   "g_LevelModifierDamDrivableBoatEnterStartPos.y =" in P and
+   "g_CurrentPlayer->field_70;" in P and
+   "Do not mix first-person eye Y with driver-floor Y." in P)
+
+ck("R15 preserves eye-height offset while interpolating base position",
+   "eyeOffset = g_CurrentPlayer->field_488.collision_position.y" in P and
+   "- g_CurrentPlayer->field_70;" in P and
+   "placed.y + eyeOffset" in P)
+
+ck("R15/R16/R17 keeps corrected entry reference with lower driver base",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET\s+-12\.0f", P) is not None and
+   "g_LevelModifierDamDrivableBoatEnterStartPos.y =" in P)
+
+ck("R15 keeps cosine entry duration and XZ interpolation",
+   "DAM_DRIVABLE_BOAT_ENTER_TICKS" in P and
+   "cosf(g_LevelModifierDamDrivableBoatEnterBlend" in P and
+   "g_LevelModifierDamDrivableBoatEnterStartPos.x" in P and
+   "g_LevelModifierDamDrivableBoatEnterStartPos.z" in P)
+
+
+ck("R16 allows slow stationary boat turning",
+   "DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE  0.10f" in P and
+   "speedScale = DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE;" in P and
+   "g_LevelModifierDamDrivableBoatSteeringApplied" in P)
+
+ck("R16 preserves stronger minimum turn authority once moving",
+   "else if (speedScale < 0.25f)" in P and
+   "speedScale = 0.25f;" in P)
+
+ck("R16 slows boat acceleration for heavier water feel",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_ACCEL\s+0\.40f", P) is not None)
+
+ck("R16 lowers only the embarked driver base below the walking deck",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET\s+-12\.0f", P) is not None and
+   "DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET  8.0f" in P)
+
+ck("R16 preserves drivable boat waterline Y -768",
+   "DAM_DRIVABLE_BOAT_START_Y       -768.0f" in P)
+
+
+ck("R17 deck is three flat rectangular height zones",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_WALK_HALF_X\s+88\.0f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_CENTER_HALF_Z\s+82\.0f", P) is not None and
+   "propLevelModifierDamDrivableBoatDeckYOffsetForLocalZ" in P)
+
+ck("R17 center wood is +8 and both end decks are +55",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET\s+8\.0f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET\s+55\.0f", P) is not None and
+   "return DAM_DRIVABLE_BOAT_DECK_CENTER_Y_OFFSET;" in P and
+   "return DAM_DRIVABLE_BOAT_DECK_END_Y_OFFSET;" in P)
+
+ck("R17/R18 exact direct STAN owns Y regardless of relative boat-floor height",
+   "propLevelModifierDamDrivableBoatExactWorldLandAt" in P and
+   "stanFindGroundAtCyl(&probe, 0.0f, NULL, &groundY)" in P and
+   "return propLevelModifierDamDrivableBoatExactWorldLandAt(" in P)
+
+ck("R17 surface handoff reconciles base Y while preserving eye offset",
+   "propLevelModifierDamDrivableBoatSetPlayerBaseY" in P and
+   "eyeOffset = g_CurrentPlayer->field_488.collision_position.y" in P and
+   "baseY + eyeOffset" in P)
+
+ck("R17/R18 exact-boundary land transfer updates STAN and Y together",
+   "propLevelModifierDamDrivableBoatExactWorldLandAt(" in P and
+   "g_CurrentPlayer->field_488.current_tile_ptr = tile;" in P and
+   "propLevelModifierDamDrivableBoatSetPlayerBaseY(groundY);" in P)
+
+ck("R17 center-to-end box transition reconciles height immediately",
+   "candidateFloor - currentFloor" in P and
+   "propLevelModifierDamDrivableBoatSetPlayerBaseY(candidateFloor);" in P)
+
+ck("R17 preserves R16 boat handling tuning",
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_ACCEL\s+0\.40f", P) is not None and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET\s+-12\.0f", P) is not None and
+   "DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE" in P)
+
+
+ck("R18 STAN surface ownership is exact center-point polygon ownership",
+   "propLevelModifierDamDrivableBoatExactWorldLandAt" in P and
+   "stanFindGroundAtCyl(&probe, 0.0f, NULL, &groundY)" in P)
+
+ck("R18/R19 STAN keeps native Y until full player bounds leave STAN",
+   "DAM_DRIVABLE_BOAT_FOOT_OWNER_STAN" in P and
+   "propLevelModifierDamDrivableBoatStickyWorldLandAt" in P and
+   "candidateStickyStan" in P and
+   "propLevelModifierDamDrivableBoatSetPlayerBaseY(candidateStanY);" in P)
+
+ck("R18/R19 seam bridge preserves persistent owner Y",
+   "g_LevelModifierDamDrivableBoatFootOwnerY" in P and
+   "propLevelModifierDamDrivableBoatSetPlayerBaseY(" in P and
+   "Tiny physical gap between STAN bounds and deck" in P)
+
+ck("R18/R19 walk-floor support follows persistent surface owner",
+   "g_LevelModifierDamDrivableBoatFootOwner" in P and
+   "propLevelModifierDamDrivableBoatStickyWorldLandAt(" in P and
+   "*floorY = g_LevelModifierDamDrivableBoatFootOwnerY;" in P)
+
+ck("R18/R19 STAN to boat waits for full STAN-bounds exit and actual deck",
+   "if (candidateStickyStan)" in P and
+   "if (candidateOnDeck)" in P and
+   "propLevelModifierDamDrivableBoatSetFootBoatOwner(candidateFloor);" in P)
+
+ck("R18/R19 boat to STAN still waits for exact center STAN entry",
+   "if (candidateExactStan)" in P and
+   "propLevelModifierDamDrivableBoatSetFootStanOwner(" in P)
+
+ck("R18 preserves three-zone deck support and R16 handling",
+   "DAM_DRIVABLE_BOAT_DECK_CENTER_HALF_Z" in P and
+   "DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE" in P and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_ACCEL\s+0\.40f", P) is not None)
+
+
+ck("R19/R20 sticky STAN support uses full radius without cross-room hijack",
+   "propLevelModifierDamDrivableBoatStickyWorldLandAt" in P and
+   "g_CurrentPlayer->field_488.collision_radius" in P and
+   "rooms[0] = anchor->room;" in P and
+   "rooms[1] = 0xff;" in P and
+   "stanFindGroundAtCyl(&probe, radius, rooms, &groundY)" in P and
+   "DAM_DRIVABLE_BOAT_STAN_OWNER_Y_EPSILON" in P)
+
+ck("R19 persistent owner hysteresis distinguishes STAN and boat",
+   "DAM_DRIVABLE_BOAT_FOOT_OWNER_STAN" in P and
+   "DAM_DRIVABLE_BOAT_FOOT_OWNER_BOAT" in P and
+   "g_LevelModifierDamDrivableBoatFootOwnerY" in P)
+
+ck("R19 bypasses retail seam clipping while STAN bounds still overlap",
+   "CRITICAL R19 PATH" in P and
+   "if (candidateStickyStan)" in P and
+   "collision_position.x = candidate.x;" in P and
+   "collision_position.z = candidate.z;" in P)
+
+ck("R19 preserves STAN Y through physical seam gap",
+   "Tiny physical gap between STAN bounds and deck" in P and
+   "g_LevelModifierDamDrivableBoatFootOwnerY" in P)
+
+ck("R19 boat to STAN does not switch on radius contact alone",
+   "Boat -> STAN changes ownership only when the player's CENTER" in P and
+   "if (candidateExactStan)" in P)
+
+ck("R19 resets sticky ownership around driving lifecycle",
+   P.count("propLevelModifierDamDrivableBoatClearFootOwner();") >= 3)
+
+ck("R19 keeps R17 three-zone deck and R16 handling",
+   "DAM_DRIVABLE_BOAT_DECK_CENTER_HALF_Z" in P and
+   "DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE" in P and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_ACCEL\s+0\.40f", P) is not None)
+
+
+ck("R20 sticky support never performs an all-room radius query",
+   "rooms[0] = anchor->room;" in P and
+   "stanFindGroundAtCyl(&probe, radius, rooms, &groundY)" in P and
+   "tile->room != anchor->room" in P)
+
+ck("R20 sticky support probes only slightly above owner Y",
+   "ownerY + DAM_DRIVABLE_BOAT_STAN_OWNER_Y_EPSILON" in P and
+   re.search(r"#define\s+DAM_DRIVABLE_BOAT_STAN_OWNER_Y_EPSILON\s+8\.0f", P)
+       is not None)
+
+ck("R20 preserves R19 owner hysteresis and seam bridge",
+   "DAM_DRIVABLE_BOAT_FOOT_OWNER_STAN" in P and
+   "DAM_DRIVABLE_BOAT_FOOT_OWNER_BOAT" in P and
+   "CRITICAL R19 PATH" in P and
+   "g_LevelModifierDamDrivableBoatFootOwnerY" in P)
+
+bad=[n for n,ok in checks if not ok]
+print()
+print(f"R27R DRIVABLE SPEEDBOAT AUDIT: {'PASS' if not bad else 'FAIL'} ({len(checks)-len(bad)}/{len(checks)})")
+if bad:
+    for n in bad: print(" - "+n)
+    sys.exit(1)

@@ -78,6 +78,13 @@ s32 propLevelModifierApplyBetaSetupPatches(s32 levelid,s32 facilityDoors,s32 fac
 {
     u8 *base=(u8 *)g_CurrentSetup.propDefs; s32 i;
     if(base==NULL)return FALSE;
+    /* These offsets are for single-player Usetup* files only. Competitive
+     * multiplayer loads Ump_* setup files with a different prop layout.
+     * In Ump_setuparkZ, the Facility door offset 0x0b49 overlaps an ammo
+     * crate model ID and changes 0xffff into 0xff9b, crashing modelLoad.
+     * Co-op uses the normal single-player setup and remains supported. */
+    if (gamemode == GAMEMODE_MULTI && get_scenario() != SCENARIO_COOP)
+        return FALSE;
     /* R27S_R4_NO_TABLE_RODATA: same exact writes, no static const lookup tables. */
     if(levelid==LEVELID_FACILITY){
         lmPatchByteRun(base,0x0149,9,0x100,0x9f,0x8f,facilityDoors);
@@ -148,7 +155,9 @@ static s32 g_LevelModifierDamDrivableBoatUseWaterEnvelope = FALSE;
 #define DAM_DRIVABLE_BOAT_START_Z      -7200.0f
 #define DAM_DRIVABLE_BOAT_START_HEADING  M_PI_F
 #define DAM_DRIVABLE_BOAT_MAX_SPEED       25.0f
-#define DAM_DRIVABLE_BOAT_ACCEL            0.40f
+#define DAM_DRIVABLE_BOAT_ACCEL            0.80f
+#define DAM_DRIVABLE_BOAT_REVERSE_SPEED     12.5f
+#define DAM_DRIVABLE_BOAT_REVERSE_ACCEL      0.36f
 #define DAM_DRIVABLE_BOAT_DECEL            0.78f
 #define DAM_DRIVABLE_BOAT_TURN_DEG          1.65f
 #define DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET  -12.0f
@@ -1695,6 +1704,97 @@ s32 propLevelModifierDamDrivableBoatCurrentPlayerSupported(void)
         g_CurrentPlayer->field_70 - deckY) <= 160.0f;
 }
 
+/* R27R R23: A boat is a moving support surface, not part of Dam's STAN.
+ * Carry only players already grounded on its deck.  The boat's X/Z motion
+ * and yaw are transferred together, keeping their local deck positions.
+ * Unlike the helm driver, passengers retain independent movement and aim. */
+static void propLevelModifierDamDrivableBoatCarryPassengers(
+    const coord3d *oldpos, f32 oldheading,
+    const coord3d *newpos, f32 newheading)
+{
+    s32 i;
+    f32 oldrot;
+    f32 delta;
+    f32 c;
+    f32 si;
+    f32 oldc;
+    f32 olds;
+    f32 dy;
+
+    if (oldpos->x == newpos->x && oldpos->z == newpos->z
+        && oldheading == newheading)
+        return;
+
+    oldrot = oldheading + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET;
+    oldc = cosf(oldrot);
+    olds = sinf(oldrot);
+    delta = oldheading - newheading;
+    c = cosf(delta);
+    si = sinf(delta);
+    dy = newpos->y - oldpos->y;
+
+    for (i = 0; i < getPlayerCount(); i++)
+    {
+        struct player *rider;
+        f32 relx;
+        f32 relz;
+        f32 localx;
+        f32 localz;
+        f32 decky;
+        f32 dx;
+        f32 dz;
+
+        if (i == g_LevelModifierDamDrivableBoatDriver)
+            continue;
+
+        rider = g_playerPointers[i];
+
+        if (rider == NULL || rider->bonddead != FALSE || rider->prop == NULL)
+            continue;
+
+        relx = rider->field_488.collision_position.x - oldpos->x;
+        relz = rider->field_488.collision_position.z - oldpos->z;
+        localx = relx * oldc + relz * olds;
+        localz = -relx * olds + relz * oldc;
+
+        /* Only the real deck is carried, not the broad boarding halo or
+         * nearby shore. The two heights exclude players in mid-air. */
+        if (!propLevelModifierDamDrivableBoatDeckFloorAtLocal(
+                localx, localz, 0.0f, &decky)
+            || propLevelModifierDamDrivableBoatAbs(
+                rider->stanHeight - decky) > 95.0f
+            || propLevelModifierDamDrivableBoatAbs(
+                rider->field_70 - decky) > 95.0f)
+            continue;
+
+        dx = newpos->x + relx * c + relz * si
+            - rider->field_488.collision_position.x;
+        dz = newpos->z - relx * si + relz * c
+            - rider->field_488.collision_position.z;
+
+        /* Mirror the existing Co-Op tank passenger transport seam: carry
+         * collision, immediate camera/prop, and previous-position history
+         * together so platform motion is not mistaken for walking speed. */
+        rider->field_488.collision_position.x += dx;
+        rider->field_488.collision_position.y += dy;
+        rider->field_488.collision_position.z += dz;
+        rider->field_488.pos.x += dx;
+        rider->field_488.pos.y += dy;
+        rider->field_488.pos.z += dz;
+        rider->field_488.pos3.x += dx;
+        rider->field_488.pos3.y += dy;
+        rider->field_488.pos3.z += dz;
+        rider->bondprevpos.x += dx;
+        rider->bondprevpos.y += dy;
+        rider->bondprevpos.z += dz;
+        rider->field_70 += dy;
+        rider->stanHeight += dy;
+        rider->prop->pos.x += dx;
+        rider->prop->pos.y += dy;
+        rider->prop->pos.z += dz;
+    }
+}
+
 void propLevelModifierDamDrivableBoatTick(void)
 {
     f32 target;
@@ -1737,8 +1837,13 @@ void propLevelModifierDamDrivableBoatTick(void)
     if (propLevelModifierDamDrivableBoatEntering())
         target = 0.0f;
     else
+    {
+        /* Forward throttle has full boat speed; reverse has a lower cap. */
         target = g_LevelModifierDamDrivableBoatThrottle
-            * DAM_DRIVABLE_BOAT_MAX_SPEED;
+            * (g_LevelModifierDamDrivableBoatThrottle >= 0.0f
+                ? DAM_DRIVABLE_BOAT_MAX_SPEED
+                : DAM_DRIVABLE_BOAT_REVERSE_SPEED);
+    }
 
     if (g_LevelModifierDamDrivableBoatSpeed < target)
     {
@@ -1750,7 +1855,11 @@ void propLevelModifierDamDrivableBoatTick(void)
     }
     else if (g_LevelModifierDamDrivableBoatSpeed > target)
     {
-        step = DAM_DRIVABLE_BOAT_DECEL * g_GlobalTimerDelta;
+        /* Reversing from rest is gentler than forward acceleration.
+         * Neutral braking keeps the original strong deceleration. */
+        step = (target < 0.0f
+            ? DAM_DRIVABLE_BOAT_REVERSE_ACCEL
+            : DAM_DRIVABLE_BOAT_DECEL) * g_GlobalTimerDelta;
         g_LevelModifierDamDrivableBoatSpeed -= step;
 
         if (g_LevelModifierDamDrivableBoatSpeed < target)
@@ -1841,6 +1950,9 @@ void propLevelModifierDamDrivableBoatTick(void)
     }
 
     obj->prop->pos.y = DAM_DRIVABLE_BOAT_START_Y;
+    propLevelModifierDamDrivableBoatCarryPassengers(
+        &oldpos, oldHeading, &obj->prop->pos,
+        g_LevelModifierDamDrivableBoatHeading);
     propLevelModifierDamDrivableBoatApplyTransform();
 
     headingdeg = g_LevelModifierDamDrivableBoatHeading * 360.0f / M_TAU_F;
@@ -3537,11 +3649,11 @@ void proplvreset2(enum LEVELID stageId)
         if (withobjs)
             numObjects += levelModifiersGetReservedObjectCount(stageId);
 
-        /* Reserve one animated-model slot per configured Simulant. P10
-         * primes these slots during level-reset allocation so each receives
-         * exact-size rwdata that can be reused by live spawn and respawn. */
-        if (gamemode == GAMEMODE_MULTI && get_scenario() != SCENARIO_COOP)
-            numAnimatedObjects += modMpBotsGetCount();
+        /* Reserve two exact-sized animated model instances for each
+         * Simulant: one living bot and one corpse that can overlap its
+         * respawn.  Applies to competitive MP and campaign Co-Op. */
+        if (gamemode == GAMEMODE_MULTI)
+            numAnimatedObjects += modMpBotsGetCount() * 2;
 #endif
 
         modelmgrAllocateModelSlots(numObjects);

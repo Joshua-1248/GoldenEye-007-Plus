@@ -157,6 +157,9 @@ static void chrlvStartSimulantPlayerDeath(ChrRecord *self)
     modelSetAnimation(self->model,
         (struct ModelAnimation *)((s32)&ptr_animation_table->data[0] + anim),
         randomGetNext() & 1, 0.0f, 0.5f, 12.0f);
+
+    /* Match human MP inventory drops for bot gunshot and explosion deaths. */
+    modMpBotsDropInventoryOnDeath(self);
 }
 #endif
 s32 chrlvAttackAnimationRelated7F026F30       (ChrRecord *self, f32 *result);
@@ -2638,6 +2641,14 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
     PropRecord *myprop = self->prop; //sp60
     s32 padd;
 
+#ifdef GE_MODDED_CHEATS
+    /* Campaign human-to-bot FF only: competitive bots have no assigned team,
+     * so they remain legitimate targets in team and free-for-all matches. */
+    if (modMpBotsFriendlyFireBlocksCoopAlly()
+        && isPlayer && modMpBotsGetSlotForChr(self) >= 0)
+        return FALSE;
+#endif
+
     // Handle hat shots.
     if (hitpart == HIT_HAT && self->handle_positiondata_hat)
     {
@@ -2805,7 +2816,13 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
                 g_ModStaggeringBackwardsDeathEnabled
                 && ((angle < 1.5707964f) || (angle > 4.712389f));
 #endif
+#ifdef GE_MODDED_CHEATS
+            g_ModMpHumanDamageAttack = isPlayer;
+#endif
             record_damage_kills(damageToCause * 0.125f, vector->x, vector->z, playerNum, 1);
+#ifdef GE_MODDED_CHEATS
+            g_ModMpHumanDamageAttack = FALSE;
+#endif
 #ifdef GE_MODDED_CHEATS
             g_ModPlayerGunshotDeathContext = FALSE;
 #endif
@@ -7754,9 +7771,16 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
                                     if ((self->chrflags & CHRFLAG_CAN_SHOOT_CHRS) != 0)
                                     {
 #ifdef GE_MODDED_CHEATS
-                                        modMpBotsNotifyBotHit(stanSavedColl_posData->chr, self);
-#endif
+                                        if (!modMpBotsFriendlyFireBlocksCoopAlly()
+                                            || modMpBotsGetSlotForChr(self) < 0
+                                            || modMpBotsGetSlotForChr(stanSavedColl_posData->chr) < 0)
+                                        {
+                                            modMpBotsNotifyBotHit(stanSavedColl_posData->chr, self);
+                                            handles_shot_actors(stanSavedColl_posData->chr, 0xF, &sp220, attack_item, 0);
+                                        }
+#else
                                         handles_shot_actors(stanSavedColl_posData->chr, 0xF, &sp220, attack_item, 0);
+#endif
                                     }
                                 }
 #ifdef GE_MODDED_CHEATS

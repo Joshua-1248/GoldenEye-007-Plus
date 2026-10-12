@@ -1,0 +1,11 @@
+--- scripts/audit_v38r1_defaults_compat.py
++++ scripts/audit_v38r1_defaults_compat.py
+@@ -11,7 +11,7 @@
+ checks=[]
+ def check(name, cond):
+     checks.append((name,bool(cond))); print(('[PASS] ' if cond else '[FAIL] ')+name)
+-check('TP Crouched Cam Height authored default is 36 in both headers', '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 36' in OPTH and '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 36' in ROOTOPTH)
++check('TP Crouched Cam Height authored default is 46 in both headers', '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in OPTH and '#define TP_CROUCH_CAM_HEIGHT_DEFAULT 46' in ROOTOPTH)
+ check('UI still displays authored base plus signed adjustment', 'TP_CROUCH_CAM_HEIGHT_DEFAULT + g_ModThirdPersonCrouchCameraHeightAdjust' in OPT)
+ check('V32 audit recognizes semantic V38 ownership helper', 'weaponPropOwnedByPlayer' in V32 and 'PROP_TYPE_PLAYER' in V32)
+ check('V38 ownership helper remains present', 'static bool weaponPropOwnedByPlayer' in PROP and 'prop = prop->parent;' in PROP)

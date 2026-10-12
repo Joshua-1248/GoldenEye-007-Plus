@@ -20,11 +20,11 @@ checks=[]
 def ck(name, cond):
     cond=bool(cond); checks.append((name,cond)); print(('[PASS] ' if cond else '[FAIL] ')+name)
 
-# Count the first mp_chr_setup branch. It is 64 today; runtime code must still use sizeof.
+# Count the first mp_chr_setup branch. Josh and Tegguy are both appended; runtime still uses sizeof.
 m = re.search(r'struct MP_selectable_chars mp_chr_setup\[\]\s*=\s*\{(.*?)\n\};', FR, re.S)
 entries = re.findall(r'^\s*\{getStringID\(', m.group(1), re.M) if m else []
 
-ck('current multiplayer character table exposes all 65 entries including Josh_7774', len(entries) == 65)
+ck('current multiplayer character table exposes all 68 entries including Josh_7774, Tegguy1989, SubDrag, Trevor', len(entries) == 68)
 ck('SP selector count follows mp_chr_setup size instead of retail unlock cutoff',
    'sizeof(mp_chr_setup) / sizeof(mp_chr_setup[0])' in FR and
    'frontGetMpCharacterCount' in FR and

@@ -1,0 +1,15 @@
+--- src/game/front.c
++++ src/game/front.c
+@@ -13399,10 +13399,10 @@
+             DL = constructor_menu_experimental_options(DL);
+             break;
+         case MENU_ENHANCEMENTS_OPTIONS:
++            DL = constructor_menu_enhancements_options(DL);
++            break;
+         case MENU_ADDITIONAL_DEATH_ANIMATIONS:
+             DL = constructor_menu_additional_death_animations(DL);
+-            break;
+-            DL = constructor_menu_enhancements_options(DL);
+             break;
+         case MENU_LEVEL_MODIFIERS:
+             DL = constructor_menu_level_modifiers(DL);

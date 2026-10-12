@@ -689,3 +689,16 @@ LEVELNAMELIST += mapmaker
 STANNAMELIST += mapmaker
 SETUPNAMELIST += setupmapmaker
 endif
+# Compile Josh_7774's standalone head only for Plus/modded ROMs.
+ifeq ($(MODDED_CHEATS),YES)
+CHRNAMELIST += headjosh
+endif
+# Tegguy1989 is separately gated; retain the exact Josh R20 audit anchor.
+ifeq ($(MODDED_CHEATS),YES)
+CHRNAMELIST += headtegguy
+endif
+
+# Goldfinger 64 Hall-of-Famers pilot: independent native head resources.
+ifeq ($(MODDED_CHEATS),YES)
+CHRNAMELIST += headgfsubdrag headgftrevor
+endif

@@ -739,28 +739,27 @@ void levelModifiersOnEnvironmentLoaded(s32 levelid)
     CurrentEnvironmentRecord *environment;
 
     g_LevelModifierCitadelWaterActive = FALSE;
+    g_LevelModifierSurfaceWhiteSkyActive = FALSE;
 
-    if (levelid != LEVELID_CITADEL || !g_LevelModifierCitadelWaterPreload)
+    if (!((levelid == LEVELID_CITADEL && g_LevelModifierCitadelWaterPreload)
+        || (levelid == LEVELID_SURFACE && g_LevelModifierSurfaceWhiteSkyPreload)))
         return;
 
     environment = fogGetCurrentEnvironmentp();
     if (environment == NULL)
         return;
 
-    environment->IsWater = 1;
-    g_LevelModifierCitadelWaterActive = TRUE;
-
-    g_LevelModifierSurfaceWhiteSkyActive = FALSE;
-    if (levelid == LEVELID_SURFACE && g_LevelModifierSurfaceWhiteSkyPreload)
+    if (levelid == LEVELID_CITADEL)
     {
-        CurrentEnvironmentRecord *environment = fogGetCurrentEnvironmentp();
-        if (environment != NULL)
-        {
-            environment->Red = 0xc0;
-            environment->Green = 0xc0;
-            environment->Blue = 0xc0;
-            g_LevelModifierSurfaceWhiteSkyActive = TRUE;
-        }
+        environment->IsWater = 1;
+        g_LevelModifierCitadelWaterActive = TRUE;
+    }
+    else if (levelid == LEVELID_SURFACE)
+    {
+        environment->Red = 0xc0;
+        environment->Green = 0xc0;
+        environment->Blue = 0xc0;
+        g_LevelModifierSurfaceWhiteSkyActive = TRUE;
     }
 }
 

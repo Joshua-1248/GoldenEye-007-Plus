@@ -1,0 +1,8 @@
+--- scripts/audit_r27c_special_options_tp.py
++++ scripts/audit_r27c_special_options_tp.py
+@@ -1,3 +1,2 @@
+-ck('Patches contains the requested entries plus Unlimited Explosions and R27W fixes',
+-   all(x in SPEC for x in ['Micro-Optimizations','Noise Dithering','Anti-Aliasing','TP Corner Shooting Fix']) and
+-   all(x in FR for x in ['frontModGetOptionLabel(i == 0 ? 46','i == 2 ? 50 : i == 3 ? 55']) and
++ck('Main Patches keeps TP Corner/Silo X/AR33 while moved enhancement rows remain in Watch Patches',
++   'frontModGetOptionLabel(i == 0 ? 55 : i == 1 ? 80 : 81)' in FR and

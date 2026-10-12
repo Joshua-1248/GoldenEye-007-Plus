@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+R = Path(__file__).resolve().parents[1]
+F2 = (R / "src/game/file2.c").read_text(errors="replace")
+O = (R / "src/game/options.c").read_text(errors="replace")
+OH = (R / "src/game/options.h").read_text(errors="replace")
+FR = (R / "src/game/front.c").read_text(errors="replace")
+SP = (R / "src/game/spectrum.c").read_text(errors="replace")
+MP = (R / "src/game/mpmenu.c").read_text(errors="replace")
+BV = (R / "src/game/bondview2.c").read_text(errors="replace")
+BVC = (R / "src/game/bondview.c").read_text(errors="replace")
+CA = (R / "src/game/chraction.c").read_text(errors="replace")
+PO = (R / "src/game/propobj.c").read_text(errors="replace")
+BC = (R / "src/bondconstants.h").read_text(errors="replace")
+MK = (R / "Makefile").read_text(errors="replace")
+
+checks = []
+def ck(name, cond):
+    cond = bool(cond)
+    checks.append((name, cond))
+    print(("[PASS] " if cond else "[FAIL] ") + name)
+
+ck("jump animation implementation is preserved but presentation is disabled",
+   "#define MOD_EXPERIMENTAL_JUMP_ANIMATIONS_ENABLED 0" in BV
+   and "R27U R10: presentation-only Experimental Jump animation" in BV
+   and "ANIM_surface_vent_jump" in BV and "ANIM_dancing" in BV
+   and "MOD_EXPERIMENTAL_JUMP_ANIMATIONS_ENABLED" in BV)
+
+ck("jump physics and R9 collision remain active",
+   "#define MOD_EXPERIMENTAL_JUMP_HEIGHT 128.0f" in BV
+   and "R27U R7 R1: compact upward head sweep against real BG" in BV
+   and "R27U R9 R5 R2: airborne upper-wall BG sweep" in BV)
+
+ck("Enhancements runtime toggle defaults Off",
+   "u8 g_ModAdditionalPlayerDeathAnimationsEnabled;" in O
+   and "extern u8 g_ModAdditionalPlayerDeathAnimationsEnabled;" in OH
+   and "g_ModAdditionalPlayerDeathAnimationsEnabled = FALSE;" in F2)
+
+ck("Enhancements persists per folder in the four free R27D tail bytes",
+   "GE_SRAM_EXT_TAIL_ENH_BASE (MAX_FOLDER_COUNT * GE_SRAM_EXT_TAIL_SP_STRIDE)" in F2
+   and "GE_SRAM_EXT_TAIL_ENH_ADDITIONAL_PLAYER_DEATHS 0x01" in F2
+   and "ge_sram_ext_enh_tail_must_fit" in F2
+   and "GE_SRAM_EXT_TAIL_ENH_BASE + folder" in F2
+   and "reserved_tail[enh] = enhflags" in F2)
+
+ck("packed labels are exact and scratch grew only in BSS",
+   "static u32 text[4][10];" in SP
+   and "index == 76" in SP and "0x456E6861" in SP
+   and "index == 77" in SP and "0x41646469" in SP
+   and "0x65720000" in SP)
+
+ck("main Special Options renders Enhancements after Experimental",
+   "page2labels[12] = {12,13,14,15,30,16,8,29,52,73,74,76}" in FR
+   and "s32 count = g_ModOptionsPage ? 12 : 11;" in FR
+   and "s32 maxrow = g_ModOptionsPage ? 11 : 10;" in FR
+   and "MENU_ENHANCEMENTS_OPTIONS" in BC
+   and "row == 11" in FR
+   and "frontChangeMenu(MENU_ENHANCEMENTS_OPTIONS, FALSE);" in FR
+   and "g_ModAdditionalPlayerDeathAnimationsEnabled ^= 1;" in FR
+   and "g_ModOptionsDirty = TRUE;" in FR)
+
+_FRWS = " ".join(FR.split())
+ck("Experimental and Enhancements share compact wrapper-free frontend init",
+   "void init_menu_experimental_options(void)" not in FR
+   and "init_menu_experimental_options();" not in FR
+   and "case MENU_EXPERIMENTAL_OPTIONS: tab_prev_highlight = FALSE; load_walletbond(); break;" in _FRWS
+   and "case MENU_ENHANCEMENTS_OPTIONS: tab_prev_highlight = FALSE; load_walletbond(); break;" in _FRWS
+   and FR.count("tab_prev_highlight = FALSE; load_walletbond();") == 2)
+
+ck("SP Watch Enhancements is one deferred-save row before Cheats",
+   "#define MODWATCH_OPTION_ROWS 18" in O
+   and "#define MODWATCH_MODE_ENHANCEMENTS 0x700" in O
+   and "#define MODWATCH_ENHANCEMENTS_ROWS 1" in O
+   and "MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS;" in O
+   and "frontModGetOptionLabel(76)" in O and "frontModGetOptionLabel(77)" in O
+   and "g_ModWatchSettingsDirty = TRUE;" in O)
+
+ck("SP Watch parent order is Debug 14 / Experimental 15 / Enhancements 16 / Cheats 17",
+   "#define MODWATCH_OPTION_ROWS 18" in O
+   and "row == 14" in O
+   and "MODWATCH_STATE = MODWATCH_MODE_DEBUG;" in O
+   and "row == 15" in O
+   and "MODWATCH_STATE = MODWATCH_MODE_EXPERIMENTAL;" in O
+   and "row == 16" in O
+   and "MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS;" in O
+   and "MODWATCH_STATE = MODWATCH_MODE_CHEATS;" in O)
+
+ck("MP/Co-op Watch Enhancements is mode 9 before Cheats",
+   "if (mode == 2) return 19;" in MP
+   and "if (mode == 9) return 1;" in MP
+   and "mpcfg_mode[player]=9" in MP
+   and "mpcfg_row[player]=17" in MP
+   and 'mpcfg_mode[curplayernum] == 9 ? "ENHANCEMENTS"' in MP
+   and "g_ModAdditionalPlayerDeathAnimationsEnabled ^= 1;" in MP
+   and "mpcfg_globals_dirty = TRUE;" in MP)
+
+_h0 = CA.find("bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weaponid, bool isPlayer)")
+_h1 = CA.find("bool chrCanSeeBond(", _h0)
+_HIT = CA[_h0:_h1] if _h0 >= 0 and _h1 > _h0 else ""
+
+_wdamage = _HIT.find("record_damage_kills(damageToCause * 0.125f, vector->x, vector->z, playerNum, 1);")
+_wmarker = _HIT.find("R27V: use the exact guard wall-stagger qualification for Bond")
+_wsetcur = _HIT.find("set_cur_player(playerNum);", _wmarker)
+
+ck("wall death uses exact guard front-hit chance and rear-wall geometry in direct-shot handler",
+   _wdamage >= 0 and _wmarker > _wdamage and _wsetcur > _wmarker
+   and "g_ModAdditionalPlayerDeathAnimationsEnabled" in _HIT[_wmarker:_wsetcur]
+   and "g_CurrentPlayer->bonddead != FALSE" in _HIT[_wmarker:_wsetcur]
+   and "angle < 1.5707964f" in _HIT[_wmarker:_wsetcur]
+   and "angle > 4.712389f" in _HIT[_wmarker:_wsetcur]
+   and "(randomGetNext() % (u32)0x14) == 0" in _HIT[_wmarker:_wsetcur]
+   and "0.17453294f" in _HIT[_wmarker:_wsetcur]
+   and _HIT[_wmarker:_wsetcur].count("chrlvPathingCollisionRelated7F0264B0(self->prop") >= 2
+   and "150.0f" in _HIT[_wmarker:_wsetcur]
+   and "vec.x < 10.0f && vec.x > -10.0f" in _HIT[_wmarker:_wsetcur]
+   and "startnewbonddie" in _HIT[_wmarker:_wsetcur])
+
+_g0 = CA.find("void chrlvUpdateShotbondsum(ChrRecord *self, s32 *arg1, s32 *arg2, ITEM_IDS item)")
+_g1 = CA.find("s32 sub_GAME_7F02D630(", _g0)
+_GUARDSHOT = CA[_g0:_g1] if _g0 >= 0 and _g1 > _g0 else ""
+_gdamage = _GUARDSHOT.find("bondviewCallRecordDamageKills(t2, subroty, -1, 1);")
+_gmarker = _GUARDSHOT.find("R27V R12: ordinary guard gunfire wall-stagger death")
+_greset = _GUARDSHOT.find("self->shotbondsum = 0.0f;", _gmarker)
+
+ck("ordinary guard gunfire can select wall stagger on its exact lethal tick",
+   _gdamage >= 0 and _gmarker > _gdamage and _greset > _gmarker
+   and "padding = g_CurrentPlayer->bonddead == FALSE;" in _GUARDSHOT
+   and "g_CurrentPlayer->bonddead != FALSE" in _GUARDSHOT[_gmarker:_greset]
+   and "atan2f(dx, dz) - bondviewGetPlayerYawRadians()" in _GUARDSHOT[_gmarker:_greset]
+   and "subroty < 1.5707964f" in _GUARDSHOT[_gmarker:_greset]
+   and "subroty > 4.712389f" in _GUARDSHOT[_gmarker:_greset]
+   and "(randomGetNext() % (u32)0x14) == 0" in _GUARDSHOT[_gmarker:_greset]
+   and "bondviewGetPlayerYawRadians() + M_PI_F" in _GUARDSHOT[_gmarker:_greset]
+   and "0.17453294f" in _GUARDSHOT[_gmarker:_greset]
+   and _GUARDSHOT[_gmarker:_greset].count(
+       "chrlvPathingCollisionRelated7F0264B0(") == 2
+   and "dy < 10.0f && dy > -10.0f" in _GUARDSHOT[_gmarker:_greset]
+   and "2 + (randomGetNext() & 1)" in _GUARDSHOT[_gmarker:_greset])
+
+ck("wall death preserves enemy stagger's random mirror flip",
+   "g_CurrentPlayer->startnewbonddie = 2 + (randomGetNext() & 1);" in CA
+   and "#define MOD_PLAYER_DEATH_WALL_FLIP0 2" in BV
+   and "#define MOD_PLAYER_DEATH_WALL_FLIP1 3" in BV
+   and "PTR_ANIM_death_stagger_back_to_wall" in BV)
+
+ck("Facility toxic gas selects Death Neck only on the lethal gas tick",
+   "void handle_gas_damage(void)" in PO
+   and "r27v_player_was_alive = g_CurrentPlayer->bonddead == FALSE;" in PO
+   and "bossGetStageNum() == LEVELID_FACILITY" in PO
+   and "g_CurrentPlayer->bonddead != FALSE" in PO
+   and "g_CurrentPlayer->startnewbonddie = 4;" in PO
+   and "#define MOD_PLAYER_DEATH_GAS_NECK   4" in BV
+   and "PTR_ANIM_death_neck" in BV)
+
+_d0 = BVC.find("s32 g_bondviewBondDeathAnimations[]")
+_d1 = BVC.find("s32 g_bondviewBondDeathAnimationsCount", _d0)
+_DEATHPOOL = BVC[_d0:_d1] if _d0 >= 0 and _d1 > _d0 else ""
+
+ck("special player deaths do not enter Bond's ordinary random pool",
+   _DEATHPOOL
+   and "PTR_ANIM_death_stagger_back_to_wall" not in _DEATHPOOL
+   and "PTR_ANIM_death_neck" not in _DEATHPOOL)
+
+ck("authoritative special deaths are mirrored by visible TP/MP bodies",
+   "these two contextual deaths are deliberately not members" in BV
+   and "PTR_ANIM_death_stagger_back_to_wall + (s32)ptr_animation_table" in BV
+   and "PTR_ANIM_death_neck + (s32)ptr_animation_table" in BV
+   and "modelGetAnimSpeed((Model *)&ppointers[index]->model)" in BV)
+
+ck("R27V audit is mandatory",
+   "r27v-additional-player-deaths-audit:" in MK
+   and "r27v-additional-player-deaths-audit" in
+      next((x for x in MK.splitlines() if x.startswith("prerequisites:")), ""))
+
+bad = [name for name, ok in checks if not ok]
+if "Experimental and Enhancements share compact wrapper-free frontend init" in bad:
+    print("[DEBUG] compact init phrase count:",
+          FR.count("tab_prev_highlight = FALSE; load_walletbond();"))
+    print("[DEBUG] normalized Experimental init:",
+          "case MENU_EXPERIMENTAL_OPTIONS: tab_prev_highlight = FALSE; load_walletbond(); break;" in _FRWS)
+    print("[DEBUG] normalized Enhancements init:",
+          "case MENU_ENHANCEMENTS_OPTIONS: tab_prev_highlight = FALSE; load_walletbond(); break;" in _FRWS)
+print()
+print("R27V R12 ADDITIONAL PLAYER DEATHS AUDIT: %s (%d/%d)" %
+      ("PASS" if not bad else "FAIL", len(checks) - len(bad), len(checks)))
+if bad:
+    for name in bad:
+        print(" - " + name)
+    sys.exit(1)

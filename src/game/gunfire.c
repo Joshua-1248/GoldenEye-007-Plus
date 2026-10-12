@@ -4358,6 +4358,10 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                 if (temp_v0_8 != NULL)
                 {
                     temp_v0_8->obj->state |= 0x40;
+#ifdef GE_MODDED_CHEATS
+                    if (get_scenario() == SCENARIO_COOP && getPlayerCount() > 1)
+                        bondinvCoopRecordGadgetActivation(temp_v0_8->obj, var_s1);
+#endif
                 }
             }
         }
@@ -6766,13 +6770,22 @@ Gfx *generate_ammo_total_microcode(Gfx *gdl)
                      * edge instead of centering it on the ammo icon position;
                      * this keeps long labels such as WATCH MAGNET ATTRACT from
                      * being clipped off the right side. */
+                    /* R16: use the same one-pixel-inverted Bank Gothic
+                     * tracking as the corrected pickup messages, only for
+                     * four-player campaign Co-Op gadgets. Keep competitive
+                     * multiplayer and the one-player HUD unchanged. */
+                    if (getPlayerCount() == 4)
+                        setTextSpacingInverted(
+                            (get_scenario() == SCENARIO_COOP) ? 1 : 0);
                     gdl = gunDrawHudString(gdl, itemname,
-                        (viGetViewLeft() + viGetViewWidth()) - 8, HUDHALIGN_RIGHT,
+                        (viGetViewLeft() + viGetViewWidth()) - (getPlayerCount() == 4 ? 2 : 8), HUDHALIGN_RIGHT,
 #if defined(VERSION_EU)
                         (viGetViewTop() + viGetViewHeight()) - 28, HUDVALIGN_MIDDLE, 1);
 #else
                         (viGetViewTop() + viGetViewHeight()) - 18, HUDVALIGN_MIDDLE, 1);
 #endif
+                    if (getPlayerCount() == 4)
+                        setTextSpacingInverted(0);
                     gdl = combiner_bayer_lod_perspective(gdl);
                 }
 

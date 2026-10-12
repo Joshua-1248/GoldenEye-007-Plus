@@ -36,7 +36,8 @@ typedef enum ModMpBotTrait
     MODBOT_TRAIT_MELEE          = 1 << 10,
     MODBOT_TRAIT_SPEEDY         = 1 << 11,
     MODBOT_TRAIT_CHEAP          = 1 << 12,
-    MODBOT_TRAIT_COUNT          = 13
+    MODBOT_TRAIT_OPPORTUNIST    = 1 << 13,
+    MODBOT_TRAIT_COUNT          = 14
 } ModMpBotTrait;
 
 #define MOD_MP_BOT_NAME_LEN 16
@@ -50,6 +51,12 @@ struct ModMpBotConfig
 };
 
 extern u8 g_ModMpBotCount;
+extern u8 g_ModMpBotDamageSoundEnabled;
+extern u8 g_ModMpFriendlyFireEnabled;
+extern u8 g_ModMpHumanDamageAttack;
+/* FFA always damages opponents; only real allies get FF immunity. */
+s32 modMpBotsFriendlyFireBlocksCoopAlly(void);
+s32 modMpBotsFriendlyFireBlocksHuman(s32 attacker, s32 victim);
 extern struct ModMpBotConfig g_ModMpBotConfigs[MOD_MP_BOT_MAX];
 
 s32 modMpBotsGetCount(void);
@@ -70,6 +77,7 @@ void modMpBotsPrepareStage(void);
 void modMpBotsTick(void);
 void modMpBotsPostChrTick(void);
 void modMpBotsNotifyPropFreed(PropRecord *prop);
+void modMpBotsDropInventoryOnDeath(ChrRecord *chr);
 
 s32 modMpBotsGetSlotForChr(ChrRecord *chr);
 PropRecord *modMpBotsGetTargetProp(ChrRecord *chr);

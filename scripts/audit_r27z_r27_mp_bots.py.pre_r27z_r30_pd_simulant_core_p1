@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+BOT_H = (ROOT / 'src/game/mpbots.h').read_text()
+BOT_C = (ROOT / 'src/game/mpbots.c').read_text()
+FRONT = (ROOT / 'src/game/front.c').read_text()
+FRONT_H = (ROOT / 'src/game/front.h').read_text()
+CONST = (ROOT / 'src/bondconstants.h').read_text()
+CHRACT = (ROOT / 'src/game/chraction.c').read_text()
+CHRPROP = (ROOT / 'src/game/chrprop.c').read_text()
+CHR = (ROOT / 'src/game/chr.c').read_text()
+INITGUARDS = (ROOT / 'src/game/initguards.c').read_text()
+BONDVIEW = (ROOT / 'src/game/bondview2.c').read_text()
+MPMENU = (ROOT / 'src/game/mpmenu.c').read_text()
+MAKEFILE = (ROOT / 'Makefile').read_text()
+LDS = '\n'.join((ROOT / p).read_text() for p in (
+    'ld/game.text.ld.inc', 'ld/game.data.ld.inc',
+    'ld/game.rodata.ld.inc', 'ld/game.bss.ld.inc'))
+
+checks = []
+def ck(name, cond):
+    ok = bool(cond)
+    checks.append(ok)
+    print(('[PASS] ' if ok else '[FAIL] ') + name)
+
+ck('bot pool is exactly eight independent slots', '#define MOD_MP_BOT_MAX 8' in BOT_H)
+ck('bot count is independent of selected_num_players',
+   'u8 g_ModMpBotCount = 0;' in BOT_C and 'selected_num_players' not in BOT_C)
+ck('difficulty scale preserves six PD tiers', all(x in BOT_H for x in (
+   'MODBOT_DIFFICULTY_MEAT', 'MODBOT_DIFFICULTY_EASY', 'MODBOT_DIFFICULTY_NORMAL',
+   'MODBOT_DIFFICULTY_HARD', 'MODBOT_DIFFICULTY_PERFECT', 'MODBOT_DIFFICULTY_DARK')))
+ck('None is the neutral/no-personality type', 'MODBOT_TYPE_NONE = 0' in BOT_H)
+ck('neutral generated names are exact',
+   '"RookieBot", "EasyBot", "NormalBot", "HardBot", "VeteranBot", "OmnisciBot"' in BOT_C)
+ck('personality names are exact', all(x in BOT_C for x in (
+   '"MeleeBot"', '"SpeedBot"', '"VindictBot"', '"PsychoBot"', '"PacifistBot"',
+   '"IronBot"', '"ArmorBot"', '"TNTBot"', '"QuarryBot"', '"FearBot"',
+   '"UmpireBot"', '"StalkerBot"')))
+ck('GoldenEye bot adaptation contains no PD alternate-fire layer',
+   'FUNC_SECONDARY' not in BOT_C)
+ck('SpeedBot is exactly 2x and IronBot is half-speed',
+   'return 2.0f;' in BOT_C and 'MODBOT_TYPE_IRON' in BOT_C and 'return 0.5f;' in BOT_C)
+ck('ArmorBot and IronBot use GE native character armor representation',
+   'chrAddHealth(chr, 4.0f);' in BOT_C and 'chrAddHealth(chr, 8.0f);' in BOT_C
+   and 'chrSetMaxDamage(chr, 4.0f);' in BOT_C)
+ck('VindictBot remembers the killer across respawn',
+   'vindicttarget' in BOT_C and 'runtime->vindicttarget = (s16)attacker;' in BOT_C
+   and 'modMpBotsResolveTargetCode(runtime->vindicttarget)' in BOT_C)
+ck('MeleeBot uses melee-only spawning/attack path',
+   'if (g_ModMpBotConfigs[slot].type == MODBOT_TYPE_MELEE)' in BOT_C
+   and 'modMpBotsMeleeAttack' in BOT_C and 'ITEM_FIST' in BOT_C)
+ck('TNTBot prefers GoldenEye explosive launchers',
+   'MODBOT_TYPE_TNT' in BOT_C and 'ITEM_ROCKETLAUNCH' in BOT_C and 'ITEM_GRENADELAUNCH' in BOT_C)
+ck('competitive MP only; campaign Co-Op is excluded',
+   'scenario != SCENARIO_COOP' in BOT_C)
+ck('multiplayer options exposes Bots and Bot Settings',
+   '(u8 *)"Bots"' in FRONT and '(u8 *)"Bot Settings"' in FRONT
+   and 'modMpBotsCycleCount();' in FRONT)
+ck('Bot Settings exposes all eight bot slots',
+   'for (i = 0; i < MOD_MP_BOT_MAX; i++)' in FRONT
+   and 'sprintf(label, "Bot %d", i + 1);' in FRONT)
+ck('per-bot editor exposes Character/Difficulty/Type and generated Name',
+   'static const char *labels[3] = {"Character", "Difficulty", "Type"};' in FRONT
+   and '(u8 *)"Name"' in FRONT and 'modMpBotGetDisplayName(g_ModMpBotEditSlot)' in FRONT)
+ck('bot menus are appended frontend IDs and have full lifecycle dispatch',
+   'MENU_MP_BOT_SETTINGS' in CONST and 'MENU_MP_BOT_EDIT' in CONST
+   and FRONT.count('case MENU_MP_BOT_SETTINGS:') >= 4
+   and FRONT.count('case MENU_MP_BOT_EDIT:') >= 4)
+ck('bot character names come from GE multiplayer character catalog',
+   'frontGetMpCharacterName' in FRONT and 'frontGetMpCharacterName' in FRONT_H)
+ck('bot runtime resets at stage guard init and ticks with chr props',
+   'modMpBotsResetRuntime();' in INITGUARDS and 'modMpBotsTick();' in CHRPROP)
+ck('bot gunfire targets explicit props and owns human damage credit',
+   'modMpBotsGetTargetProp(self)' in CHRACT and 'modMpBotsDamageViewer' in CHRACT
+   and 'modMpBotsGetDamageOwner()' in BONDVIEW)
+ck('human MP score includes kills against bots', 'modMpBotsGetHumanKills(playernum)' in MPMENU)
+ck('bot module is linked in text/data/rodata/bss', LDS.count('src/game/mpbots.o') == 4)
+ck('bot removal follows GE active-prop teardown order',
+   'chrpropCleanupForRemoval(prop);\n        chrpropDelist(prop);\n        chrpropDisable(prop);\n        chrpropFree(prop);' in BOT_C)
+ck('QuarryBot compares normalized health/armor across humans and bots',
+   'return (chr->maxdamage - chr->damage) / chr->maxdamage;' in BOT_C)
+ck('bot locomotion no longer uses guard chase pathing',
+   'plot_course_for_actor(runtime->chr' not in BOT_C
+   and 'modMpBotsDrive(i);' in BOT_C)
+ck('PD-style lateral motor is injected before GE chr collision',
+   's32 modMpBotsApplyLateral(ChrRecord *chr, coord3d *src, coord3d *dst)' in BOT_C
+   and 'modMpBotsApplyLateral(chr, src, dst);' in CHR)
+ck('player-like controller has independent forward/back and strafe',
+   'runtime->moveforward = forward;' in BOT_C
+   and 'runtime->movesideways = sideways;' in BOT_C
+   and 'forward = -0.78f;' in BOT_C
+   and 'sideways = 0.72f * runtime->strafedir;' in BOT_C)
+ck('player-like controller has a real f32 atan2f prototype',
+   '#include "math_atan2f.h"' in BOT_C
+   and 'targetyaw = atan2f(dx, dz);' in BOT_C)
+ck('angle normalization is bounded and cannot hard-hang',
+   'while (delta >' not in BOT_C
+   and 'while (delta <' not in BOT_C
+   and 'if (delta > M_PI_F)' in BOT_C
+   and 'else if (delta < -M_PI_F)' in BOT_C)
+ck('player-like controller faces independently from travel',
+   'targetyaw = atan2f(dx, dz);' in BOT_C
+   and 'setsubroty(runtime->chr->model, modMpBotsNormalizeAngle(currentyaw + delta));' in BOT_C)
+ck('R2 isolates player-like motor from GE guard combat actions',
+   'R27Z/R28 R2 combat isolation' in BOT_C
+   and 'actor_fire_or_aim_at_target_update(runtime->chr, TARGET_BOND, 0)' not in BOT_C
+   and 'actor_aim_at_actor(runtime->chr, TARGET_BOND, 0)' not in BOT_C
+   and 'modMpBotsMeleeAttack(slot, target);' not in BOT_C
+   and 'modMpBotsApplyLateral' in BOT_C)
+ck('PsychoBot keeps close aggressive combat distance',
+   'if (config->type == MODBOT_TYPE_PSYCHO)' in BOT_C
+   and 'maxrange = 300.0f;' in BOT_C)
+ck('bot audit is a mandatory build prerequisite',
+   'r27z-r27-mp-bots-audit' in MAKEFILE
+   and 'python3 scripts/audit_r27z_r27_mp_bots.py' in MAKEFILE)
+
+passed = sum(checks)
+print(f'\nR27Z R27 PERFECT DARK BOT FOUNDATION AUDIT: {"PASS" if passed == len(checks) else "FAIL"} ({passed}/{len(checks)})')
+sys.exit(0 if passed == len(checks) else 1)

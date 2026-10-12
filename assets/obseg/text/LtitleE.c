@@ -306,7 +306,10 @@ char *LtitleE[] = {
  "Cheats without any consequences to it. Uses unfair tactics such as starting armed and moving at twice the normal speed.", //TITLE_STR_BOTTRAIT_CHEAP_DESC
  #ifdef LANG_US 
  0, //TITLE_STR_287_RUSSIANSOLDIER
- "Josh_7774" //TITLE_STR_JOSH_7774 (US index 288)
+ "Josh_7774", //TITLE_STR_JOSH_7774 (US index 288)
+ "Tegguy1989", //TITLE_STR_TEGGUY1989
+ "SubDrag", //TITLE_STR_GF_SUBDRAG
+ "Trevor" //TITLE_STR_GF_TREVOR
  #endif
  #ifdef LANG_JP
  "Russian Soldier\n", //TITLE_STR_287_RUSSIANSOLDIER
@@ -324,6 +327,9 @@ char *LtitleE[] = {
  "Jungle Commando\n", //TITLE_STR_299_JUNGLECOMMANDO
  "Janus Special Forces\n", //TITLE_STR_300_JANUSSPECIALFORCES
  "Moonraker Elite\n", //TITLE_STR_301_MOONRAKERELITE
- "Josh_7774" //TITLE_STR_JOSH_7774
+ "Josh_7774", //TITLE_STR_JOSH_7774
+ "Tegguy1989", //TITLE_STR_TEGGUY1989
+ "SubDrag", //TITLE_STR_GF_SUBDRAG
+ "Trevor" //TITLE_STR_GF_TREVOR
  #endif
 };

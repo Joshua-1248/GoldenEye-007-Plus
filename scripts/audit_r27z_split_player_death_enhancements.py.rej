@@ -1,0 +1,18 @@
+--- scripts/audit_r27z_split_player_death_enhancements.py
++++ scripts/audit_r27z_split_player_death_enhancements.py
+@@ -34,6 +34,15 @@
+ ck("frontend death menu uses live crosshair hit testing",
+    "cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f" in FR)
+ ck("frontend death submenu exists","MENU_ADDITIONAL_DEATH_ANIMATIONS" in BC and "interface_menu_additional_death_animations" in FR)
++enh_case = FR.rfind("case MENU_ENHANCEMENTS_OPTIONS:")
++death_case = FR.find("case MENU_ADDITIONAL_DEATH_ANIMATIONS:", enh_case)
++enh_ctor = FR.find("constructor_menu_enhancements_options(DL);", enh_case)
++death_ctor = FR.find("constructor_menu_additional_death_animations(DL);", death_case)
++ck("frontend Enhancements and death submenu constructors dispatch separately",
++   enh_case >= 0
++   and death_case > enh_case
++   and enh_ctor > enh_case and enh_ctor < death_case
++   and death_ctor > death_case)
+ ck("child names exact","Facility Gas Leak Death" in SP and "Staggering Backwards Death" in SP)
+ ck("stagger persists independently","g_ModStaggeringBackwardsDeathEnabled" in O and "GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH 0x20" in F2)
+ ck("Facility gas keeps existing 0x01 setting","g_ModAdditionalPlayerDeathAnimationsEnabled" in PO)

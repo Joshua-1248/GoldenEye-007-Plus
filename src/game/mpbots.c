@@ -52,6 +52,13 @@ extern u8 _modMpBotModelCacheStart[];
 extern u8 _modMpBotModelCacheEnd[];
 extern u8 _modMpBotTextureCacheStart[];
 extern u8 _modMpBotTextureCacheEnd[];
+extern u8 _modMpBotDecodeScratchStart[];
+/* The Co-Op graphics reservation has no graphics owner in competitive MP. */
+extern u8 _coopDynBuffersStart[];
+extern u8 _coopDynBuffersEnd[];
+/* Dyn owns only the front portion needed for the active Co-Op viewports. */
+extern u8 *g_GfxBuffers[3];
+extern u8 *g_VtxBuffers[3];
 #endif
 
 #ifdef GE_MODDED_CHEATS
@@ -140,6 +147,8 @@ struct ModMpBotRuntime
     s16 respawntimer;
     s16 damagegracetimer60;
     u8 deathrecorded;
+    u8 deathdropsdone;
+    u8 regroupafterdeath;
     u8 spawnready;
     u8 resourcesready;
     s32 kills;
@@ -164,7 +173,8 @@ struct ModMpBotRuntime
     s32 targetlastseen60;
     s32 lastseenanytarget60;
     u8 targetinsight;
-    u8 pad2[3];
+    u8 opportunistcommitted;
+    u8 pad2[2];
     s32 queryplayernum;
     s8 chrnumsbydistanceasc[MODBOT_PD_MAX_PARTICIPANTS];
     f32 chrdistances[MODBOT_PD_MAX_PARTICIPANTS];
@@ -211,6 +221,20 @@ struct ModMpBotRuntime
     s8 navindex;
     s8 navcount;
     u8 navactive;
+
+    /* A prop pointer disambiguates pickups/guards (all have targetcode -1). */
+    PropRecord *navtargetprop;
+    PropRecord *movetargetprop;
+    PropRecord *failedpickupprop;
+    s16 pickupretry60;
+    s16 movehold60;
+    coord3d navavoidpos;
+    coord3d navprogresspos;
+    s16 navavoidttl60;
+    s16 navclearanceinterval60;
+    s16 navblocked60;
+    s8 navavoidside;
+    u8 navstalled;
 };
 
 struct ModMpBotPdDifficulty
@@ -220,9 +244,7 @@ struct ModMpBotPdDifficulty
     f32 maxzerospeed;
     u16 zerotime60;
     f32 turnunzeromult;
-    f32 zerocloakspeed;
     f32 forcezerominspeed;
-    s32 dizzyamount;
 };
 
 
@@ -250,6 +272,42 @@ struct ModMpBotPdWeaponConfig
 };
 
 u8 g_ModMpBotCount = 0;
+/* Per-session settings; default On, independent of human damage audio. */
+u8 g_ModMpBotDamageSoundEnabled = TRUE;
+u8 g_ModMpFriendlyFireEnabled = TRUE;
+u8 g_ModMpHumanDamageAttack = FALSE;
+
+/* Real team-vs-team modes use have_token_or_goldengun as team ID.
+ * Ordinary Deathmatch, LTK, YOLT and objective scenarios never use this
+ * setting to turn off combat between opposing participants. */
+extern s32 get_players_team_or_scenario_item_flag(int player);
+
+s32 modMpBotsFriendlyFireBlocksCoopAlly(void)
+{
+    return gamemode == GAMEMODE_MULTI && !g_ModMpFriendlyFireEnabled
+        && get_scenario() == SCENARIO_COOP;
+}
+
+s32 modMpBotsFriendlyFireBlocksHuman(s32 attacker, s32 victim)
+{
+    s32 scenarioid;
+
+    if (gamemode != GAMEMODE_MULTI || g_ModMpFriendlyFireEnabled
+        || (u32)attacker >= (u32)getPlayerCount()
+        || (u32)victim >= (u32)getPlayerCount() || attacker == victim)
+        return FALSE;
+
+    scenarioid = get_scenario();
+    if (scenarioid == SCENARIO_COOP)
+        return TRUE;
+
+    if (scenarioid == SCENARIO_2v2 || scenarioid == SCENARIO_3v1
+        || scenarioid == SCENARIO_2v1)
+        return get_players_team_or_scenario_item_flag(attacker)
+            == get_players_team_or_scenario_item_flag(victim);
+
+    return FALSE;
+}
 
 struct ModMpBotConfig g_ModMpBotConfigs[MOD_MP_BOT_MAX] = {
     {0, MODBOT_DIFFICULTY_NORMAL, 0, "Bot 1"},
@@ -287,10 +345,20 @@ static s32 g_ModMpBotDamageOwner = -1;
 static s32 g_ModMpBotSpawnCursor;
 
 static void modMpBotsPdNavClear(struct ModMpBotRuntime *runtime);
+static void modMpBotsCoopGiveIntroLoadout(s32 slot);
 
 #if defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
 static u8 *g_ModMpBotModelCacheCursor;
 static struct texpool g_ModMpBotTexturePool;
+/* P26 R2: set only while competitive multiplayer uses the Co-Op-idle arena. */
+static s32 g_ModMpBotBorrowedCoopArena;
+/* Only Co-Op may borrow the unused, post-VTX tail of its graphics reserve. */
+static s32 g_ModMpBotCoopSlackArena;
+/* Co-Op retains its complete dedicated display-list and vertex buffers.
+ * Optional extra bot resource space comes ONLY from unused MEMPOOL_STAGE
+ * after stage objects and all human player buffers have been allocated. */
+static s32 g_ModMpBotCoopStageArenaTried;
+extern MemoryPool g_mempPools[MEMPOOL_COUNT];
 #endif
 
 static const char *g_ModMpBotDifficultyNames[MODBOT_DIFFICULTY_MAX] = {
@@ -299,20 +367,24 @@ static const char *g_ModMpBotDifficultyNames[MODBOT_DIFFICULTY_MAX] = {
 
 static const char *g_ModMpBotTraitNames[MODBOT_TRAIT_COUNT] = {
     "Pacifist", "Vindictive", "Psychotic", "Juggernaut",
-    "Armor Specialist", "Pyromaniac", "Bully", "Fearful",
-    "Equalizer", "Stalker", "Melee", "Speedy", "Cheap"
+    "Armor Specialist", "Pyromaniac", "Assassin", "Fearful",
+    "Equalizer", "Stalker", "Melee", "Speedy", "Cheap", "Opportunist"
 };
 
 
 
-/* Perfect Dark bot.c difficulty table, NTSC timing. */
+/* Perfect Dark bot.c difficulty table, NTSC timing.
+ * PD-only fields zerocloakspeed and dizzyamount are deliberately not stored:
+ * no GoldenEye Simulant code reads them. Authored PD values, by row:
+ * zerocloakspeed (degrees): 40, 28.5, 20, 14, 10, 10;
+ * dizzyamount: 1000, 1000, 1500, 2500, 4000, 4000. */
 static struct ModMpBotPdDifficulty g_ModMpBotPdDifficulties[MODBOT_DIFFICULTY_MAX] = {
-    {90, MODBOT_PD_DTOR(15.0f),  MODBOT_PD_DTOR(30.0f), 600, 10.0f, MODBOT_PD_DTOR(40.0f),   MODBOT_PD_DTOR(20.0f), 1000},
-    {60, MODBOT_PD_DTOR(7.0f),   MODBOT_PD_DTOR(14.0f), 360, 10.0f, MODBOT_PD_DTOR(28.5f),  MODBOT_PD_DTOR(8.0f),  1000},
-    {30, MODBOT_PD_DTOR(4.0f),   MODBOT_PD_DTOR(8.0f),  180, 4.0f,  MODBOT_PD_DTOR(20.0f),   MODBOT_PD_DTOR(5.0f),  1500},
-    {15, MODBOT_PD_DTOR(1.5f),   MODBOT_PD_DTOR(4.0f),   90, 2.0f,  MODBOT_PD_DTOR(14.0f),   MODBOT_PD_DTOR(2.0f),  2500},
-    { 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(2.0f),   45, 1.0f,  MODBOT_PD_DTOR(10.0f),   MODBOT_PD_DTOR(0.0f),  4000},
-    { 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(0.0f),    0, 1.0f,  MODBOT_PD_DTOR(10.0f),   MODBOT_PD_DTOR(0.0f),  4000}
+    {90, MODBOT_PD_DTOR(15.0f),  MODBOT_PD_DTOR(30.0f), 600, 10.0f, MODBOT_PD_DTOR(20.0f)},
+    {60, MODBOT_PD_DTOR(7.0f),   MODBOT_PD_DTOR(14.0f), 360, 10.0f, MODBOT_PD_DTOR(8.0f)},
+    {30, MODBOT_PD_DTOR(4.0f),   MODBOT_PD_DTOR(8.0f),  180, 4.0f,  MODBOT_PD_DTOR(5.0f)},
+    {15, MODBOT_PD_DTOR(1.5f),   MODBOT_PD_DTOR(4.0f),   90, 2.0f,  MODBOT_PD_DTOR(2.0f)},
+    { 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(2.0f),   45, 1.0f,  MODBOT_PD_DTOR(0.0f)},
+    { 0, MODBOT_PD_DTOR(0.0f),   MODBOT_PD_DTOR(0.0f),    0, 1.0f,  MODBOT_PD_DTOR(0.0f)}
 };
 
 /* Perfect Dark botcmd.c g_BotDistConfigs. */
@@ -435,13 +507,27 @@ static s32 modMpBotsStageReadyForSpawn(void)
     return TRUE;
 }
 
+#if defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+/* P26 R2: arena switching happens ONLY during stage preparation.  The game
+ * never evicts an already-loaded model or texture: the old pointers stay
+ * permanently valid until the entire stage is torn down.  The two windows
+ * are physically disjoint; only one is the active allocation target. */
+static void modMpBotsBindResourceArena(u8 *start, u8 *end)
+{
+    g_ModMpBotModelCacheCursor = start;
+    texInitPool(&g_ModMpBotTexturePool, start, (s32)(end - start));
+    texBindBotDynamicPool(&g_ModMpBotTexturePool);
+    texSetBotDynamicFloor(g_ModMpBotModelCacheCursor);
+}
+#endif
+
 /*
  * GoldenEye lazily loads character bodies/heads from MEMPOOL_STAGE.  Its
  * historical loader assumes the allocation succeeds; a late Simulant body on
  * a tight Multiplayer stage can therefore enter the allocator failure loop.
- * Physical Plus builds reserve an upper-RDRAM model-file cache instead.  The
- * ordinary decoded texture pool remains authoritative (and already has its
- * Expansion-Pak overflow pool in PHYSICAL_FASTPATHS builds).
+ * Physical Plus builds now use an upper-RDRAM stage-lifetime arena: models
+ * advance from the low end, shared bot textures from the high end.  The
+ * ordinary stage texture pool and weapon caches keep their separate owners.
  */
 static s32 modMpBotsEnsureCharacterModelLoaded(s32 modelnum)
 {
@@ -469,10 +555,18 @@ static s32 modMpBotsEnsureCharacterModelLoaded(s32 modelnum)
     {
         s32 remaining;
         s32 used;
+        s32 texturefailures;
         u8 *cursor;
+        struct tex *oldtexhead;
+        u8 *loadend;
 
         cursor = (u8 *)(((u32)g_ModMpBotModelCacheCursor + 0xfU) & ~0xfU);
-        remaining = (s32)(_modMpBotModelCacheEnd - cursor);
+        /* Reserve a transient upper workspace for the model loader's
+         * compressed input and GDL relocation.  Texture allocations during
+         * the load must stay ABOVE loadend; future model loads must stay
+         * BELOW the latest committed texture. */
+        loadend = (u8 *)g_ModMpBotTexturePool.rightpos - MODBOT_MODEL_LOAD_MIN_FREE;
+        remaining = (s32)(loadend - cursor);
 
         /* 64 KiB is deliberately conservative: the largest authored chr
          * Model.o payload in this tree is below 40 KiB, with heads far smaller.
@@ -489,17 +583,28 @@ static s32 modMpBotsEnsureCharacterModelLoaded(s32 modelnum)
             return FALSE;
         }
 
+        oldtexhead = g_ModMpBotTexturePool.rightpos;
+        texturefailures = texGetPoolAllocationFailures();
+        texSetBotDynamicFloor(loadend);
         load_object_fill_header(header, (u8 *)c_item_entries[modelnum].filename,
             cursor, remaining, &g_ModMpBotTexturePool);
         used = get_pc_buffer_remaining_value((u8 *)c_item_entries[modelnum].filename);
 
-        if (header->RootNode == NULL || used <= 0 || used > remaining)
+        /* A full texture pool must not leave an apparently loaded bot model
+         * whose materials silently point to unrelated texels at pool->start. */
+        if (header->RootNode == NULL || used <= 0 || used > remaining
+            || texGetPoolAllocationFailures() != texturefailures)
         {
+            /* A rejected model has no live references.  Return its private
+             * texture allocations to the high-water mark atomically. */
             header->RootNode = NULL;
+            g_ModMpBotTexturePool.rightpos = oldtexhead;
+            texSetBotDynamicFloor(g_ModMpBotModelCacheCursor);
             return FALSE;
         }
 
         g_ModMpBotModelCacheCursor = cursor + ((used + 0xf) & ~0xf);
+        texSetBotDynamicFloor(g_ModMpBotModelCacheCursor);
         return TRUE;
     }
 #else
@@ -513,15 +618,89 @@ static s32 modMpBotsEnsureCharacterModelLoaded(s32 modelnum)
 #endif
 }
 
+/* Body and head may live in different physical arenas.  Both model headers
+ * keep permanent stage-owned pointers, so no relocation is necessary. */
+static s32 modMpBotsTryCharacterResources(s32 body, s32 head)
+{
+    return modMpBotsEnsureCharacterModelLoaded(body)
+        && (head < 0 || modMpBotsEnsureCharacterModelLoaded(head));
+}
+
+#if defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+/* A four-human Co-Op level consumes ALL 0xCC000 bytes of its reserved
+ * graphics memory.  Never alias that window or any hand/weapon cache.
+ * Co-Op does, however, keep its gfx/VTX double buffers OUT of the retail
+ * stage heap, allowing a safe late stage-lifetime allocation here.
+ *
+ * Only invoke this during modMpBotsPrepareStage (before gameplay).  Leave
+ * at least 128 KiB in MEMPOOL_STAGE for any later model/prop allocations;
+ * keep the bound allocation small enough to avoid stealing the stage heap
+ * on levels with unusually large setup data.  If insufficient, fail safely
+ * and retain the pre-existing upper-RDRAM bot resources. */
+static s32 modMpBotsTryBindCoopStageArena(void)
+{
+    MemoryPool *stage;
+    s32 freebytes;
+    s32 arenasize;
+    u8 *base;
+
+    if (g_ModMpBotCoopStageArenaTried)
+        return FALSE;
+    g_ModMpBotCoopStageArenaTried = TRUE;
+
+    if (get_scenario() != SCENARIO_COOP)
+        return FALSE;
+
+    stage = &g_mempPools[MEMPOOL_STAGE];
+    if (stage->pos == NULL || stage->end <= stage->pos)
+        return FALSE;
+
+    freebytes = (s32)(stage->end - stage->pos);
+    if (freebytes <= 0x40000)
+        return FALSE;
+
+    /* 0x20000 stays unallocated; 0x80000 is the maximum extra resource arena.
+     * A minimum 0x20000 arena leaves room for loader staging + textures. */
+    arenasize = (freebytes - 0x20000) & ~0xf;
+    if (arenasize > 0x80000)
+        arenasize = 0x80000;
+    if (arenasize < 0x20000)
+        return FALSE;
+
+    base = mempAllocBytesInBank((u32)arenasize, MEMPOOL_STAGE);
+    modMpBotsBindResourceArena(base, base + arenasize);
+    return TRUE;
+}
+#endif
+
 static s32 modMpBotsEnsureCharacterResources(s32 body, s32 head)
 {
-    if (!modMpBotsEnsureCharacterModelLoaded(body))
-        return FALSE;
+    if (modMpBotsTryCharacterResources(body, head))
+        return TRUE;
 
-    if (head >= 0 && !modMpBotsEnsureCharacterModelLoaded(head))
-        return FALSE;
-
-    return TRUE;
+#if defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
+    /* The competitive stage-only arena can fill on an eight-unique-character
+     * selection.  Retain ALL previously committed assets there and let the
+     * next loads use the separate P26 upper-RDRAM arena.  Never borrow Co-Op
+     * graphics memory in campaign Co-Op.  No evictions, DMA, or mid-gameplay
+     * allocation occur here. */
+    if (g_ModMpBotBorrowedCoopArena || g_ModMpBotCoopSlackArena)
+    {
+        /* Both regions are distinct from upper RDRAM; keep loaded pointers. */
+        g_ModMpBotBorrowedCoopArena = FALSE;
+        g_ModMpBotCoopSlackArena = FALSE;
+        modMpBotsBindResourceArena(_modMpBotModelCacheStart,
+            _modMpBotDecodeScratchStart);
+        return modMpBotsTryCharacterResources(body, head);
+    }
+    /* The R5 stage-heap fallback remains solely for fully occupied 4P
+     * Co-Op. One-to-three-player Co-Op has a reserved graphics tail instead;
+     * do not starve their remaining level initialization allocations. */
+    if (get_scenario() == SCENARIO_COOP && getPlayerCount() >= 4
+        && modMpBotsTryBindCoopStageArena())
+        return modMpBotsTryCharacterResources(body, head);
+#endif
+    return FALSE;
 }
 
 void modMpBotsResetRuntime(void)
@@ -541,6 +720,8 @@ void modMpBotsResetRuntime(void)
         runtime->respawntimer = 0;
         runtime->damagegracetimer60 = 0;
         runtime->deathrecorded = FALSE;
+        runtime->deathdropsdone = FALSE;
+        runtime->regroupafterdeath = FALSE;
         runtime->spawnready = FALSE;
         runtime->resourcesready = FALSE;
         runtime->kills = 0;
@@ -563,6 +744,7 @@ void modMpBotsResetRuntime(void)
         runtime->targetlastseen60 = -1;
         runtime->lastseenanytarget60 = -1;
         runtime->targetinsight = FALSE;
+        runtime->opportunistcommitted = FALSE;
         runtime->queryplayernum = -1;
         runtime->zeroangle = 0.0f;
         runtime->zerospeed = 0.0f;
@@ -600,6 +782,16 @@ void modMpBotsResetRuntime(void)
         runtime->navindex = 0;
         runtime->navcount = 0;
         runtime->navactive = FALSE;
+        runtime->navtargetprop = NULL;
+        runtime->movetargetprop = NULL;
+        runtime->failedpickupprop = NULL;
+        runtime->pickupretry60 = 0;
+        runtime->movehold60 = 0;
+        runtime->navavoidttl60 = 0;
+        runtime->navclearanceinterval60 = 0;
+        runtime->navblocked60 = 0;
+        runtime->navavoidside = 0;
+        runtime->navstalled = FALSE;
 
         for (j = 0; j < MAX_CHRWAYPOINTS; j++)
             runtime->navtiles[j] = NULL;
@@ -625,9 +817,12 @@ void modMpBotsResetRuntime(void)
     g_ModMpBotDamageOwner = -1;
     g_ModMpBotSpawnCursor = 0;
 #if defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
-    g_ModMpBotModelCacheCursor = _modMpBotModelCacheStart;
-    texInitPool(&g_ModMpBotTexturePool, _modMpBotTextureCacheStart,
-        (s32)(_modMpBotTextureCacheEnd - _modMpBotTextureCacheStart));
+
+    g_ModMpBotBorrowedCoopArena = FALSE;
+    g_ModMpBotCoopSlackArena = FALSE;
+    g_ModMpBotCoopStageArenaTried = FALSE;
+    modMpBotsBindResourceArena(_modMpBotModelCacheStart,
+        _modMpBotDecodeScratchStart);
 #endif
 }
 
@@ -636,7 +831,7 @@ void modMpBotsResetRuntime(void)
  * model-file decompression/header relocation. */
 void modMpBotsPrepareStage(void)
 {
-    Model *primedmodels[MOD_MP_BOT_MAX];
+    Model *primedmodels[MOD_MP_BOT_MAX * 2];
     s32 primedcount = 0;
     s32 i;
     s32 body;
@@ -646,9 +841,27 @@ void modMpBotsPrepareStage(void)
         return;
 
 #if defined(GE_PHYSICAL_CODE) && defined(GE_PHYSICAL_FASTPATHS)
-    g_ModMpBotModelCacheCursor = _modMpBotModelCacheStart;
-    texInitPool(&g_ModMpBotTexturePool, _modMpBotTextureCacheStart,
-        (s32)(_modMpBotTextureCacheEnd - _modMpBotTextureCacheStart));
+
+    /* Only competitive MP uses MEMPOOL_STAGE graphics buffers (dyn.c).
+     * Campaign Co-Op uses every byte of this reservation with four humans. */
+    g_ModMpBotBorrowedCoopArena = get_scenario() != SCENARIO_COOP;
+    g_ModMpBotCoopSlackArena = FALSE;
+    if (g_ModMpBotBorrowedCoopArena)
+        modMpBotsBindResourceArena(_coopDynBuffersStart, _coopDynBuffersEnd);
+    else if (g_GfxBuffers[0] == _coopDynBuffersStart
+        && g_VtxBuffers[2] > _coopDynBuffersStart
+        && g_VtxBuffers[2] < _coopDynBuffersEnd
+        && (u32)(_coopDynBuffersEnd - g_VtxBuffers[2]) >
+            MODBOT_MODEL_LOAD_MIN_FREE * 2 + MODBOT_MODEL_LOAD_ROM_GUARD)
+    {
+        /* dynInitMemory ran before lvlStageLoad. Its VTX end is the exact
+         * high-water mark of the double-buffered human rendering region. */
+        g_ModMpBotCoopSlackArena = TRUE;
+        modMpBotsBindResourceArena(g_VtxBuffers[2], _coopDynBuffersEnd);
+    }
+    else
+        modMpBotsBindResourceArena(_modMpBotModelCacheStart,
+            _modMpBotDecodeScratchStart);
 #endif
 
     for (i = 0; i < g_ModMpBotCount; i++)
@@ -678,9 +891,30 @@ void modMpBotsPrepareStage(void)
         g_ModMpBotRuntime[i].resourcesready = TRUE;
     }
 
-    /* Mark the primed slots free only after all configured bots have obtained
-     * distinct exact-size rwdata buffers.  Runtime spawn/respawn can now reuse
-     * them without relying on the ten retail 140-record generic spares. */
+    /* Prepare another exact-size instance per successful bot while the
+     * loader still permits stage-time RWdata allocations.  Keep the primary
+     * eight occupied until ALL secondary slots are prepared: neither respawns
+     * nor unfinished corpses should compete for retail's ten generic spares.
+     * This uses already-loaded model definitions and textures, not duplicate
+     * assets.  Optional secondary failure must not disable a ready bot. */
+    for (i = 0; i < g_ModMpBotCount; i++)
+    {
+        Model *model;
+
+        if (!g_ModMpBotRuntime[i].resourcesready)
+            continue;
+
+        if (!frontGetMpCharacterData(g_ModMpBotConfigs[i].character,
+                &body, &head, NULL))
+            continue;
+
+        model = retrieve_header_for_body_and_head(body, head, 0);
+        if (model != NULL)
+            primedmodels[primedcount++] = model;
+    }
+
+    /* Free instances only after every RWdata reservation is committed.  The
+     * model definitions and all referenced textures remain stage-resident. */
     for (i = 0; i < primedcount; i++)
         clear_aircraft_model_obj(primedmodels[i]);
 }
@@ -802,6 +1036,69 @@ static f32 modMpBotsPdCalculateMaxSpeed(s32 slot)
  * lvupdate60freal.  R30 P4 makes aibot->roty authoritative; navigation no
  * longer reads travel heading back out of GoldenEye's guard action state.
  */
+/* Co-Op companions yield to nearby players and to each other.  This
+ * alters only the proposed X/Z displacement; the normal GE chr movement tick
+ * still performs wall, floor, door and collision validation. */
+static void modMpBotsCoopCrowdSeparation(s32 slot, coord3d *src, coord3d *dst)
+{
+    s32 i;
+    s32 humans = getPlayerCount();
+    PropRecord *other;
+    f32 dx, dz, dy, d2, dist, step;
+    f32 pushx = 0.0f, pushz = 0.0f, pushlen;
+
+    if (gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP)
+        return;
+
+    for (i = 0; i < humans + g_ModMpBotCount; i++)
+    {
+        if (i < humans)
+            other = g_playerPointers[i] != NULL ? g_playerPointers[i]->prop : NULL;
+        else
+        {
+            if (i - humans == slot)
+                continue;
+            other = modMpBotsGetBotProp(i - humans);
+        }
+        if (other == NULL || other->stan == NULL)
+            continue;
+        if (other->type == PROP_TYPE_CHR && other->chr != NULL
+            && chrIsDead(other->chr))
+            continue;
+
+        dy = src->y - other->pos.y;
+        if (i < humans)
+            dy += g_playerPointers[i]->eyeheight;
+        if (dy <= -140.0f || dy >= 140.0f)
+            continue;
+        dx = src->x - other->pos.x;
+        dz = src->z - other->pos.z;
+        d2 = dx * dx + dz * dz;
+        if (d2 >= 120.0f * 120.0f)
+            continue;
+        if (d2 < 0.01f)
+        {
+            dx = (slot & 1) ? 1.0f : -1.0f;
+            dz = (slot & 2) ? 1.0f : -1.0f;
+            d2 = dx * dx + dz * dz;
+        }
+        dist = sqrtf(d2);
+        step = (120.0f - dist) * 0.075f;
+        if (step > 6.0f) step = 6.0f;
+        pushx += dx * step / dist;
+        pushz += dz * step / dist;
+    }
+    /* Clamp the combined pressure from eight companions to one safe step. */
+    pushlen = sqrtf(pushx * pushx + pushz * pushz);
+    if (pushlen > 6.0f)
+    {
+        pushx *= 6.0f / pushlen;
+        pushz *= 6.0f / pushlen;
+    }
+    dst->x += pushx;
+    dst->z += pushz;
+}
+
 s32 modMpBotsApplyLateral(ChrRecord *chr, coord3d *src, coord3d *dst)
 {
     struct ModMpBotRuntime *runtime;
@@ -842,6 +1139,7 @@ s32 modMpBotsApplyLateral(ChrRecord *chr, coord3d *src, coord3d *dst)
         runtime->moveratez = 0.0f;
         dst->x = src->x;
         dst->z = src->z;
+        modMpBotsCoopCrowdSeparation(slot, src, dst);
         return TRUE;
     }
 
@@ -878,6 +1176,7 @@ s32 modMpBotsApplyLateral(ChrRecord *chr, coord3d *src, coord3d *dst)
 
     dst->x = src->x + movex;
     dst->z = src->z + movez;
+    modMpBotsCoopCrowdSeparation(slot, src, dst);
 
     return TRUE;
 }
@@ -968,8 +1267,11 @@ void modMpBotsOnDamageAccepted(ChrRecord *victim)
 
     g_ModMpBotRuntime[slot].damagegracetimer60 = (s16)duration;
 
-    modMpBotsPlayLocalSfx(victim, BOND_GET_HIT1_SFX);
-    play_sound_for_shot_actor(victim);
+    if (g_ModMpBotDamageSoundEnabled)
+    {
+        modMpBotsPlayLocalSfx(victim, BOND_GET_HIT1_SFX);
+        play_sound_for_shot_actor(victim);
+    }
 }
 
 void modMpBotsNotifyHumanHit(ChrRecord *victim, s32 playernum)
@@ -1034,6 +1336,8 @@ void modMpBotsDamageViewer(s32 slot, PropRecord *viewer, ITEM_IDS weaponid, coor
         return;
 
     victim = getPlayerPointerIndex(viewer);
+    if (modMpBotsFriendlyFireBlocksCoopAlly())
+        return;
     if ((u32)victim >= (u32)getPlayerCount())
         return;
 
@@ -1659,6 +1963,54 @@ static s32 modMpBotsChooseWeaponIndex(s32 slot)
     return best;
 }
 
+/* Shared by Co-Op, FFA and team matches.  A human viewer's prop->stan
+ * may be NULL on the first MP frames: the collision tile, not that prop's
+ * presentation STAN pointer, is authoritative from bondviewPlayerBeginLife.
+ * Compare standing-floor heights, not human camera/eye heights. */
+static s32 modMpBotsPadOccupied(PadRecord *pad)
+{
+    s32 i;
+    s32 humans = getPlayerCount();
+    PropRecord *other;
+    StandTile *floor;
+    f32 dx, dz, dy, footy, pady;
+
+    if (pad == NULL || pad->stan == NULL)
+        return TRUE;
+    pady = stanGetPositionYValue(pad->stan, pad->pos.x, pad->pos.z);
+
+    for (i = 0; i < humans + g_ModMpBotCount; i++)
+    {
+        if (i < humans)
+        {
+            if (g_playerPointers[i] == NULL || g_playerPointers[i]->prop == NULL
+                || g_playerPointers[i]->bonddead
+                || g_playerPointers[i]->field_488.current_tile_ptr == NULL)
+                continue;
+            other = g_playerPointers[i]->prop;
+            floor = g_playerPointers[i]->field_488.current_tile_ptr;
+        }
+        else
+        {
+            other = modMpBotsGetBotProp(i - humans);
+            if (other == NULL || other->stan == NULL
+                || other->chr == NULL || chrIsDead(other->chr))
+                continue;
+            floor = other->stan;
+        }
+
+        dx = other->pos.x - pad->pos.x;
+        dz = other->pos.z - pad->pos.z;
+        if (dx * dx + dz * dz >= 150.0f * 150.0f)
+            continue;
+        footy = stanGetPositionYValue(floor, other->pos.x, other->pos.z);
+        dy = footy - pady;
+        if (dy > -140.0f && dy < 140.0f)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 static s32 modMpBotsSpawn(s32 slot)
 {
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
@@ -1670,6 +2022,8 @@ static s32 modMpBotsSpawn(s32 slot)
     s32 body;
     s32 head;
     s32 weaponindex;
+    s32 attempt;
+    s32 firstpad;
     f32 angle;
     coord3d spawnpos;
 
@@ -1680,8 +2034,19 @@ static s32 modMpBotsSpawn(s32 slot)
     if (!runtime->resourcesready)
         return FALSE;
 
-    pad = g_Startpad[(slot + (randomGetNext() % (u32)startpadcount)) % startpadcount];
-    if (pad == NULL || pad->stan == NULL)
+    firstpad = (slot + (randomGetNext() % (u32)startpadcount)) % startpadcount;
+    pad = NULL;
+    for (attempt = 0; attempt < startpadcount; attempt++)
+    {
+        PadRecord *candidate = g_Startpad[(firstpad + attempt) % startpadcount];
+        if (candidate != NULL && candidate->stan != NULL
+            && !modMpBotsPadOccupied(candidate))
+        {
+            pad = candidate;
+            break;
+        }
+    }
+    if (pad == NULL)
         return FALSE;
 
     angle = atan2f(pad->look.x, pad->look.z);
@@ -1712,6 +2077,7 @@ static s32 modMpBotsSpawn(s32 slot)
     runtime->respawntimer = 0;
     runtime->damagegracetimer60 = 0;
     runtime->deathrecorded = FALSE;
+    runtime->deathdropsdone = FALSE;
     runtime->spawnready = FALSE;
     runtime->speedmultforwards = 0.0f;
     runtime->speedmultsideways = 0.0f;
@@ -1731,6 +2097,7 @@ static s32 modMpBotsSpawn(s32 slot)
     runtime->targetlastseen60 = -1;
     runtime->lastseenanytarget60 = -1;
     runtime->targetinsight = FALSE;
+    runtime->opportunistcommitted = FALSE;
     runtime->queryplayernum = -1;
     runtime->zeroangle = 0.0f;
     runtime->zerospeed = 0.0f;
@@ -1768,6 +2135,16 @@ static s32 modMpBotsSpawn(s32 slot)
     runtime->navindex = 0;
     runtime->navcount = 0;
     runtime->navactive = FALSE;
+    runtime->navtargetprop = NULL;
+    runtime->movetargetprop = NULL;
+    runtime->failedpickupprop = NULL;
+    runtime->pickupretry60 = 0;
+    runtime->movehold60 = 0;
+    runtime->navavoidttl60 = 0;
+    runtime->navclearanceinterval60 = 0;
+    runtime->navblocked60 = 0;
+    runtime->navavoidside = 0;
+    runtime->navstalled = FALSE;
 
     {
         s32 j;
@@ -1791,6 +2168,14 @@ static s32 modMpBotsSpawn(s32 slot)
     }
 
     check_set_actor_standing_still(chr, 0, 0);
+
+    /* Campaign setup intro items/ammo define each human's initial loadout.
+     * Apply the same records to bot-owned inventory, not human bondinv. */
+    if (get_scenario() == SCENARIO_COOP)
+    {
+        modMpBotsCoopGiveIntroLoadout(slot);
+        return TRUE;
+    }
 
     /* PD's ordinary Simulants enter play unarmed and acquire their loadout
      * through bot inventory/pickup logic.  Preserve the requested Dark/
@@ -1853,11 +2238,70 @@ static void modMpBotsInvalidateTargetProp(PropRecord *victim)
         if (g_ModMpBotRuntime[i].targetprop == victim)
         {
             g_ModMpBotRuntime[i].targetprop = NULL;
+            g_ModMpBotRuntime[i].opportunistcommitted = FALSE;
             g_ModMpBotRuntime[i].attackingparticipant = -1;
             g_ModMpBotRuntime[i].targetinsight = FALSE;
             modMpBotsPdNavClear(&g_ModMpBotRuntime[i]);
         }
     }
+}
+
+/* The equipped models are only presentation copies: the real Simulant
+ * weapons live in runtime->inventory.  Human MP drops one collectable per
+ * inventory item on death.  Do the same for bot-owned inventory, and never
+ * leave equipped props attached to the corpse.  One-shot across all damage
+ * sources (gunshots, explosions, and generic chr deaths). */
+static void modMpBotsPdReleaseHeldHand(ChrRecord *chr, s32 hand);
+
+void modMpBotsDropInventoryOnDeath(ChrRecord *chr)
+{
+    struct ModMpBotRuntime *runtime;
+    PropRecord *drop;
+    ITEM_IDS item;
+    PROP propid;
+    s32 slot;
+    s32 i;
+
+    slot = modMpBotsGetSlotForChr(chr);
+    if (slot < 0 || chr == NULL || chr->prop == NULL)
+        return;
+
+    runtime = &g_ModMpBotRuntime[slot];
+    if (runtime->deathdropsdone)
+        return;
+    runtime->deathdropsdone = TRUE;
+
+    /* Match the human MP death flow, but release bot hand-model ownership
+     * now rather than waiting for a later chr tick after a lethal hit. */
+    modMpBotsPdReleaseHeldHand(chr, GUNLEFT);
+    modMpBotsPdReleaseHeldHand(chr, GUNRIGHT);
+    chr->hidden &= ~CHRHIDDEN_DROP_HELD_ITEMS;
+
+    for (i = 0; i < runtime->inventorycount; i++)
+    {
+        item = runtime->inventory[i];
+        if (item == ITEM_UNARMED)
+            continue;
+        propid = getPropForHeldItem(item);
+        if ((s32)propid < 0)
+            continue;
+
+        drop = something_with_generating_object(chr, propid, item,
+            0x20000000, NULL, NULL);
+        if (drop != NULL)
+        {
+            propobjSetDropped(drop, DROPTYPE_DEFAULT);
+            objDrop(drop);
+        }
+    }
+
+    runtime->weaponnum = ITEM_UNARMED;
+    runtime->inventorycount = 1;
+    runtime->inventory[0] = ITEM_UNARMED;
+    runtime->inventorycopies[0] = 1;
+    runtime->inventorypads[0] = -1;
+    runtime->loadedammo[GUNRIGHT] = 0;
+    runtime->loadedammo[GUNLEFT] = 0;
 }
 
 static void modMpBotsRecordDeath(s32 slot)
@@ -2065,6 +2509,7 @@ static void modMpBotsPdSetTarget(s32 slot, PropRecord *prop)
 
     if (changed)
     {
+        runtime->opportunistcommitted = FALSE;
         runtime->shootdelaytimer60 = 0;
     }
     else if (runtime->targetinsight)
@@ -2153,6 +2598,7 @@ static void modMpBotsPdChooseGeneralTarget(s32 slot)
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
     PropRecord *candidate;
     PropRecord *closestoutofsight = NULL;
+    PropRecord *sortparticipants[MODBOT_PD_MAX_PARTICIPANTS];
     s32 distancesdone[MODBOT_PD_MAX_PARTICIPANTS];
     s32 selfparticipant = MAX_PLAYER_COUNT + slot;
     s32 difficulty = g_ModMpBotConfigs[slot].difficulty;
@@ -2183,6 +2629,7 @@ static void modMpBotsPdChooseGeneralTarget(s32 slot)
     {
         if (runtime->chrsinsight[i])
             runtime->chrslastseen60[i] = g_GlobalTimer;
+        sortparticipants[i] = modMpBotsPdGetParticipantProp(i);
         distancesdone[i] = FALSE;
         runtime->chrnumsbydistanceasc[i] = -1;
     }
@@ -2194,7 +2641,7 @@ static void modMpBotsPdChooseGeneralTarget(s32 slot)
 
         for (j = 0; j < MODBOT_PD_MAX_PARTICIPANTS; j++)
         {
-            candidate = modMpBotsPdGetParticipantProp(j);
+            candidate = sortparticipants[j];
             if (!distancesdone[j] && j != selfparticipant && candidate != NULL
                 && (closest < 0 || runtime->chrdistances[j] < closestdistance))
             {
@@ -2281,15 +2728,73 @@ static void modMpBotsPdChooseGeneralTarget(s32 slot)
     modMpBotsPdSetTarget(slot, runtime->targetprop);
 }
 
+/* Rear-arc test for Opportunist: target heading, not its velocity. Viewer
+ * yaw is stored in degrees; guard and bot model headings are in radians.
+ * Only a target with its back toward the Simulant gets rear-approach priority. */
+static s32 modMpBotsPdTargetBackTurned(s32 slot, PropRecord *target)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    f32 heading;
+    f32 dx;
+    f32 dz;
+    f32 distance2;
+    f32 facingdot;
+    s32 human;
+
+    if (target == NULL || runtime->chr == NULL || runtime->chr->prop == NULL)
+        return FALSE;
+
+    if (target->type == PROP_TYPE_VIEWER)
+    {
+        human = getPlayerPointerIndex(target);
+        if ((u32)human >= (u32)getPlayerCount()
+            || g_playerPointers[human] == NULL || g_playerPointers[human]->bonddead)
+            return FALSE;
+        heading = g_playerPointers[human]->vv_theta * (M_TAU_F / 360.0f);
+    }
+    else if (target->type == PROP_TYPE_CHR && target->chr != NULL
+        && target->chr->model != NULL && !chrIsDead(target->chr))
+    {
+        heading = getsubroty(target->chr->model);
+    }
+    else
+    {
+        return FALSE;
+    }
+
+    dx = runtime->chr->prop->pos.x - target->pos.x;
+    dz = runtime->chr->prop->pos.z - target->pos.z;
+    distance2 = dx * dx + dz * dz;
+    if (distance2 < 400.0f)
+        return FALSE;
+
+    facingdot = sinf(heading) * dx + cosf(heading) * dz;
+    /* At least 60% toward the rear hemisphere: stable cone boundary. */
+    return facingdot < 0.0f && facingdot * facingdot > distance2 * 0.36f;
+}
+
 static PropRecord *modMpBotsCoopChooseTarget(s32 slot, s32 enemy)
 {
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
     PropRecord *best = NULL;
     f32 bestdist = 0.0f;
+    PropRecord *previous = NULL;
+    f32 previousdist = 0.0f;
     s32 i;
 
     if (enemy)
     {
+        s32 preferred = FALSE;
+        if (modMpBotHasTrait(slot, MODBOT_TRAIT_OPPORTUNIST)
+            && runtime->opportunistcommitted && runtime->targetprop != NULL
+            && runtime->targetprop->type == PROP_TYPE_CHR
+            && runtime->targetprop->chr != NULL
+            && modMpBotsGetSlotForChr(runtime->targetprop->chr) < 0
+            && !chrCoopIsEscortCandidate(runtime->targetprop->chr)
+            && modMpBotsPdPropAlive(runtime->targetprop)
+            && modMpBotsPdHasSight(runtime->chr, runtime->targetprop))
+            return runtime->targetprop;
+
         for (i = 0; i < g_NumChrSlots; i++)
         {
             ChrRecord *candidate = &g_ChrSlots[i];
@@ -2303,12 +2808,35 @@ static PropRecord *modMpBotsCoopChooseTarget(s32 slot, s32 enemy)
                 continue;
 
             dist = modMpBotsPdDistance(runtime->chr, candidate->prop);
-            if (best == NULL || dist < bestdist)
+            if (candidate->prop == runtime->targetprop)
+            {
+                previous = candidate->prop;
+                previousdist = dist;
+            }
+            if (modMpBotHasTrait(slot, MODBOT_TRAIT_OPPORTUNIST))
+            {
+                s32 rear = modMpBotsPdTargetBackTurned(slot, candidate->prop);
+                if (best == NULL || (rear && !preferred)
+                    || (rear == preferred && dist < bestdist))
+                {
+                    best = candidate->prop;
+                    bestdist = dist;
+                    preferred = rear;
+                }
+            }
+            else if (best == NULL || dist < bestdist)
             {
                 best = candidate->prop;
                 bestdist = dist;
             }
         }
+        /* Keep fighting the same valid guard until an appreciably nearer
+         * threat appears.  Otherwise two equidistant guards flip the target
+         * every few frames and neither is pursued. */
+        if (previous != NULL && previousdist <= bestdist * 1.25f
+            && (!modMpBotHasTrait(slot, MODBOT_TRAIT_OPPORTUNIST)
+                || !preferred || modMpBotsPdTargetBackTurned(slot, previous)))
+            return previous;
         return best;
     }
 
@@ -2323,6 +2851,11 @@ static PropRecord *modMpBotsCoopChooseTarget(s32 slot, s32 enemy)
 
         playerprop = g_playerPointers[i]->prop;
         dist = modMpBotsPdDistance(runtime->chr, playerprop);
+        if (playerprop == runtime->movetargetprop)
+        {
+            previous = playerprop;
+            previousdist = dist;
+        }
         if (best == NULL || dist < bestdist)
         {
             best = playerprop;
@@ -2330,6 +2863,8 @@ static PropRecord *modMpBotsCoopChooseTarget(s32 slot, s32 enemy)
         }
     }
 
+    if (previous != NULL && previousdist <= bestdist * 1.25f)
+        return previous;
     return best;
 }
 
@@ -2338,7 +2873,7 @@ static PropRecord *modMpBotsPdChoosePersonalityAttack(s32 slot)
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
     struct ModMpBotConfig *config = &g_ModMpBotConfigs[slot];
     PropRecord *candidate;
-    PropRecord *choice[4];
+    PropRecord *choice[5];
     s32 votes[MODBOT_PD_MAX_PARTICIPANTS];
     f32 besthealth = 0.0f;
     f32 health;
@@ -2352,7 +2887,7 @@ static PropRecord *modMpBotsPdChoosePersonalityAttack(s32 slot)
 
     for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
         votes[i] = 0;
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < 5; i++)
         choice[i] = NULL;
 
     if (config->traits & MODBOT_TRAIT_VINDICTIVE)
@@ -2394,10 +2929,35 @@ static PropRecord *modMpBotsPdChoosePersonalityAttack(s32 slot)
         }
     }
 
-    /* Traits are independent. Each targeting trait casts one vote; matching
-     * preferences reinforce each other. Ties retain the original PD-style
-     * priority order: Vindictive, Stalker, Equalizer, then Bully. */
-    for (j = 0; j < 4; j++)
+    if (config->traits & MODBOT_TRAIT_OPPORTUNIST)
+    {
+        if (runtime->opportunistcommitted && runtime->targetprop != NULL
+            && modMpBotsPdPropAlive(runtime->targetprop) && runtime->targetinsight)
+            choice[4] = runtime->targetprop;
+        else
+        {
+            f32 bestrear = 0.0f;
+            for (i = 0; i < MODBOT_PD_MAX_PARTICIPANTS; i++)
+            {
+                f32 dist;
+                candidate = modMpBotsPdGetParticipantProp(i);
+                if (candidate == NULL || candidate == runtime->chr->prop
+                    || !runtime->chrsinsight[i]
+                    || !modMpBotsPdTargetBackTurned(slot, candidate))
+                    continue;
+                dist = modMpBotsPdDistance(runtime->chr, candidate);
+                if (choice[4] == NULL || dist < bestrear)
+                {
+                    choice[4] = candidate;
+                    bestrear = dist;
+                }
+            }
+        }
+    }
+
+    /* Each targeting trait casts one vote. Preferences stay independently
+     * combinable; original priority on ties includes rear opportunities. */
+    for (j = 0; j < 5; j++)
     {
         candidate = choice[j];
         if (candidate == NULL
@@ -2413,7 +2973,18 @@ static PropRecord *modMpBotsPdChoosePersonalityAttack(s32 slot)
     }
 
     if (bestparticipant >= 0)
-        return modMpBotsPdGetParticipantProp(bestparticipant);
+    {
+        candidate = modMpBotsPdGetParticipantProp(bestparticipant);
+        if ((config->traits & MODBOT_TRAIT_OPPORTUNIST)
+            && candidate != NULL && candidate == choice[4])
+        {
+            /* The targeting preference must also update the weapon's aim.
+             * Keep the target after they turn to face us: evade, don't swap. */
+            modMpBotsPdSetTarget(slot, candidate);
+            runtime->opportunistcommitted = TRUE;
+        }
+        return candidate;
+    }
 
     return runtime->targetprop;
 }
@@ -2495,6 +3066,9 @@ static s32 modMpBotsPdSwitchToWeapon(s32 slot, ITEM_IDS item)
         runtime->weaponnum = item;
         runtime->gunfunc = MODBOT_PD_FUNC_PRIMARY;
         runtime->changeguntimer60 = 60;
+        /* Switching weapons cancels any pending melee swing/impact. */
+        runtime->punchtimer60[GUNRIGHT] = 0;
+        runtime->punchtimer60[GUNLEFT] = -1;
         runtime->burstsdone[GUNRIGHT] = 0;
         runtime->burstsdone[GUNLEFT] = 0;
         runtime->nextbullettimer60[GUNRIGHT] = 0;
@@ -2547,6 +3121,82 @@ static s32 modMpBotsPdSwitchToWeapon(s32 slot, ITEM_IDS item)
     return TRUE;
 }
 
+/* Co-Op intro records are authoritative for human starting weapons and ammo.
+ * Bots must receive their own inventory and loaded rounds: never access the
+ * current viewport player's bondinv or give_cur_player_ammo here. */
+static void modMpBotsCoopGiveIntroLoadout(s32 slot)
+{
+    struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
+    struct SetupIntroEmpty *intro = g_CurrentSetup.intro;
+    ITEM_IDS starting = ITEM_UNARMED;
+    s32 demo = check_ramrom_flags();
+
+    while (intro != NULL && intro->type != INTROTYPE_END)
+    {
+        switch (intro->type)
+        {
+            case INTROTYPE_ITEM:
+            {
+                struct SetupIntroItem *entry = (struct SetupIntroItem *)intro;
+                if (entry->is_demo_playback == demo)
+                {
+                    ITEM_IDS right = (ITEM_IDS)entry->item_right;
+                    ITEM_IDS left = (ITEM_IDS)entry->item_left;
+                    /* Retain mission gadgets in inventory, but equip only
+                     * weapons GE can actually attach to a bot character. */
+                    modMpBotsPdInventoryGive(runtime, right, -1);
+                    if (entry->item_left >= 0)
+                        modMpBotsPdInventoryGive(runtime, left, -2);
+                    if (starting == ITEM_UNARMED
+                        && (s32)getPropForHeldItem(right) >= 0)
+                        starting = right;
+                }
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(*entry));
+                break;
+            }
+            case INTROTYPE_AMMO:
+            {
+                struct SetupIntroAmmo *entry = (struct SetupIntroAmmo *)intro;
+                if (entry->is_demo_playback == demo)
+                    modMpBotsPdGiveAmmo(runtime, entry->ammo_type, entry->ammo_amount);
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(*entry));
+                break;
+            }
+            case INTROTYPE_SPAWN:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroSpawn));
+                break;
+            case INTROTYPE_SWIRL:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroSwirl));
+                break;
+            case INTROTYPE_ANIM:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroAnim));
+                break;
+            case INTROTYPE_CUFF:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroCuff));
+                break;
+            case INTROTYPE_CAMERA:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroCamera));
+                break;
+            case INTROTYPE_WATCH:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroWatch));
+                break;
+            case INTROTYPE_CREDITS:
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroCredits));
+                break;
+            default:
+                /* Preserve the retail intro's unknown-record step. */
+                intro = (struct SetupIntroEmpty *)((u8 *)intro + sizeof(struct SetupIntroEmpty));
+                break;
+        }
+    }
+
+    if (starting != ITEM_UNARMED)
+    {
+        modMpBotsPdSwitchToWeapon(slot, starting);
+        runtime->changeguntimer60 = 0;
+    }
+}
+
 static void modMpBotsPdBotInvTick(s32 slot)
 {
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
@@ -2572,7 +3222,15 @@ static void modMpBotsPdBotInvTick(s32 slot)
         ITEM_IDS item = i < 0 ? ITEM_UNARMED : runtime->inventory[i];
         score = modMpBotsPdWeaponScore(slot, item, TRUE);
 
-        if (score >= bestscore && modMpBotsPdAmmoQuantity(runtime, item, TRUE) > 0)
+        /* An empty Sniper Rifle still has the human player's buttstock role.
+         * Rank it just above Slappers, below usable loaded firearms. */
+        if (item == ITEM_SNIPERRIFLE
+            && modMpBotsPdAmmoQuantity(runtime, item, TRUE) == 0)
+            score = 14;
+
+        if (score >= bestscore
+            && (modMpBotsPdAmmoQuantity(runtime, item, TRUE) > 0
+                || item == ITEM_SNIPERRIFLE))
         {
             bestscore = score;
             bestweapon = item;
@@ -2654,7 +3312,9 @@ static void modMpBotsPdApplyAimEnd(s32 slot)
 
 static f32 modMpBotsPdMeleeReach(struct ModMpBotRuntime *runtime)
 {
-    return runtime->weaponnum == ITEM_SNIPERRIFLE ? 100.0f : 50.0f;
+    /* Bot-only range: make Slappers practical when chasing a moving target.
+     * Human weapon ranges and damage remain unchanged. */
+    return runtime->weaponnum == ITEM_SNIPERRIFLE ? 115.0f : 70.0f;
 }
 
 static f32 modMpBotsPdMeleeDistanceSq(struct ModMpBotRuntime *runtime,
@@ -2678,6 +3338,10 @@ static s32 modMpBotsPdMeleeImpact(s32 slot)
     f32 reach;
 
     if (!modMpBotsPdPropAlive(target))
+        return FALSE;
+
+    if (modMpBotsFriendlyFireBlocksCoopAlly() && target->type == PROP_TYPE_CHR
+        && target->chr != NULL && modMpBotsGetSlotForChr(target->chr) >= 0)
         return FALSE;
 
     reach = modMpBotsPdMeleeReach(runtime);
@@ -2717,6 +3381,52 @@ static void modMpBotsPdTickMelee(s32 slot)
     s32 difficulty = g_ModMpBotConfigs[slot].difficulty;
     f32 reach = modMpBotsPdMeleeReach(runtime);
 
+    if (runtime->weaponnum == ITEM_UNARMED || runtime->weaponnum == ITEM_FIST
+        || runtime->weaponnum == ITEM_SNIPERRIFLE)
+    {
+        /* Retail US gun.c/gunfire.c first-person melee timelines:
+         * Slappers: 42 ticks; Sniper buttstock: 60 ticks.
+         * Both random left/right swing variants register their hit at tick 30.
+         * Sniper swing 1 lasts 60 ticks; swing 2 lasts 52 ticks.
+         * Do not apply the PD difficulty-dependent 30/60/120 punch cadence. */
+        if (runtime->punchtimer60[GUNRIGHT] > 0)
+        {
+            runtime->punchtimer60[GUNRIGHT] -= g_ClockTimer;
+
+            if (runtime->punchtimer60[GUNLEFT] >= 0)
+            {
+                runtime->punchtimer60[GUNLEFT] -= g_ClockTimer;
+
+                if (runtime->punchtimer60[GUNLEFT] <= 0)
+                {
+                    runtime->punchtimer60[GUNLEFT] = -1;
+                    if (modMpBotsPdMeleeImpact(slot))
+                        modMpBotsPlayLocalSfx(runtime->chr,
+                            PUNCH1_SFX + (randomGetNext() % 3U));
+                    else
+                        modMpBotsPlayLocalSfx(runtime->chr, PUNCHING_AIR_SFX);
+                }
+            }
+            return;
+        }
+
+        if (g_ClockTimer <= 0 || runtime->targetprop == NULL
+            || !runtime->targetinsight
+            || runtime->shootdelaytimer60 < g_ModMpBotPdDifficulties[difficulty].shootdelay60
+            || !modMpBotsPdTargetInFov(slot, 40.0f)
+            || modMpBotsPdMeleeDistanceSq(runtime, runtime->targetprop) > reach * reach)
+            return;
+
+        /* Human gunTickHandState chooses PUNCH1/PUNCH2 with a random bit.
+         * Bot models lack the first-person hand skeleton; do not play the
+         * unrelated hit_butt_long/short victim flinch animations here. */
+        runtime->pad3 = (u8)(randomGetNext() & 1U);
+        runtime->punchtimer60[GUNRIGHT] = runtime->weaponnum == ITEM_SNIPERRIFLE
+            ? (runtime->pad3 ? 52 : 60) : 42;
+        runtime->punchtimer60[GUNLEFT] = 30;
+        return;
+    }
+
     if (runtime->punchtimer60[GUNRIGHT] >= 0 && runtime->timeuntilreload60[GUNRIGHT] <= 0)
     {
         runtime->punchtimer60[GUNRIGHT] -= g_ClockTimer;
@@ -2725,7 +3435,10 @@ static void modMpBotsPdTickMelee(s32 slot)
             || !runtime->targetinsight
             || runtime->shootdelaytimer60 < g_ModMpBotPdDifficulties[difficulty].shootdelay60
             || !modMpBotsPdTargetInFov(slot, 40.0f)
-            || modMpBotsPdMeleeDistanceSq(runtime, runtime->targetprop) > reach * reach)
+            /* Accept input slightly before reaching striking distance.
+             * The impact still requires actual proximity and clear STAN LOS. */
+            || modMpBotsPdMeleeDistanceSq(runtime, runtime->targetprop)
+                > (reach + 20.0f) * (reach + 20.0f))
         {
             runtime->punchtimer60[GUNRIGHT] = 0;
         }
@@ -3149,12 +3862,21 @@ static void modMpBotsPdCombatTick(s32 slot)
 {
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
 
+    /* GE Sniper Butt remains usable with neither magazine nor reserve ammo;
+     * recover normal rifle fire immediately when ammunition is acquired. */
+    if (runtime->weaponnum == ITEM_SNIPERRIFLE)
+        runtime->ismeleeweapon = modMpBotsPdAmmoQuantity(runtime, ITEM_SNIPERRIFLE, TRUE) == 0;
+
     modMpBotsPdApplyAimEnd(slot);
 
     if (runtime->ismeleeweapon)
         modMpBotsPdTickMelee(slot);
     else
+    {
+        runtime->punchtimer60[GUNLEFT] = -1;
+        runtime->punchtimer60[GUNRIGHT] = 0;
         modMpBotsPdTickGunfire(slot);
+    }
 }
 
 static ITEM_IDS modMpBotsPdWeaponForAmmo(s32 ammotype)
@@ -3528,6 +4250,9 @@ static PropRecord *modMpBotsPdFindArmorTarget(s32 slot)
 
         obj = prop->obj;
 
+        if (prop == runtime->failedpickupprop && runtime->pickupretry60 > 0)
+            continue;
+
         if (needweapon)
         {
             WeaponObjRecord *weapon;
@@ -3557,6 +4282,16 @@ static PropRecord *modMpBotsPdFindArmorTarget(s32 slot)
         dz = prop->pos.z - runtime->chr->prop->pos.z;
         dist = dx * dx + dz * dz;
 
+        /* Co-Op: a distant weapon must not outrank staying with the team.
+         * Nearby weapons are still gathered as soon as a route is viable. */
+        if (scenario == SCENARIO_COOP && needweapon && dist > 129600.0f)
+            continue;
+
+        /* Commit to the current pickup for a while instead of oscillating
+         * between equal-distance weapons on consecutive ticks. */
+        if (prop == runtime->movetargetprop && runtime->movehold60 > 0)
+            return prop;
+
         if (best == NULL || dist < bestdist)
         {
             best = prop;
@@ -3567,29 +4302,63 @@ static PropRecord *modMpBotsPdFindArmorTarget(s32 slot)
     return best;
 }
 
+/* Human players' collision STAN is authoritative even if their viewer
+ * presentation prop has not published prop->stan.  Both initial follow and
+ * post-respawn regroup use this same live target STAN. */
+static StandTile *modMpBotsPdNavTargetStan(PropRecord *prop)
+{
+    s32 i;
+
+    if (prop == NULL)
+        return NULL;
+    if (scenario == SCENARIO_COOP && prop->type == PROP_TYPE_VIEWER)
+    {
+        i = getPlayerPointerIndex(prop);
+        if ((u32)i < (u32)getPlayerCount()
+            && g_playerPointers[i] != NULL
+            && g_playerPointers[i]->prop == prop
+            && !g_playerPointers[i]->bonddead
+            && g_playerPointers[i]->field_488.current_tile_ptr != NULL)
+            return g_playerPointers[i]->field_488.current_tile_ptr;
+    }
+    return prop->stan;
+}
+
 static s32 modMpBotsPdMoveTargetValid(PropRecord *prop)
 {
     if (modMpBotsPdFindParticipant(prop) >= 0)
         return modMpBotsPdPropAlive(prop);
 
+    /* Co-Op enemy selection returns ordinary guard props, which do not have
+     * human/bot participant slots.  Previously the movement validator only
+     * accepted participants and pickups, so selected guards could be aimed at
+     * and punched but could never be pursued through the STAN navigator. */
+    if (scenario == SCENARIO_COOP && prop != NULL
+        && prop->type == PROP_TYPE_CHR && prop->chr != NULL
+        && prop->stan != NULL && !chrIsDead(prop->chr)
+        && modMpBotsGetSlotForChr(prop->chr) < 0
+        && !chrCoopIsEscortCandidate(prop->chr))
+        return TRUE;
+
+    /* An unarmed Simulant selects PROPDEF_COLLECTABLE world weapons in
+     * modMpBotsPdFindArmorTarget.  The move-target gate must accept that
+     * same pickup type, or no navigation route is ever activated. */
     return prop != NULL
         && (prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON)
-        && prop->obj != NULL && prop->obj->type == PROPDEF_ARMOUR
+        && prop->obj != NULL
+        && (prop->obj->type == PROPDEF_ARMOUR || prop->obj->type == PROPDEF_COLLECTABLE)
         && prop->stan != NULL && prop->parent == NULL && prop->timetoregen == 0;
 }
 
 static void modMpBotsPdNavClear(struct ModMpBotRuntime *runtime)
 {
-    s32 i;
-
     runtime->navgoalstan = NULL;
     runtime->navtargetcode = MODBOT_TARGET_NONE;
+    runtime->navtargetprop = NULL;
     runtime->navindex = 0;
     runtime->navcount = 0;
     runtime->navactive = FALSE;
-
-    for (i = 0; i < MAX_CHRWAYPOINTS; i++)
-        runtime->navtiles[i] = NULL;
+    /* The count and active flag invalidate all prior route entries. */
 }
 
 static f32 modMpBotsPdNavSqDist(const coord3d *a, const coord3d *b)
@@ -3661,12 +4430,13 @@ static s16 modMpBotsStanFindNode(StandTile *tile, s32 create)
 
 static void modMpBotsStanHeapSwap(s32 a, s32 b)
 {
-    s16 tmp = g_ModMpBotStanHeap[a];
+    s16 left = g_ModMpBotStanHeap[a];
+    s16 right = g_ModMpBotStanHeap[b];
 
-    g_ModMpBotStanHeap[a] = g_ModMpBotStanHeap[b];
-    g_ModMpBotStanHeap[b] = tmp;
-    g_ModMpBotStanNodes[g_ModMpBotStanHeap[a]].heappos = a;
-    g_ModMpBotStanNodes[g_ModMpBotStanHeap[b]].heappos = b;
+    g_ModMpBotStanHeap[a] = right;
+    g_ModMpBotStanHeap[b] = left;
+    g_ModMpBotStanNodes[right].heappos = a;
+    g_ModMpBotStanNodes[left].heappos = b;
 }
 
 static void modMpBotsStanHeapBubbleUp(s32 pos)
@@ -3763,12 +4533,10 @@ static f32 modMpBotsStanDistance(StandTile *a, StandTile *b)
     return sqrtf(dx * dx + dy * dy + dz * dz);
 }
 
-static f32 modMpBotsStanTurnPenalty(s16 current, StandTile *next)
+static f32 modMpBotsStanTurnPenalty(s16 current, const coord3d *b, const coord3d *c)
 {
     s16 parent = g_ModMpBotStanNodes[current].parent;
     coord3d a;
-    coord3d b;
-    coord3d c;
     f32 abx;
     f32 abz;
     f32 bcx;
@@ -3781,13 +4549,11 @@ static f32 modMpBotsStanTurnPenalty(s16 current, StandTile *next)
         return 0.0f;
 
     getTileMidPoint(g_ModMpBotStanNodes[parent].tile, &a);
-    getTileMidPoint(g_ModMpBotStanNodes[current].tile, &b);
-    getTileMidPoint(next, &c);
 
-    abx = b.x - a.x;
-    abz = b.z - a.z;
-    bcx = c.x - b.x;
-    bcz = c.z - b.z;
+    abx = b->x - a.x;
+    abz = b->z - a.z;
+    bcx = c->x - b->x;
+    bcz = c->z - b->z;
     ablen = sqrtf(abx * abx + abz * abz);
     bclen = sqrtf(bcx * bcx + bcz * bcz);
 
@@ -3809,9 +4575,20 @@ static f32 modMpBotsStanEdgeCost(s16 current, StandTile *next, s32 edgeIndex)
     f32 cost;
     f32 clearance;
     f32 width = 0.0f;
+    f32 dx;
+    f32 dy;
+    f32 dz;
+    coord3d currentmid;
+    coord3d nextmid;
     coord3d portal;
 
-    cost = modMpBotsStanDistance(g_ModMpBotStanNodes[current].tile, next);
+    /* Reuse the two STAN midpoints for distance and turn penalty. */
+    getTileMidPoint(g_ModMpBotStanNodes[current].tile, &currentmid);
+    getTileMidPoint(next, &nextmid);
+    dx = nextmid.x - currentmid.x;
+    dy = nextmid.y - currentmid.y;
+    dz = nextmid.z - currentmid.z;
+    cost = sqrtf(dx * dx + dy * dy + dz * dz);
     clearance = stanGetTileCenterClearanceWorld(next);
 
     if (clearance < MODBOT_STAN_CLEARANCE_GOAL)
@@ -3823,7 +4600,7 @@ static f32 modMpBotsStanEdgeCost(s16 current, StandTile *next, s32 edgeIndex)
         cost += (MODBOT_STAN_PORTAL_GOAL - width) * MODBOT_STAN_PORTAL_COST;
     }
 
-    cost += modMpBotsStanTurnPenalty(current, next);
+    cost += modMpBotsStanTurnPenalty(current, &currentmid, &nextmid);
     return cost;
 }
 
@@ -3846,23 +4623,21 @@ static s32 modMpBotsPdNavBuildRoute(s32 slot, PropRecord *targetprop)
     f32 tentative;
     f32 heuristic;
 
+    goaltile = modMpBotsPdNavTargetStan(targetprop);
     if (runtime->chr == NULL || runtime->chr->prop == NULL
-        || targetprop == NULL || targetprop->stan == NULL
-        || runtime->chr->prop->stan == NULL)
+        || goaltile == NULL || runtime->chr->prop->stan == NULL)
     {
         modMpBotsPdNavClear(runtime);
         return FALSE;
     }
 
     starttile = runtime->chr->prop->stan;
-    goaltile = targetprop->stan;
 
-    for (i = 0; i < MAX_CHRWAYPOINTS; i++)
-        runtime->navtiles[i] = NULL;
-
+    /* Every active route entry is overwritten before navactive is set. */
     runtime->navgoalstan = goaltile;
     runtime->navgoalpos = targetprop->pos;
     runtime->navtargetcode = modMpBotsPdTargetCodeForProp(targetprop);
+    runtime->navtargetprop = targetprop;
     runtime->navindex = 0;
     runtime->navcount = 0;
     runtime->navactive = FALSE;
@@ -3997,11 +4772,17 @@ static void modMpBotsPdNavSetTravelYaw(struct ModMpBotRuntime *runtime, coord3d 
         runtime->roty = modMpBotsPdNormalizeAngle(atan2f(dx, dz));
 }
 
+/* GoldenEye's padlock test is implemented in chrprop.c. */
+extern bool doorIsPadlockFree(DoorRecord *door);
+
 static void modMpBotsPdCheckDoor(struct ModMpBotRuntime *runtime, coord3d *goal)
 {
     PropRecord *doorprop;
     PropRecord *scan;
     ObjectRecord *obj;
+    struct rect4f *polygon;
+    s32 numedges;
+    s32 i;
     f32 gx;
     f32 gz;
     f32 len;
@@ -4010,6 +4791,7 @@ static void modMpBotsPdCheckDoor(struct ModMpBotRuntime *runtime, coord3d *goal)
     f32 dx;
     f32 dy;
     f32 dz;
+    f32 distance2d;
 
     if (runtime->chr == NULL || runtime->chr->prop == NULL || goal == NULL
         || (runtime->navage % 10) != 0)
@@ -4031,6 +4813,13 @@ static void modMpBotsPdCheckDoor(struct ModMpBotRuntime *runtime, coord3d *goal)
         runtime->chr->prop->pos.x, runtime->chr->prop->pos.z,
         endx, endz, 0x5000);
 
+    /* The closed/ajar probe can miss an individual sliding panel.  Query
+     * actual door collision hulls before falling back to nearby objects. */
+    if (doorprop == NULL || doorprop->type != PROP_TYPE_DOOR)
+        doorprop = sub_GAME_7F0B1410(runtime->chr->prop->stan,
+            runtime->chr->prop->pos.x, runtime->chr->prop->pos.z,
+            endx, endz, CDTYPE_DOORS);
+
     /* Temple's short portal approaches can stop the route probe just before
      * the door polygon.  Fall back to a player-like local USE search: choose
      * only a nearby door lying in the current travel corridor. */
@@ -4049,8 +4838,31 @@ static void modMpBotsPdCheckDoor(struct ModMpBotRuntime *runtime, coord3d *goal)
                 || scan->obj == NULL)
                 continue;
 
-            sx = scan->pos.x - runtime->chr->prop->pos.x;
-            sz = scan->pos.z - runtime->chr->prop->pos.z;
+            /* Sliding-panel origins need not coincide with the visible door
+             * footprint.  Use the native collision polygon where available. */
+            sx = scan->pos.x;
+            sz = scan->pos.z;
+            polygon = NULL;
+            numedges = 0;
+            chraiGetCollisionBoundsWithoutY(scan, &polygon, &numedges);
+
+            if (polygon != NULL && numedges > 1)
+            {
+                sx = 0.0f;
+                sz = 0.0f;
+
+                for (i = 0; i < numedges; i++)
+                {
+                    sx += polygon->points[i].f[0];
+                    sz += polygon->points[i].f[1];
+                }
+
+                sx /= (f32)numedges;
+                sz /= (f32)numedges;
+            }
+
+            sx -= runtime->chr->prop->pos.x;
+            sz -= runtime->chr->prop->pos.z;
             along = (sx * gx + sz * gz) * invlen;
 
             if (along <= 0.0f || along > 280.0f)
@@ -4079,18 +4891,151 @@ static void modMpBotsPdCheckDoor(struct ModMpBotRuntime *runtime, coord3d *goal)
     dx = doorprop->pos.x - runtime->chr->prop->pos.x;
     dy = doorprop->pos.y - runtime->chr->prop->pos.y;
     dz = doorprop->pos.z - runtime->chr->prop->pos.z;
+    distance2d = dx * dx + dz * dz;
 
-    if (dx * dx + dy * dy + dz * dz < 78400.0f)
+    /* Measure USE reach to the collision footprint rather than the sliding
+     * model origin.  The square Temple panel may have an offset origin. */
+    polygon = NULL;
+    numedges = 0;
+    chraiGetCollisionBoundsWithoutY(doorprop, &polygon, &numedges);
+
+    if (polygon != NULL && numedges > 1)
+    {
+        f32 nearest = 999999999.0f;
+
+        for (i = 0; i < numedges; i++)
+        {
+            s32 next = (i + 1) % numedges;
+            f32 ax = polygon->points[i].f[0];
+            f32 az = polygon->points[i].f[1];
+            f32 ex = polygon->points[next].f[0] - ax;
+            f32 ez = polygon->points[next].f[1] - az;
+            f32 length2 = ex * ex + ez * ez;
+            f32 t = 0.0f;
+            f32 px;
+            f32 pz;
+            f32 distance2;
+
+            if (length2 > 1.0f)
+                t = ((runtime->chr->prop->pos.x - ax) * ex
+                    + (runtime->chr->prop->pos.z - az) * ez) / length2;
+            if (t < 0.0f)
+                t = 0.0f;
+            else if (t > 1.0f)
+                t = 1.0f;
+
+            px = ax + ex * t - runtime->chr->prop->pos.x;
+            pz = az + ez * t - runtime->chr->prop->pos.z;
+            distance2 = px * px + pz * pz;
+
+            if (distance2 < nearest)
+                nearest = distance2;
+        }
+
+        distance2d = nearest;
+    }
+
+    if (distance2d + dy * dy < 78400.0f
+        && doorprop->door->keyflags == 0
+        && doorIsPadlockFree(doorprop->door)
+        && doorprop->door->openPosition < doorprop->door->maxFrac
+        && doorprop->door->openstate != DOORSTATE_OPENING
+        && doorprop->door->openstate != DOORSTATE_WAITING)
     {
         doorsChooseSwingDirection(runtime->chr->prop, doorprop->door);
-        doorActivate(doorprop->door, 1);
+        doorActivate(doorprop->door, DOORSTATE_OPENING);
     }
+}
+
+/* STAN represents walkable floor, but not all solid objects on that floor.
+ * Use the real collision query to keep the steering motor off crates/glass.
+ * Doors remain managed by modMpBotsPdCheckDoor rather than detoured around. */
+static s32 modMpBotsPdNavSegmentClear(struct ModMpBotRuntime *runtime,
+    coord3d *dest)
+{
+    PropRecord *self = runtime->chr->prop;
+    StandTile *tile = self->stan;
+    f32 height = self->pos.y + 42.0f;
+
+    return tile != NULL && stanTestLineUnobstructed(&tile,
+        self->pos.x, self->pos.z, dest->x, dest->z,
+        CDTYPE_OBJS | CDTYPE_PATHBLOCKER,
+        height, height, height, height);
+}
+
+/* Collision-tested forward steering around an obstacle.  Unlike an arbitrary
+ * stuck strafe, this selects a traversable waypoint and uses the ordinary
+ * forward-only Simulant motor and chr collision resolver to reach it. */
+static void modMpBotsPdNavAvoidProps(struct ModMpBotRuntime *runtime,
+    coord3d *goal)
+{
+    coord3d test;
+    PropRecord *self = runtime->chr->prop;
+    f32 dx = goal->x - self->pos.x;
+    f32 dz = goal->z - self->pos.z;
+    f32 len = sqrtf(dx * dx + dz * dz);
+    s32 attempt;
+    s32 firstside;
+
+    if (len < 5.0f)
+        return;
+
+    dx /= len;
+    dz /= len;
+    /* Hold a proven detour long enough to pass the obstacle.  Native
+     * character collision continues to resolve every individual step. */
+    if (runtime->navavoidttl60 > 0
+        && modMpBotsPdNavSqDist(&self->pos, &runtime->navavoidpos) > 1225.0f)
+    {
+        *goal = runtime->navavoidpos;
+        return;
+    }
+
+    /* Avoid eight bots issuing several expensive room/prop casts per frame. */
+    if ((runtime->navage % 5) != 0)
+        return;
+
+    test = self->pos;
+    test.x += dx * (len < 140.0f ? len : 140.0f);
+    test.z += dz * (len < 140.0f ? len : 140.0f);
+
+    if (modMpBotsPdNavSegmentClear(runtime, &test) && !runtime->navstalled)
+    {
+        runtime->navavoidttl60 = 0;
+        return;
+    }
+
+    firstside = runtime->navavoidside == 0 ? 1 : runtime->navavoidside;
+
+    for (attempt = 0; attempt < 4; attempt++)
+    {
+        s32 side = (attempt & 1) ? -firstside : firstside;
+        f32 forward = attempt < 2 ? 65.0f : 20.0f;
+        f32 sideways = attempt < 2 ? 110.0f : 145.0f;
+
+        test = self->pos;
+        test.x += dx * forward + dz * sideways * side;
+        test.z += dz * forward - dx * sideways * side;
+
+        if (modMpBotsPdNavSegmentClear(runtime, &test))
+        {
+            runtime->navavoidpos = test;
+            runtime->navavoidttl60 = 55;
+            runtime->navavoidside = (s8)side;
+            runtime->navstalled = FALSE;
+            *goal = test;
+            return;
+        }
+    }
+
+    runtime->navstalled = TRUE;
 }
 
 static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
 {
     struct ModMpBotRuntime *runtime = &g_ModMpBotRuntime[slot];
     StandTile *currenttile;
+    StandTile *goaltile;
     StandTile *nexttile;
     coord3d portal;
     coord3d center;
@@ -4107,8 +5052,9 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
         return;
     }
 
+    goaltile = modMpBotsPdNavTargetStan(targetprop);
     if (runtime->chr == NULL || runtime->chr->prop == NULL
-        || runtime->chr->prop->stan == NULL || targetprop->stan == NULL)
+        || runtime->chr->prop->stan == NULL || goaltile == NULL)
     {
         modMpBotsPdNavClear(runtime);
         return;
@@ -4118,8 +5064,9 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
     currenttile = runtime->chr->prop->stan;
 
     if (!runtime->navactive
+        || runtime->navtargetprop != targetprop
         || runtime->navtargetcode != targetcode
-        || runtime->navgoalstan != targetprop->stan)
+        || runtime->navgoalstan != goaltile)
     {
         rebuild = TRUE;
     }
@@ -4140,10 +5087,41 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
     runtime->navage += g_ClockTimer;
     runtime->navgoalpos = targetprop->pos;
 
-    if (runtime->targetinsight
-        && (currenttile == targetprop->stan
-            || modMpBotsPdNavSqDist(&runtime->chr->prop->pos, &targetprop->pos)
-                <= MODBOT_STAN_DIRECT_RANGE_SQ))
+    if (runtime->navavoidttl60 > 0)
+        runtime->navavoidttl60 -= g_ClockTimer;
+
+    /* Actual travel, not an invented timer-based random action, determines
+     * when an attempted route is failing against prop collision. */
+    runtime->navclearanceinterval60 += g_ClockTimer;
+    if (runtime->navclearanceinterval60 >= 35)
+    {
+        f32 moved = modMpBotsPdNavSqDist(&runtime->chr->prop->pos,
+            &runtime->navprogresspos);
+        runtime->navstalled = moved < 324.0f;
+        if (runtime->navstalled)
+        {
+            runtime->navblocked60 += runtime->navclearanceinterval60;
+            if (runtime->navblocked60 > 300)
+                runtime->navblocked60 = 300;
+        }
+        else
+        {
+            runtime->navblocked60 = 0;
+        }
+        runtime->navprogresspos = runtime->chr->prop->pos;
+        runtime->navclearanceinterval60 = 0;
+    }
+
+    /* A target vertically above/below the bot can be nearby in X/Z across
+     * several spiral turns.  Direct travel is safe only on the same tile or
+     * on a directly connected, near-level tile. */
+    if ((runtime->targetinsight || currenttile == goaltile)
+        && (currenttile == goaltile
+            || (runtime->chr->prop->pos.y >= targetprop->pos.y - 56.0f
+                && runtime->chr->prop->pos.y <= targetprop->pos.y + 56.0f
+                && modMpBotsStanFindEdgeTo(currenttile, goaltile) >= 0
+                && modMpBotsPdNavSqDist(&runtime->chr->prop->pos, &targetprop->pos)
+                    <= MODBOT_STAN_DIRECT_RANGE_SQ)))
     {
         direct = TRUE;
     }
@@ -4166,7 +5144,7 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
             {
                 if (!modMpBotsPdNavBuildRoute(slot, targetprop))
                 {
-                    if (runtime->targetinsight)
+                    if (runtime->targetinsight && targetprop == runtime->targetprop)
                         goal = targetprop->pos;
                     else
                     {
@@ -4187,7 +5165,7 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
             {
                 if (!modMpBotsPdNavBuildRoute(slot, targetprop))
                 {
-                    if (runtime->targetinsight)
+                    if (runtime->targetinsight && targetprop == runtime->targetprop)
                         goal = targetprop->pos;
                     else
                     {
@@ -4209,14 +5187,26 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
                 /* Aim through the middle of the portal, but pull the steering
                  * point inward toward the next STAN centre.  This prevents
                  * wall/ledge shaving without forcing robotic centroid hops. */
-                goal.x = portal.x * 0.60f + center.x * 0.40f;
-                goal.y = portal.y * 0.60f + center.y * 0.40f;
-                goal.z = portal.z * 0.60f + center.z * 0.40f;
-
-                if (modMpBotsPdNavSqDist(&runtime->chr->prop->pos, &goal)
-                    <= MODBOT_STAN_REACH_SQ)
+                if (portalwidth < MODBOT_STAN_PORTAL_GOAL)
                 {
-                    goal = center;
+                    /* In a narrow stair turn, keep the crossing point just
+                     * inside the next polygon.  Only STAN tile transition
+                     * advances the route; do not jump to its distant centre. */
+                    goal.x = portal.x * 0.85f + center.x * 0.15f;
+                    goal.y = portal.y * 0.85f + center.y * 0.15f;
+                    goal.z = portal.z * 0.85f + center.z * 0.15f;
+                }
+                else
+                {
+                    goal.x = portal.x * 0.60f + center.x * 0.40f;
+                    goal.y = portal.y * 0.60f + center.y * 0.40f;
+                    goal.z = portal.z * 0.60f + center.z * 0.40f;
+
+                    if (modMpBotsPdNavSqDist(&runtime->chr->prop->pos, &goal)
+                        <= MODBOT_STAN_REACH_SQ)
+                    {
+                        goal = center;
+                    }
                 }
             }
             else
@@ -4229,7 +5219,7 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
             goal = targetprop->pos;
         }
     }
-    else if (runtime->targetinsight)
+    else if (runtime->targetinsight && targetprop == runtime->targetprop)
     {
         goal = targetprop->pos;
     }
@@ -4238,8 +5228,9 @@ static void modMpBotsPdNavTick(s32 slot, PropRecord *targetprop)
         return;
     }
 
-    modMpBotsPdNavSetTravelYaw(runtime, &goal);
     modMpBotsPdCheckDoor(runtime, &goal);
+    modMpBotsPdNavAvoidProps(runtime, &goal);
+    modMpBotsPdNavSetTravelYaw(runtime, &goal);
 }
 
 static void modMpBotsPdTickDistMode(s32 slot, PropRecord *targetprop)
@@ -4267,6 +5258,28 @@ static void modMpBotsPdTickDistMode(s32 slot, PropRecord *targetprop)
     minattackdistance = limits[0];
     maxattackdistance = limits[1];
     limit3 = limits[2];
+
+    /* Use horizontal separation when deciding if a melee bot must advance;
+     * the actual Slappers impact test uses the same horizontal geometry. */
+    if (runtime->ismeleeweapon)
+        distance = sqrtf(modMpBotsPdMeleeDistanceSq(runtime, targetprop));
+
+    /* The PD range configuration may demand retreat hundreds of units away.
+     * Melee bots need a reachable engagement band regardless of weapon or
+     * personality: advance inside reach, never back off at ranged distances. */
+    if (runtime->ismeleeweapon)
+    {
+        minattackdistance = 0.0f;
+        maxattackdistance = modMpBotsPdMeleeReach(runtime) - 10.0f;
+    }
+    else if ((config->traits & MODBOT_TRAIT_OPPORTUNIST)
+        && targetprop == runtime->targetprop && runtime->targetinsight
+        && modMpBotsPdTargetBackTurned(slot, targetprop))
+    {
+        /* Unlike ranged stand-off behavior, close on an exposed back. */
+        minattackdistance = 0.0f;
+        maxattackdistance = 115.0f;
+    }
 
     if (config->difficulty == MODBOT_DIFFICULTY_MEAT)
         minattackdistance *= 0.35f;
@@ -4376,6 +5389,10 @@ static void modMpBotsPdTickCore(s32 slot)
     if (scenario == SCENARIO_COOP)
     {
         modMpBotsPdSetTarget(slot, modMpBotsCoopChooseTarget(slot, TRUE));
+        if (modMpBotHasTrait(slot, MODBOT_TRAIT_OPPORTUNIST)
+            && runtime->targetprop != NULL
+            && modMpBotsPdTargetBackTurned(slot, runtime->targetprop))
+            runtime->opportunistcommitted = TRUE;
         attackprop = runtime->targetprop;
         followprop = modMpBotsCoopChooseTarget(slot, FALSE);
     }
@@ -4391,25 +5408,98 @@ static void modMpBotsPdTickCore(s32 slot)
 
     runtime->attackingparticipant = (s16)modMpBotsPdFindParticipant(attackprop);
 
-    /* An unarmed Simulant first looks for a real world weapon.  Armor
-     * Specialist keeps its normal armour priority once the bot is armed.
-     * Co-Op follows the nearest living human whenever no encountered hostile
-     * guard is taking movement priority. */
-    moveprop = modMpBotsPdFindArmorTarget(slot);
+    /* Unreachable pickups are temporary failures, not permanent commands.
+     * Always keep Co-Op follow/combat as a usable alternative to scavenging. */
+    if (runtime->pickupretry60 > 0)
+    {
+        runtime->pickupretry60 -= g_ClockTimer;
+        if (runtime->pickupretry60 <= 0)
+        {
+            runtime->pickupretry60 = 0;
+            runtime->failedpickupprop = NULL;
+        }
+    }
+    if (runtime->movehold60 > 0)
+        runtime->movehold60 -= g_ClockTimer;
+
+    /* A respawned Co-Op Simulant must rejoin its human teammates before
+     * shopping for weapons or taking distant fights.  The existing STAN A*
+     * rebuilds when the human moves; no permanent stage waypoints are added.
+     * Only complete regroup when nearby on this floor/adjacent STAN tile,
+     * not when the player is across a wall or several storeys above. */
+    if (scenario == SCENARIO_COOP && runtime->regroupafterdeath
+        && followprop != NULL && runtime->chr->prop->stan != NULL)
+    {
+        StandTile *humanstan = modMpBotsPdNavTargetStan(followprop);
+        if (humanstan != NULL
+            && modMpBotsPdNavSqDist(&runtime->chr->prop->pos,
+                &followprop->pos) <= 22500.0f
+            && stanGetPositionYValue(humanstan, followprop->pos.x,
+                followprop->pos.z) >=
+                stanGetPositionYValue(runtime->chr->prop->stan,
+                    runtime->chr->prop->pos.x, runtime->chr->prop->pos.z) - 90.0f
+            && stanGetPositionYValue(humanstan, followprop->pos.x,
+                followprop->pos.z) <=
+                stanGetPositionYValue(runtime->chr->prop->stan,
+                    runtime->chr->prop->pos.x, runtime->chr->prop->pos.z) + 90.0f
+            && (runtime->chr->prop->stan == humanstan
+                || modMpBotsStanFindEdgeTo(runtime->chr->prop->stan,
+                    humanstan) >= 0))
+            runtime->regroupafterdeath = FALSE;
+    }
+
+    if (scenario == SCENARIO_COOP && runtime->regroupafterdeath
+        && followprop != NULL && runtime->chr->prop->stan != NULL
+        && modMpBotsPdNavTargetStan(followprop) != NULL)
+        moveprop = followprop;
+    else
+        moveprop = modMpBotsPdFindArmorTarget(slot);
+    /* A Co-Op bot engaging a visible guard with melee must get close enough
+     * to strike instead of detouring for a weapon.  Explicit armour choices
+     * and competitive multiplayer weapon-seeking remain untouched. */
+    if (scenario == SCENARIO_COOP && runtime->ismeleeweapon
+        && !runtime->regroupafterdeath
+        && attackprop != NULL && runtime->targetinsight
+        && (moveprop == NULL || moveprop->obj == NULL
+            || moveprop->obj->type != PROPDEF_ARMOUR))
+        moveprop = attackprop;
+    /* Rear-facing foes are an explicit Opportunist combat priority, but
+     * after-death regroup and Armor Specialist armour still come first. */
+    if (modMpBotHasTrait(slot, MODBOT_TRAIT_OPPORTUNIST)
+        && !runtime->regroupafterdeath && attackprop != NULL
+        && runtime->targetinsight
+        && (runtime->opportunistcommitted
+            || modMpBotsPdTargetBackTurned(slot, attackprop))
+        && (moveprop == NULL || moveprop->obj == NULL
+            || moveprop->obj->type != PROPDEF_ARMOUR))
+        moveprop = attackprop;
     if (moveprop == NULL)
         moveprop = attackprop;
     if (moveprop == NULL)
         moveprop = followprop;
 
+    if (moveprop != runtime->movetargetprop)
+    {
+        runtime->movetargetprop = moveprop;
+        runtime->movehold60 = 75;
+        runtime->navclearanceinterval60 = 0;
+        runtime->navblocked60 = 0;
+        runtime->navstalled = FALSE;
+        runtime->navavoidttl60 = 0;
+        runtime->navavoidside = 0;
+        runtime->navprogresspos = runtime->chr->prop->pos;
+    }
+
     if (moveprop != NULL)
     {
         if (scenario == SCENARIO_COOP && moveprop == followprop
-            && attackprop == NULL)
+            && (attackprop == NULL || runtime->regroupafterdeath))
         {
             /* Following a teammate is not combat range management.  Stay with
              * the human instead of stopping at the normal weapon standoff
              * distance or backing away from them. */
-            if (modMpBotsPdNavSqDist(&runtime->chr->prop->pos,
+            if (runtime->regroupafterdeath
+                || modMpBotsPdNavSqDist(&runtime->chr->prop->pos,
                     &followprop->pos) > (180.0f * 180.0f))
             {
                 runtime->manualbackup = FALSE;
@@ -4428,6 +5518,39 @@ static void modMpBotsPdTickCore(s32 slot)
         else
         {
             modMpBotsPdTickDistMode(slot, moveprop);
+        }
+
+        /* If no route can be formed or forward movement repeatedly stalls,
+         * release this pickup, and retry it later.  A bot can then pursue a
+         * guard or follow its human instead of standing motionless unarmed. */
+        if ((moveprop->type == PROP_TYPE_OBJ
+                || moveprop->type == PROP_TYPE_WEAPON)
+            && moveprop->obj != NULL
+            && (moveprop->obj->type == PROPDEF_COLLECTABLE
+                || moveprop->obj->type == PROPDEF_ARMOUR)
+            && (runtime->navblocked60 >= 140
+                || (!runtime->navactive
+                    && modMpBotsPdNavSqDist(&runtime->chr->prop->pos,
+                        &moveprop->pos) > 14400.0f)))
+        {
+            runtime->failedpickupprop = moveprop;
+            runtime->pickupretry60 = 180;
+            runtime->movetargetprop = NULL;
+            runtime->movehold60 = 0;
+            runtime->navblocked60 = 0;
+            runtime->navstalled = FALSE;
+            runtime->manualbackup = FALSE;
+            modMpBotsPdNavClear(runtime);
+
+            if (scenario == SCENARIO_COOP)
+            {
+                if (attackprop != NULL)
+                    modMpBotsPdTickDistMode(slot, attackprop);
+                else if (followprop != NULL
+                    && modMpBotsPdNavSqDist(&runtime->chr->prop->pos,
+                        &followprop->pos) > 32400.0f)
+                    modMpBotsPdNavTick(slot, followprop);
+            }
         }
     }
     else
@@ -4499,6 +5622,29 @@ static void modMpBotsPdTickCore(s32 slot)
         runtime->speedmultforwards = 0.0f;
         runtime->speedmultsideways = 0.0f;
         runtime->realignangleframe = g_GlobalTimer;
+    }
+
+    /* Opportunist: once the opponent turns to face us, orbit and keep firing.
+     * This is combat evasion, not an invented generic stuck-strafe workaround.
+     * Movement still passes through the chr collision motor, so walls/props
+     * continue to block it. The direction remains stable per opponent. */
+    if (modMpBotHasTrait(slot, MODBOT_TRAIT_OPPORTUNIST)
+        && attackprop != NULL && attackprop == runtime->targetprop
+        && moveprop == attackprop && runtime->targetinsight
+        && !modMpBotsPdTargetBackTurned(slot, attackprop))
+    {
+        f32 dx2 = attackprop->pos.x - runtime->chr->prop->pos.x;
+        f32 dz2 = attackprop->pos.z - runtime->chr->prop->pos.z;
+        f32 distance2 = dx2 * dx2 + dz2 * dz2;
+        if (distance2 < 280.0f * 280.0f && distance2 > 20.0f * 20.0f)
+        {
+            s32 targetcode = modMpBotsPdTargetCodeForProp(attackprop);
+            runtime->roty = modMpBotsPdNormalizeAngle(atan2f(dx2, dz2));
+            runtime->manualbackup = FALSE;
+            runtime->speedmultforwards = distance2 < 90.0f * 90.0f ? -0.45f
+                : distance2 > 190.0f * 190.0f ? 0.65f : 0.10f;
+            runtime->speedmultsideways = ((slot ^ targetcode) & 1) ? 0.7f : -0.7f;
+        }
     }
 
     /* PD botinv_tick precedes the two-hand combat loop in bot_tick_unpaused. */
@@ -4720,6 +5866,9 @@ void modMpBotsTick(void)
 
             if (!runtime->deathrecorded)
             {
+                if (scenario == SCENARIO_COOP)
+                    runtime->regroupafterdeath = TRUE;
+                modMpBotsDropInventoryOnDeath(runtime->chr);
                 modMpBotsInvalidateTargetProp(runtime->chr->prop);
                 modMpBotsRecordDeath(i);
                 runtime->deathrecorded = TRUE;
@@ -4746,10 +5895,10 @@ void modMpBotsTick(void)
     if (!modMpBotsStageReadyForSpawn())
         return;
 
-    /* Materialize at most one bot per frame.  This prevents a single MP load
-     * tick from mutating the active prop list and loading up to eight new
-     * character model pairs at once.  Rotate the starting slot so one bad or
-     * memory-heavy character cannot starve the others. */
+    /* Shared, fair pending-spawn queue for Co-Op and competitive multiplayer.
+     * Each unspawned bot retains its slot and retries a free pad on a future
+     * tick; nobody is created in a blocked pad, even during the first wave.
+     * Materialize at most one bot per frame and rotate the waiting slot. */
     for (n = 0; n < g_ModMpBotCount; n++)
     {
         slot = (g_ModMpBotSpawnCursor + n) % g_ModMpBotCount;

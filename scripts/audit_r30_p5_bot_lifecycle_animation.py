@@ -40,11 +40,34 @@ ck('model load checks compressed resource and cache headroom',
    and '+ MODBOT_MODEL_LOAD_ROM_GUARD >= remaining' in BOT)
 ck('nonphysical path refuses unsafe stage-heap lazy load',
    'mempGetBankSizeLeft(MEMPOOL_STAGE)' in BOT)
-ck('linker keeps bounded upper-RDRAM Simulant model storage after explosions',
+# P26 replaces the fixed 64 KiB texture partition with a two-ended arena.
+# Continue accepting the legacy bounded layout, but require P26's independent
+# 12 KiB scratch ceiling and explicit arena/explosion boundaries when enabled.
+legacy_linker_layout = all(fragment in LDS for fragment in (
+    '_modMpBotModelCacheEnd = _modMpBotTextureCacheStart;',
+    '_modMpBotTextureCacheStart = _modMpBotTextureCacheEnd - 0x10000;',
+    '(_modMpBotModelCacheEnd - _modMpBotModelCacheStart) >= 0x5E000',
+    '_modMpBotModelCacheEnd <= _modMpBotTextureCacheStart',
+    '_modMpBotTextureCacheEnd <= 0x80800000',
+))
+p26_dynamic_linker_layout = all(fragment in LDS for fragment in (
+    '_modMpBotTextureCacheEnd = 0x80800000;',
+    '_modMpBotDecodeScratchStart = _modMpBotTextureCacheEnd - 0x3000;',
+    '_modMpBotDecodeScratchEnd = _modMpBotTextureCacheEnd;',
+    '_modMpBotModelCacheEnd = _modMpBotDecodeScratchStart;',
+    '_modMpBotTextureCacheStart = _modMpBotModelCacheStart;',
+    '(_modMpBotModelCacheEnd - _modMpBotModelCacheStart) >= 0x5E000',
+    '_modMpBotModelCacheEnd == _modMpBotDecodeScratchStart',
+    '_modMpBotDecodeScratchEnd <= 0x80800000',
+)) and all(fragment in BOT for fragment in (
+    'texBindBotDynamicPool(&g_ModMpBotTexturePool);',
+    'texSetBotDynamicFloor(loadend);',
+    'loadend = (u8 *)g_ModMpBotTexturePool.rightpos - MODBOT_MODEL_LOAD_MIN_FREE;',
+))
+ck('linker keeps bounded upper-RDRAM Simulant resources after explosions',
    '_modMpBotModelCacheStart = ALIGN(_unlimitedExplosionPoolEnd, 16);' in LDS
-   and '_modMpBotModelCacheEnd = _modMpBotTextureCacheStart;' in LDS
-   and '(_modMpBotModelCacheEnd - _modMpBotModelCacheStart) >= 0x5E000' in LDS
-   and '_modMpBotTextureCacheEnd <= 0x80800000' in LDS)
+   and '_unlimitedExplosionPoolEnd <= _modMpBotModelCacheStart' in LDS
+   and (legacy_linker_layout or p26_dynamic_linker_layout))
 ck('spawn no longer installs guard face/reaim standing state',
    'check_set_actor_standing_still(chr, 0, 0);' in BOT
    and 'check_set_actor_standing_still(chr, 0x10' not in BOT)

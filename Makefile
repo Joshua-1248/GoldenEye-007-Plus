@@ -299,6 +299,8 @@ ifeq ($(MODDED_CHEATS), YES)
  LDFILEOPTS := $(subst -DOUTCODE=$(MOD_BASE_OUTCODE),-DOUTCODE=$(OUTCODE),$(LDFILEOPTS))
  LCDEFS += -DGE_MODDED_CHEATS
  ASMDEFS += --defsym GE_MODDED_CHEATS=1
+ # Keep the game linker script in sync with the compiler and assembler.
+ LDFILEOPTS += -DGE_MODDED_CHEATS
 endif
 
 ifeq ($(SAVE_EEPROM16K), YES)
@@ -337,6 +339,13 @@ ifeq ($(MAP_MAKER), YES)
  LCDEFS += -DGE_MAP_MAKER
  ASMDEFS += --defsym GE_MAP_MAKER=1
  LDFILEOPTS += -DGE_MAP_MAKER
+else ifeq ($(MODDED_CHEATS), YES)
+ # Keep Map Maker-disabled builds separate from normal Plus builds.  Both
+ # configurations compile front.c differently, so sharing objects can leave
+ # stale Map Maker references in the final link.
+ NOMAP_BASE_OUTCODE := $(OUTCODE)
+ OUTCODE := $(NOMAP_BASE_OUTCODE)-nomap
+ LDFILEOPTS := $(subst -DOUTCODE=$(NOMAP_BASE_OUTCODE),-DOUTCODE=$(OUTCODE),$(LDFILEOPTS))
 endif
 
 # The linker places its temporary uncompressed csegment immediately after the
@@ -390,6 +399,9 @@ CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
 GAMEFILES_C := $(foreach dir,src/game,$(wildcard $(dir)/*.c))
 GAMEFILES_S := $(foreach dir,src/game,$(wildcard $(dir)/*.s))
+ifneq ($(MODDED_CHEATS), YES)
+GAMEFILES_S := $(filter-out src/game/modbot_trait_descriptions.s,$(GAMEFILES_S))
+endif
 GAMEOBJECTS := $(foreach file,$(GAMEFILES_S),$(BUILD_DIR)/$(file:.s=.o)) \
 				$(foreach file,$(GAMEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
 
@@ -567,6 +579,23 @@ $(BUILD_DIR)/assets/images/combined/%.o: assets/images/combined/combined.bin
 	$(LD) -r -b binary $< -o $@
 
 
+# Josh_7774 is registered through nested include files in src/game/cobjdata.c.
+# Without explicit Make prerequisites, incremental builds can link an old
+# c_item_entries table whose slot 80 is still the empty terminator.
+# Add dependencies; never modify or replace the retail model entries.
+ifeq ($(MODDED_CHEATS), YES)
+$(BUILD_DIR)/src/game/cobjdata.o: assets/obseg/chr/chrModelFileHeaders.inc.c \
+    assets/obseg/chr/chrModelFileRecords.inc.c \
+    assets/obseg/chr/headjosh/modelFileHeader.inc.c \
+    assets/obseg/chr/headjosh/chrModelFileRecord.inc.c \
+    assets/obseg/chr/headtegguy/modelFileHeader.inc.c \
+    assets/obseg/chr/headtegguy/chrModelFileRecord.inc.c \
+    assets/obseg/chr/headgfsubdrag/modelFileHeader.inc.c \
+    assets/obseg/chr/headgfsubdrag/chrModelFileRecord.inc.c \
+    assets/obseg/chr/headgftrevor/modelFileHeader.inc.c \
+    assets/obseg/chr/headgftrevor/chrModelFileRecord.inc.c
+endif
+
 #Compress Obseg
 $(BUILD_DIR)/$(OBSEGMENT): $(OBSEG_RZ) $(IMAGE_OBJS)
 
@@ -696,6 +725,14 @@ ifeq ($(MODDED_CHEATS), YES)
 endif
 
 $(APPROM):	$(APPBIN)
+	# data_compress.sh mutates APPBIN in place. Always reconstruct the full,
+	# uncompressed temporary csegment from the ELF before finalizing any ROM.
+	# Otherwise a second finalization of APPBIN can compress an empty segment.
+	@echo "Restoring uncompressed ROM image from linked ELF"
+	$(OBJCOPY) $(APPELF) $(APPBIN) -O binary --gap-fill=0xff
+ifeq ($(MODDED_CHEATS), YES)
+	python3 scripts/patch_r21_front_textids.py $(APPBIN)
+endif
 	@echo "Compressing ROM"
 	GE_ROM_SIZE_BYTES=$(ROM_SIZE_BYTES) $(DATASEG_COMP) $< $(OUTCODE)
 	@echo "Finalizing ROM"
@@ -1252,8 +1289,20 @@ r27z-split-player-deaths-audit:
 r30-p4-bot-navigation-audit:
 	python3 scripts/audit_r30_p4_bot_navigation.py
 
+.PHONY: r30-p26-r8-coop-fp-hand-audit
+r30-p26-r8-coop-fp-hand-audit:
+	python3 scripts/audit_r30_p26_r8_coop_fp_hand_ownership.py
+
+.PHONY: r30-p26-pd-dynamic-resource-audit
+r30-p26-pd-dynamic-resource-audit: r30-p26-r8-coop-fp-hand-audit
+	python3 scripts/audit_r30_p26_pd_dynamic_bot_resource_arena.py
+
 .PHONY: r30-p5-bot-lifecycle-animation-audit
-r30-p5-bot-lifecycle-animation-audit:
+.PHONY: r30-p26-r4-actor-capacity-audit
+r30-p26-r4-actor-capacity-audit:
+	python3 scripts/audit_r30_p26_r4_actor_capacity.py
+
+r30-p5-bot-lifecycle-animation-audit: r30-p26-pd-dynamic-resource-audit r30-p26-r4-actor-capacity-audit
 	python3 scripts/audit_r30_p5_bot_lifecycle_animation.py
 
 .PHONY: r30-p6-bot-crash-hardening-audit

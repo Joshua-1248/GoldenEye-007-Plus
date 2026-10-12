@@ -79,5 +79,11 @@ struct ChrModelFileRecord c_item_entries[] = {
     #include <assets/obseg/chr/headbrosnansnow/chrModelFileRecord.inc.c>
     #include <assets/obseg/chr/headbrosnan/chrModelFileRecord.inc.c>
     #include <assets/obseg/chr/spicebond/chrModelFileRecord.inc.c>
+#ifdef GE_MODDED_CHEATS
+    #include <assets/obseg/chr/headjosh/chrModelFileRecord.inc.c>
+    #include <assets/obseg/chr/headtegguy/chrModelFileRecord.inc.c>
+    #include <assets/obseg/chr/headgfsubdrag/chrModelFileRecord.inc.c>
+    #include <assets/obseg/chr/headgftrevor/chrModelFileRecord.inc.c>
+#endif
     {0, 0, 1.0, 0.0, 0x00, 0x00, 0x00, 0x00}
 };

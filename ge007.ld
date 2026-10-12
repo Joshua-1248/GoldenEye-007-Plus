@@ -258,15 +258,19 @@ SECTIONS
    /* R30 P5: Simulant body/head model-file cache.  Bot characters are selected
     * freely and therefore cannot rely on the retail stage having preloaded the
     * corresponding chr resources.  Keep those late loads out of MEMPOOL_STAGE. */
+   /* R31: PD-style stage-lifetime arena.  Models grow upward, decoded
+    * textures downward.  Keep decoding scratch outside both live frontiers. */
    _modMpBotModelCacheStart = ALIGN(_unlimitedExplosionPoolEnd, 16);
    _modMpBotTextureCacheEnd = 0x80800000;
-   _modMpBotTextureCacheStart = _modMpBotTextureCacheEnd - 0x10000;
-   _modMpBotModelCacheEnd = _modMpBotTextureCacheStart;
-   ASSERT((_modMpBotTextureCacheEnd - _modMpBotTextureCacheStart) == 0x10000, "Simulant texture cache reservation drifted")
-   ASSERT((_modMpBotModelCacheEnd - _modMpBotModelCacheStart) >= 0x5E000, "Simulant model cache too small")
-   ASSERT(_unlimitedExplosionPoolEnd <= _modMpBotModelCacheStart, "Simulant model cache overlaps explosion pool")
-   ASSERT(_modMpBotModelCacheEnd <= _modMpBotTextureCacheStart, "Simulant model cache overlaps texture cache")
-   ASSERT(_modMpBotTextureCacheEnd <= 0x80800000, "Simulant texture cache exceeds 8 MiB RDRAM")
+   _modMpBotDecodeScratchStart = _modMpBotTextureCacheEnd - 0x3000;
+   _modMpBotDecodeScratchEnd = _modMpBotTextureCacheEnd;
+   _modMpBotModelCacheEnd = _modMpBotDecodeScratchStart;
+   _modMpBotTextureCacheStart = _modMpBotModelCacheStart;
+   ASSERT((_modMpBotDecodeScratchEnd - _modMpBotDecodeScratchStart) == 0x3000, "Simulant decode scratch drifted")
+   ASSERT((_modMpBotModelCacheEnd - _modMpBotModelCacheStart) >= 0x5E000, "Simulant unified arena too small")
+   ASSERT(_unlimitedExplosionPoolEnd <= _modMpBotModelCacheStart, "Simulant arena overlaps explosion pool")
+   ASSERT(_modMpBotModelCacheEnd == _modMpBotDecodeScratchStart, "Simulant scratch overlaps arena")
+   ASSERT(_modMpBotDecodeScratchEnd <= 0x80800000, "Simulant scratch exceeds 8 MiB RDRAM")
    ASSERT(_gameSegmentStart == 0x80600000, "physical game segment start drifted")
    ASSERT(_gameSegmentRomStart == 0x00034B30, "physical game ROM start drifted from retail 0x34B30")
    ASSERT(_gameSegmentStart >= 0x80400000, "physical game segment must live in Expansion Pak RDRAM")

@@ -868,5 +868,10 @@ extern u8 Ump_setupcatZ[];
 extern u8 bg_courtyard_all_p_seg[];
 extern u8 Tbg_courtyard_all_p_stanZ[];
 extern u8 Ump_setupcourtyardZ[];
+/* R20 R1: new independent Josh head .rz resource linked by ob_seg.s. */
+extern u8 CheadjoshZ[];
+extern u8 CheadtegguyZ[];
+extern u8 CheadgfsubdragZ[];
+extern u8 CheadgftrevorZ[];
 #endif
 extern u8 ob__ob_end_seg[];
