@@ -6,6 +6,9 @@
 #include "chrai.h"
 #include "chr.h"
 #include "stanintersection.h"
+#ifdef GE_MODDED_CHEATS
+#include "levelmodifiers.h"
+#endif
 #include "assert.h"
 
 void getTileMidPoint(StandTile *tile, coord3d *out);
@@ -1048,7 +1051,13 @@ bool stanTileHasZeroArea(StandTile *tile)
     s32 AC[3];
     u32 crossStore[2];
     s32 temp1, temp2, temp3;
-    
+
+#ifdef GE_MODDED_CHEATS
+    /* Dam live island activation masks only the exclusive tile set.  Their
+     * memory and all pre-existing STAN pointers remain stable. */
+    if (levelModifiersDamIslandTileDisabled(tile))
+        return TRUE;
+#endif
 
     temp1 = (tile->tail.half >> 8) & 0xf;
     temp2 = (tile->tail.half >> 4) & 0xf;

@@ -87,6 +87,14 @@ table_music_data:
  music_table_entry Msurface2_ending
  music_table_entry Mstatue_ending
  music_table_entry Mfrigate_outro
+.ifdef GE_MODDED_CHEATS
+ music_table_entry Mwatch_gf
+ music_table_entry Mwatch_tmd
+ music_table_entry Mwatch_tswlm
+ music_table_entry Mfolders_gf
+ music_table_entry Mfolders_tmd
+ music_table_entry Mfolders_tswlm
+.endif
 table_music_data_end:
 .global _musicsampletblSegmentRomEnd
 _musicsampletblSegmentRomEnd:
@@ -184,6 +192,14 @@ music_file Msurface1x
 music_file Msurface2_ending
 music_file Mstatue_ending
 music_file Mfrigate_outro
+.ifdef GE_MODDED_CHEATS
+music_file Mwatch_gf
+music_file Mwatch_tmd
+music_file Mwatch_tswlm
+music_file Mfolders_gf
+music_file Mfolders_tmd
+music_file Mfolders_tswlm
+.endif
 
 .section .musiccompressed
 .half 0

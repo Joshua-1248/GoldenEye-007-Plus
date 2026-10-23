@@ -2,6 +2,7 @@
 #define _LEVELMODIFIERS_H_
 
 #include <ultra64.h>
+struct StandTile;
 
 typedef enum LevelModifierCategory
 {
@@ -68,6 +69,14 @@ s32 levelModifiersGetDamDrivableSpeedboatPreload(void);
 void levelModifiersSetDamDrivableSpeedboatPreload(s32 enabled);
 s32 levelModifiersActivateDamDrivableSpeedboat(void);
 LevelModifierPolicy levelModifiersGetDamDrivableSpeedboatPolicy(void);
+
+/* Dam Island Fixed Collisions: latched live geometry in a dual-state STAN. */
+s32 levelModifiersDamIslandShouldLoad(s32 levelid);
+s32 levelModifiersDamIslandActive(void);
+s32 levelModifiersDamIslandTileDisabled(struct StandTile *tile);
+s32 levelModifiersGetDamIslandPreload(void);
+void levelModifiersSetDamIslandPreload(s32 enabled);
+LevelModifierPolicy levelModifiersGetDamIslandPolicy(void);
 
 const char *levelModifiersGetCurrentStageModifierName(s32 index);
 const char *levelModifiersGetCurrentStageModifierValue(s32 index);

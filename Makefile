@@ -573,7 +573,8 @@ $(BUILD_DIR)/assets/obseg/ob_seg.o: $(BUILD_DIR)/assets/obseg/setup/Ump_setupcat
 	$(BUILD_DIR)/assets/obseg/stan/Tbg_cat_all_p_stanZ.rz \
 	assets/obseg/bg/bg_courtyard_all_p.bin \
 	assets/obseg/stan/Tbg_courtyard_all_p_stanZ.rz \
-	assets/obseg/setup/Ump_setupcourtyardZ.rz
+	assets/obseg/setup/Ump_setupcourtyardZ.rz \
+	assets/obseg/stan/Tbg_dam_island_stanZ.rz
 
 $(BUILD_DIR)/assets/images/combined/%.o: assets/images/combined/combined.bin
 	$(LD) -r -b binary $< -o $@
@@ -1327,3 +1328,9 @@ r30-p11-stan-navigation-audit:
 .PHONY: r30-p12-p13-simulant-features-audit
 r30-p12-p13-simulant-features-audit:
 	python3 scripts/audit_r30_p12_p13_simulant_features.py
+
+# Independent resource-layout check, required before every ROM build.
+.PHONY: dam-island-fixed-collisions-audit
+dam-island-fixed-collisions-audit:
+	python3 scripts/audit_dam_island_fixed_collisions.py
+prerequisites: dam-island-fixed-collisions-audit

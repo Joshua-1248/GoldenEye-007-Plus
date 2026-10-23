@@ -28,6 +28,38 @@ typedef char save_data_size_must_remain_0x60[(sizeof(save_data) == 0x60) ? 1 : -
 u8 g_ModGameplayOptions2 = DEFAULT_MOD_OPTIONS2;
 u8 g_ModGameplayOptions3 = DEFAULT_MOD_OPTIONS3;
 s32 g_ModAntiAliasingEnabled = TRUE;
+/* EEPROM16 extended-settings selection, per save folder. */
+u8 g_ModWatchThemeSelection = 0;
+/* Independent two-bit main-menu theme, stored per folder. */
+u8 g_ModMainMenuThemeSelection = 0;
+
+s32 modMainMenuThemeGetSelection(void)
+{
+    return g_ModMainMenuThemeSelection;
+}
+
+s32 modMainMenuThemeSetSelection(s32 selection)
+{
+    if (selection < 0 || selection > 3 || selection == g_ModMainMenuThemeSelection)
+        return FALSE;
+    g_ModMainMenuThemeSelection = (u8)selection;
+    return TRUE;
+}
+
+
+s32 modWatchThemeGetSelection(void)
+{
+    return g_ModWatchThemeSelection;
+}
+
+s32 modWatchThemeSetSelection(s32 selection)
+{
+    if (selection < 0 || selection > 3 || selection == g_ModWatchThemeSelection)
+        return FALSE;
+    g_ModWatchThemeSelection = (u8)selection;
+    return TRUE;
+}
+
 
 s32 modMicroOptimizationsEnabled(void)
 {
@@ -427,6 +459,10 @@ static s32 fileSramProbe(void)
 #define GE_SRAM_EXT_TAIL_SP_CHAR_LO 1u
 #define GE_SRAM_EXT_TAIL_SP_FLAGS   2u
 #define GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT 0x01
+/* Bits 1 and 2 in each SP flag byte are unused in the current v4 journal.
+ * Do not reuse watch theme's bits 6-7 in the separate enhancement byte. */
+#define GE_SRAM_EXT_TAIL_SP_MAIN_MENU_THEME_SHIFT 1
+#define GE_SRAM_EXT_TAIL_SP_MAIN_MENU_THEME_MASK  0x06
 /* R27V: R27D consumes bytes 0..11; bytes 12..15 remain one per folder. */
 #define GE_SRAM_EXT_TAIL_ENH_BASE (MAX_FOLDER_COUNT * GE_SRAM_EXT_TAIL_SP_STRIDE)
 #define GE_SRAM_EXT_TAIL_ENH_ADDITIONAL_PLAYER_DEATHS 0x01
@@ -436,6 +472,10 @@ static s32 fileSramProbe(void)
 #define GE_SRAM_EXT_TAIL_ENH_AR33_PROP_FIX_MP          0x10
 
 #define GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH 0x20
+/* No layout or schema bump: bits 6-7 were unused in the existing per-folder
+ * enhancement byte.  Zero remains GoldenEye's watch theme for old saves. */
+#define GE_SRAM_EXT_TAIL_WATCH_THEME_SHIFT 6
+#define GE_SRAM_EXT_TAIL_WATCH_THEME_MASK  0xc0
 /* Version-1-only crouch metadata.  These bits are consumed exactly once while
  * upgrading a v1 bank to v2, then stripped from the canonical v2 record. */
 #define GE_SRAM_EXT_V1_CROUCH36_MARKER      0x02
@@ -988,6 +1028,10 @@ static s32 fileSramExtLoadFolder(u32 folder, save_data *save)
         g_ModSinglePlayerMatchViewHeight =
             (g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_FLAGS]
                 & GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT) != 0;
+        g_ModMainMenuThemeSelection =
+            (g_GeSramExtBank.reserved_tail[tail + GE_SRAM_EXT_TAIL_SP_FLAGS]
+                & GE_SRAM_EXT_TAIL_SP_MAIN_MENU_THEME_MASK)
+                >> GE_SRAM_EXT_TAIL_SP_MAIN_MENU_THEME_SHIFT;
     }
 
     g_ModAdditionalPlayerDeathAnimationsEnabled =
@@ -1008,6 +1052,9 @@ static s32 fileSramExtLoadFolder(u32 folder, save_data *save)
     g_ModStaggeringBackwardsDeathEnabled =
         (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
             & GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH) != 0;
+    g_ModWatchThemeSelection =
+        (g_GeSramExtBank.reserved_tail[GE_SRAM_EXT_TAIL_ENH_BASE + folder]
+            & GE_SRAM_EXT_TAIL_WATCH_THEME_MASK) >> GE_SRAM_EXT_TAIL_WATCH_THEME_SHIFT;
 
     g_ModStayInTpOnDeathDefault = (record->flags & GE_SRAM_EXT_FLAG_STAY_TP_DEATH) != 0;
     g_ModAntiAliasingEnabled = !(record->reserved & GE_SRAM_EXT_RESERVED_AA_VALID)
@@ -1047,6 +1094,8 @@ s32 fileLoadExtendedSettings(save_data *save)
     g_ModDisableBodyArmorEnabled = FALSE;
     g_ModSiloXMusicLoopFixEnabled = FALSE;
     g_ModAr33PropFixMpEnabled = FALSE;
+    g_ModWatchThemeSelection = 0;
+    g_ModMainMenuThemeSelection = 0;
 
     if (save == NULL || (save->completion_bitflags & SAVEFLAG_DORESET))
         return FALSE;
@@ -1110,7 +1159,8 @@ void fileStoreExtendedSettings(save_data *save)
     {
         u32 tail = folder * GE_SRAM_EXT_TAIL_SP_STRIDE;
         u16 selection = g_ModSinglePlayerCharacter;
-        u8 flags = g_ModSinglePlayerMatchViewHeight ? GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT : 0;
+        u8 flags = (g_ModSinglePlayerMatchViewHeight ? GE_SRAM_EXT_TAIL_SP_MATCH_VIEW_HEIGHT : 0)
+            | ((g_ModMainMenuThemeSelection & 3u) << GE_SRAM_EXT_TAIL_SP_MAIN_MENU_THEME_SHIFT);
         u32 enh = GE_SRAM_EXT_TAIL_ENH_BASE + folder;
         u8 enhflags = (g_ModAdditionalPlayerDeathAnimationsEnabled
             ? GE_SRAM_EXT_TAIL_ENH_ADDITIONAL_PLAYER_DEATHS : 0)
@@ -1123,7 +1173,8 @@ void fileStoreExtendedSettings(save_data *save)
             | (g_ModAr33PropFixMpEnabled
             ? GE_SRAM_EXT_TAIL_ENH_AR33_PROP_FIX_MP : 0)
             | (g_ModStaggeringBackwardsDeathEnabled
-            ? GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH : 0);
+            ? GE_SRAM_EXT_TAIL_ENH_STAGGERING_BACKWARDS_DEATH : 0)
+            | ((g_ModWatchThemeSelection & 3u) << GE_SRAM_EXT_TAIL_WATCH_THEME_SHIFT);
         s32 changed = FALSE;
 
         /* Keep the folder record and the R27D tail bytes in the same journal
@@ -1218,6 +1269,8 @@ s32 fileLoadExtendedSettings(save_data *save)
     g_ModDisableBodyArmorEnabled = FALSE;
     g_ModSiloXMusicLoopFixEnabled = FALSE;
     g_ModAr33PropFixMpEnabled = FALSE;
+    g_ModWatchThemeSelection = 0;
+    g_ModMainMenuThemeSelection = 0;
     return FALSE;
 }
 void fileStoreExtendedSettings(save_data *save) { (void)save; }

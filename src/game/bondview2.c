@@ -91,6 +91,11 @@
 #define MOD_PLAYER_DEATH_WALL_FLIP0 2
 #define MOD_PLAYER_DEATH_WALL_FLIP1 3
 #define MOD_PLAYER_DEATH_GAS_NECK   4
+/* A one-human competitive match is still multiplayer.  Bots do not increase
+ * getPlayerCount(), which counts human viewports only.  Restrict the fix to
+ * competitive matches so campaign and Co-Op death rules stay unchanged. */
+#define MOD_SOLO_COMPETITIVE_MP (gamemode == GAMEMODE_MULTI \
+    && get_scenario() != SCENARIO_COOP && getPlayerCount() == 1)
 #endif
 #ifdef GE_MODDED_CHEATS
 /* R27U Experimental Jumping. The velocities are derived from the target
@@ -111,6 +116,33 @@
 #define MOD_EXPERIMENTAL_JUMP_VELOCITY_FAST \
     ((MOD_EXPERIMENTAL_JUMP_HEIGHT + 0.5f * 1.388889f * MOD_EXPERIMENTAL_JUMP_FAST_TICKS * MOD_EXPERIMENTAL_JUMP_FAST_TICKS) / MOD_EXPERIMENTAL_JUMP_FAST_TICKS)
 static u8 g_ModExperimentalJumpRequestMask;
+
+/* Experimental Move Anywhere R1: independent, opt-in runtime state.
+ * No stage heap allocation and no STAN data rewriting. */
+static s32 g_ModMoveAnywhereEnabled;
+
+s32 modMoveAnywhereEnabled(void)
+{
+    return g_ModMoveAnywhereEnabled;
+}
+
+void modSetMoveAnywhereEnabled(s32 enabled)
+{
+    g_ModMoveAnywhereEnabled = enabled != 0;
+}
+
+/* No-Clipping uses its existing direct, collision-free move. Fly Mode still
+ * needs the STAN-independent horizontal BG sweep when Move Anywhere is on;
+ * its pitch-driven vertical movement remains owned by the Fly Mode branch. */
+static s32 modMoveAnywhereForCurrentPlayer(void)
+{
+    return g_ModMoveAnywhereEnabled
+        && g_CurrentPlayer != NULL
+        && g_CurrentPlayer->prop != NULL
+        && g_CurrentPlayer->field_488.current_tile_ptr != NULL
+        && g_PlayerIsInTank == 0
+        && !g_CheatActivated[CHEAT_NO_CLIPPING];
+}
 #endif
 #ifdef GE_MODDED_CHEATS
 /* Max Head-On Mode intentionally recreates the run-over SFX retrigger from
@@ -3288,6 +3320,123 @@ void bondviewCalcUpdatePlayerCollision(struct coord3d *offset, s32 allow_scoot)
     }
 #endif
 
+#ifdef GE_MODDED_CHEATS
+    if (modMoveAnywhereForCurrentPlayer())
+    {
+        /* Move Anywhere uses the SAME player radius and upright/ducking
+         * cylinder height as retail STAN collision. Sweep the leading
+         * semicircle rather than only tracing Bond's centre (R1). Keeping
+         * the start and end offsets equal gives the rim its real radius
+         * without making STAN walkability a requirement. */
+        coord3d from;
+        coord3d to;
+        coord3d roomprobe;
+        StandTile *found;
+        f32 frac;
+        f32 collision_radius;
+        f32 collision_height;
+        f32 collision_base;
+        f32 dx;
+        f32 dz;
+        f32 span;
+        f32 forwardx;
+        f32 forwardz;
+        f32 sidex;
+        f32 sidez;
+        f32 offx;
+        f32 offz;
+        f32 y;
+        s32 blocked;
+        s32 layer;
+        s32 sample;
+
+        bondviewGetCollisionRadius(g_CurrentPlayer->prop,
+            &collision_radius, &collision_height, &collision_base);
+        dx = next_pos.f[0] - g_CurrentPlayer->field_488.collision_position.f[0];
+        dz = next_pos.f[2] - g_CurrentPlayer->field_488.collision_position.f[2];
+        span = sqrtf(dx * dx + dz * dz);
+        blocked = FALSE;
+
+        if (span > 0.001f)
+        {
+            forwardx = dx / span * collision_radius;
+            forwardz = dz / span * collision_radius;
+            sidex = -forwardz;
+            sidez = forwardx;
+
+            for (layer = 0; layer < 3 && !blocked; layer++)
+            {
+                /* Height follows Bond's live crouch instead of an
+                 * approximate fixed 'head height'. */
+                if (layer == 0)
+                    y = collision_base + 1.0f;
+                else if (layer == 1)
+                    y = collision_base + collision_height * 0.5f;
+                else
+                    y = collision_base + collision_height - 1.0f;
+
+                for (sample = 0; sample < 6; sample++)
+                {
+                    /* Centre, leading rim, +/-45 degrees, +/-90 degrees.
+                     * All perimeter samples lie at the full native radius.
+                     * A half-circle is sufficient for swept forward motion;
+                     * reverse travel automatically reverses the probes. */
+                    offx = 0.0f;
+                    offz = 0.0f;
+                    if (sample == 1)
+                    {
+                        offx = forwardx;
+                        offz = forwardz;
+                    }
+                    else if (sample == 2 || sample == 3)
+                    {
+                        f32 sign = sample == 2 ? 1.0f : -1.0f;
+                        offx = (forwardx + sign * sidex) * 0.70710678f;
+                        offz = (forwardz + sign * sidez) * 0.70710678f;
+                    }
+                    else if (sample == 4 || sample == 5)
+                    {
+                        f32 sign = sample == 4 ? 1.0f : -1.0f;
+                        offx = sign * sidex;
+                        offz = sign * sidez;
+                    }
+
+                    from = g_CurrentPlayer->field_488.collision_position;
+                    from.f[0] += offx;
+                    from.f[1] = g_CurrentPlayer->field_70 + y;
+                    from.f[2] += offz;
+                    to = from;
+                    to.f[0] += dx;
+                    to.f[2] += dz;
+                    if (bondviewThirdPersonFindBackgroundHitFraction(&from, &to, &frac)
+                        && frac < 0.999f)
+                    {
+                        blocked = TRUE;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!blocked)
+        {
+            g_CurrentPlayer->field_488.collision_position.f[0] = next_pos.f[0];
+            g_CurrentPlayer->field_488.collision_position.f[2] = next_pos.f[2];
+        }
+
+        /* Real STAN may still be present below Bond. Refresh if found, but
+         * missing authored STAN does not roll movement back. */
+        roomprobe = g_CurrentPlayer->field_488.collision_position;
+        roomprobe.f[1] = g_CurrentPlayer->field_70 + 40.0f;
+        found = stanFindTileBelowPos(&roomprobe, NULL, NULL);
+        if (found != NULL)
+            g_CurrentPlayer->field_488.current_tile_ptr = found;
+        bondviewUpdatePlayerRoom(g_CurrentPlayer);
+        g_BondCanEnterTank = 0;
+        return;
+    }
+#endif
+
     g_BondCanEnterTank = 0;
 
     g_CurrentPlayer->autocrouchpos = CROUCH_STAND;
@@ -5342,6 +5491,80 @@ f32 bondviewYPositionRelated(StandTile *arg0, f32 arg1, f32 arg2)
  */
 #ifdef GE_MODDED_CHEATS
 static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *to, f32 *outfrac);
+static s32 bondviewThirdPersonFindBackgroundHitFractionInRoom(
+    coord3d *from, coord3d *to, f32 *outfrac, s32 *outroom);
+
+/* Move Anywhere floor support must be based on loaded BG triangles at the
+ * actual probe position, not on rooms reachable from Bond's last STAN tile.
+ * R7's portal-oriented segment search is appropriate for camera/wall rays,
+ * but it can miss a landing triangle across an unlinked room seam.
+ *
+ * Unlike the generic ray helper, inspect the returned face normal: an
+ * almost-vertical BG triangle is a wall, not a floor. The triangle routine
+ * returns an UNNORMALIZED normal, so compare squared magnitudes rather than
+ * a fixed normal.y component. Neither BG residency nor portal state is
+ * changed here; this code only reads already-loaded room geometry. */
+static s32 bondviewModMoveAnywhereFindFloor(coord3d *from,
+    f32 *outheight, s32 *outroom)
+{
+    coord3d to;
+    f32 scale = get_room_data_float2();
+    f32 bestheight = -100000.0f;
+    s32 bestroom = 0;
+    s32 room;
+
+    to = *from;
+    to.y -= 4000.0f;
+
+    for (room = 1; room < g_MaxNumRooms; room++)
+    {
+        s_room_info *info = &g_BgRoomInfo[room];
+        f32 candidate;
+
+        /* Room GDLs and triangle batches belong to the streamed BG cache.
+         * Never dereference a room that is only represented by its bounds. */
+        if (info->model_bin_loaded == 0 || info->vertices == NULL
+            || info->vtx_batch_bounds == NULL
+            || info->ptr_expanded_mapping_info == NULL)
+        {
+            continue;
+        }
+
+        /* Bounds are stored in BG-native coordinates, whereas the ray and
+         * player are in world coordinates (the R9 scale distinction). */
+        if (from->x < info->minbounds.x * scale - 1.0f
+            || from->x > info->maxbounds.x * scale + 1.0f
+            || from->z < info->minbounds.z * scale - 1.0f
+            || from->z > info->maxbounds.z * scale + 1.0f
+            || from->y < info->minbounds.y * scale - 1.0f
+            || to.y > info->maxbounds.y * scale + 1.0f)
+        {
+            continue;
+        }
+
+        /* Select from all triangles, not just the bullet-ray's nearest face.
+         * A rejected steep face must not hide walkable ground underneath. */
+        if (!bgModMoveAnywhereFindFloorInRoom(from, &to, room, &candidate))
+        {
+            continue;
+        }
+
+        if (bestroom == 0 || candidate > bestheight)
+        {
+            bestheight = candidate;
+            bestroom = room;
+        }
+    }
+
+    if (bestroom != 0)
+    {
+        *outheight = bestheight;
+        *outroom = bestroom;
+        return TRUE;
+    }
+
+    return FALSE;
+}
 #endif
 
 void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)
@@ -5403,8 +5626,9 @@ void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)
         return;
     }
 
-    if (propLevelModifierDamDrivableBoatCurrentPlayerDriving()
-        || propLevelModifierDamDrivableBoatCurrentPlayerSupported())
+    /* Only the seated driver is locked to the helm height. Deck riders
+     * retain the shaped floor supplied above and native gravity/jumping. */
+    if (propLevelModifierDamDrivableBoatCurrentPlayerDriving())
     {
         g_CurrentPlayer->stanHeight =
             propLevelModifierDamDrivableBoatDriverY();
@@ -5442,6 +5666,143 @@ void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)
     if (g_CheatActivated[CHEAT_NO_CLIPPING] && g_PlayerIsInTank == 0)
     {
         g_CurrentPlayer->stanHeight = g_CurrentPlayer->field_70;
+        return;
+    }
+#endif
+
+#ifdef GE_MODDED_CHEATS
+    if (modMoveAnywhereForCurrentPlayer())
+    {
+        /* Ground support also samples Bond's collision footprint. This
+         * allows the actual rim to remain on a narrow ledge instead of
+         * requiring the cylinder centre to have a floor polygon below it. */
+        coord3d floorfrom;
+        f32 frac;
+        f32 floorheight;
+        f32 oldvel;
+        f32 newvel;
+        f32 newy;
+        f32 accel;
+        f32 collision_radius;
+        f32 collision_height;
+        f32 collision_base;
+        f32 candidate;
+        s32 supported;
+        s32 sample;
+        s32 hitroom;
+        s32 supportroom = 0;
+
+        bondviewGetCollisionRadius(g_CurrentPlayer->prop,
+            &collision_radius, &collision_height, &collision_base);
+        supported = FALSE;
+        floorheight = -100000.0f;
+
+        /* Centre + four cardinal + four diagonal footprint contacts.
+         * A narrow triangular ledge can overlap only one diagonal portion
+         * of Bond's cylinder, and the old cardinal-only sampling would miss
+         * it completely. Never stop on the first centre hit: the rim can
+         * be resting on a higher adjoining triangle at a wall/roof seam. */
+        for (sample = 0; sample < 9; sample++)
+        {
+            floorfrom = g_CurrentPlayer->field_488.collision_position;
+            /* Start exactly at the highest step that can be accepted;
+             * a higher roof cannot mask a valid floor underneath it. */
+            floorfrom.f[1] = g_CurrentPlayer->field_70 + 18.0f;
+
+            if (sample == 1)
+                floorfrom.f[0] += collision_radius;
+            else if (sample == 2)
+                floorfrom.f[0] -= collision_radius;
+            else if (sample == 3)
+                floorfrom.f[2] += collision_radius;
+            else if (sample == 4)
+                floorfrom.f[2] -= collision_radius;
+            else if (sample >= 5)
+            {
+                f32 offset = collision_radius * 0.70710678f;
+                floorfrom.f[0] += sample == 5 || sample == 7
+                    ? offset : -offset;
+                floorfrom.f[2] += sample == 5 || sample == 6
+                    ? offset : -offset;
+            }
+
+            if (bondviewModMoveAnywhereFindFloor(&floorfrom,
+                    &candidate, &hitroom))
+            {
+                if (candidate <= g_CurrentPlayer->field_70 + 18.0f
+                    && (!supported || candidate > floorheight))
+                {
+                    floorheight = candidate;
+                    supportroom = hitroom;
+                    supported = TRUE;
+                }
+            }
+        }
+
+        /* Use the winning near-feet collision triangle as the room owner.
+         * A distant floor (while falling) is not current support, so defer
+         * to the R4 geometric-bounds fallback rather than pinning that room. */
+        bgModMoveAnywhereSetSupportingRoom(supported
+            && floorheight >= g_CurrentPlayer->field_70 - 30.0f
+            ? supportroom : 0);
+
+        g_CurrentPlayer->stanHeight = floorheight;
+        if (modExperimentalJumpRequest && modExperimentalJumpEnabled()
+            && g_CurrentPlayer->bonddead == FALSE
+            && supported && g_CurrentPlayer->field_7C == 0.0f
+            && g_CurrentPlayer->field_70 >= floorheight - 0.5f
+            && g_CurrentPlayer->field_70 <= floorheight + 0.5f)
+        {
+            g_CurrentPlayer->field_7C = get_debug_fast_bond_flag()
+                ? MOD_EXPERIMENTAL_JUMP_VELOCITY_FAST
+                : MOD_EXPERIMENTAL_JUMP_VELOCITY_NORMAL;
+        }
+
+        oldvel = g_CurrentPlayer->field_7C;
+        accel = get_debug_fast_bond_flag() ? 1.388889f : 0.27777779f;
+        newvel = oldvel - g_GlobalTimerDelta * accel;
+        newy = g_CurrentPlayer->field_70
+            + g_GlobalTimerDelta * (oldvel + newvel) * 0.5f;
+
+        if (newvel > 0.0f && newy > g_CurrentPlayer->field_70)
+        {
+            coord3d headfrom;
+            coord3d headto;
+
+            /* The ceiling must clear the whole collision radius, not only
+             * a single point directly above the player's head. */
+            for (sample = 0; sample < 5; sample++)
+            {
+                headfrom = g_CurrentPlayer->field_488.collision_position;
+                headfrom.f[1] = g_CurrentPlayer->field_70
+                    + collision_base + collision_height - 1.0f;
+                if (sample == 1)
+                    headfrom.f[0] += collision_radius;
+                else if (sample == 2)
+                    headfrom.f[0] -= collision_radius;
+                else if (sample == 3)
+                    headfrom.f[2] += collision_radius;
+                else if (sample == 4)
+                    headfrom.f[2] -= collision_radius;
+
+                headto = headfrom;
+                headto.f[1] += newy - g_CurrentPlayer->field_70;
+                if (bondviewThirdPersonFindBackgroundHitFraction(&headfrom, &headto, &frac))
+                {
+                    newy = g_CurrentPlayer->field_70;
+                    newvel = 0.0f;
+                    break;
+                }
+            }
+        }
+
+        if (supported && newy <= floorheight && newvel <= 0.0f)
+        {
+            newy = floorheight;
+            newvel = 0.0f;
+        }
+        g_CurrentPlayer->field_70 = newy;
+        g_CurrentPlayer->field_7C = newvel;
         return;
     }
 #endif
@@ -5516,7 +5877,8 @@ void bondviewUpdatePlayerY(s32 use_stanHeight, f32 stanHeight_offset)
             && modExperimentalJumpEnabled()
             && g_PlayerIsInTank == 0
             && g_CurrentPlayer->bonddead == FALSE
-            && g_CurrentPlayer->field_488.current_tile_ptr != NULL
+            && (g_CurrentPlayer->field_488.current_tile_ptr != NULL
+                || r27rBoatWalkFloorActive)
             && g_CurrentPlayer->field_7C == 0.0f
             && g_CurrentPlayer->field_70 >= g_CurrentPlayer->stanHeight - 0.5f
             && g_CurrentPlayer->field_70 <= g_CurrentPlayer->stanHeight + 0.5f)
@@ -5775,7 +6137,8 @@ void bondviewUpdatePlayerCollisionPositionFields(void)
 #endif
 #endif
 #ifdef GE_MODDED_CHEATS
-            (g_CheatActivated[CHEAT_NO_CLIPPING] && g_PlayerIsInTank == 0)
+            ((g_CheatActivated[CHEAT_NO_CLIPPING] || modMoveAnywhereForCurrentPlayer())
+                && g_PlayerIsInTank == 0)
 #endif
             )
     {
@@ -8979,7 +9342,23 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         }
 
 #ifdef GE_MODDED_CHEATS
-        if (!propLevelModifierDamDrivableBoatHandleFootMovement(&move_offset))
+        /* No-Clipping's collision-free movement and Fly Mode's existing
+         * movement path take priority over the boat's synthetic deck.
+         * Move Anywhere still needs separate moving-platform floor support,
+         * so do not change its boat behavior here. */
+        if (!g_CheatActivated[CHEAT_NO_CLIPPING]
+            && !g_CheatActivated[CHEAT_FLY_MODE]
+            && propLevelModifierDamDrivableBoatHandleFootMovement(&move_offset))
+        {
+            /* The boat owns X/Z collision here, but the native movement
+             * routine normally snapshots the previous position. Keep that
+             * one-step history for throw velocity and movement statistics. */
+            g_CurrentPlayer->bondprevpos.f[0] = start_collision_pos_x;
+            g_CurrentPlayer->bondprevpos.f[1] =
+                g_CurrentPlayer->field_488.collision_position.f[1];
+            g_CurrentPlayer->bondprevpos.f[2] = start_collision_pos_z;
+        }
+        else
 #endif
         {
             bondviewCalcUpdatePlayerCollision(
@@ -10358,7 +10737,8 @@ s32 bondviewGetThirdPersonLocalBodyAlpha(s32 withalpha)
  * arm update.  Open ledges remain valid camera space, while actual walls,
  * ceilings and floors shorten the arm.
  */
-static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *to, f32 *outfrac)
+static s32 bondviewThirdPersonFindBackgroundHitFractionInRoom(
+    coord3d *from, coord3d *to, f32 *outfrac, s32 *outroom)
 {
     u8 startrooms[8];
     u8 finalrooms[8];
@@ -10373,6 +10753,12 @@ static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *
     f32 scale;
     f32 frac;
     f32 best = 2.0f;
+    s32 bestroom = 0;
+
+    if (outroom != NULL)
+    {
+        *outroom = 0;
+    }
 
     if (g_CurrentPlayer == NULL
         || g_CurrentPlayer->prop == NULL
@@ -10405,6 +10791,20 @@ static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *
     {
         startrooms[i] = 0xff;
     }
+
+    /* A geometry-supported Move Anywhere position can be in another authored
+     * BG room than the last valid STAN. Search that room too while leaving
+     * the player's real STAN pointer untouched. */
+    if (modMoveAnywhereForCurrentPlayer())
+    {
+        s32 nearbyroom = bgModMoveAnywhereRoomForCurrentPlayer();
+
+        if (nearbyroom > 0 && nearbyroom < g_MaxNumRooms && nearbyroom != room)
+        {
+            startrooms[1] = (u8)nearbyroom;
+            startrooms[2] = 0xff;
+        }
+    }
     finalrooms[0] = 0xff;
 
     bgFindRoomsAlongSegment(from, to, startrooms, finalrooms,
@@ -10415,6 +10815,47 @@ static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *
         rooms[0] = room;
         roomcount = 1;
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* R7: raycast nearby loaded BG rooms as well as the rooms reachable
+     * through STAN/portals. Only Move Anywhere uses this additional path;
+     * unloaded room geometry is never dereferenced or forced in a raycast. */
+    if (modMoveAnywhereForCurrentPlayer())
+    {
+        coord3d feet = g_CurrentPlayer->field_488.collision_position;
+        s32 adjacent[3];
+        s32 count;
+        s32 k;
+
+        feet.y = g_CurrentPlayer->field_70 + 12.0f;
+        count = bgModMoveAnywhereFindNearbyGeometryRooms(&feet, room,
+            bgModMoveAnywhereRoomForCurrentPlayer(), adjacent, 3);
+
+        for (k = 0; k < count && roomcount < 16; k++)
+        {
+            s32 candidate = adjacent[k];
+            s32 j;
+
+            if (g_BgRoomInfo[candidate].vtx_batch_bounds == NULL)
+            {
+                continue;
+            }
+
+            for (j = 0; j < roomcount; j++)
+            {
+                if (rooms[j] == candidate)
+                {
+                    break;
+                }
+            }
+
+            if (j == roomcount)
+            {
+                rooms[roomcount++] = candidate;
+            }
+        }
+    }
+#endif
 
     scale = get_room_data_float2();
 
@@ -10455,6 +10896,7 @@ static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *
             if (frac >= 0.0f && frac <= 1.0f && frac < best)
             {
                 best = frac;
+                bestroom = rooms[i];
             }
         }
     }
@@ -10462,10 +10904,22 @@ static s32 bondviewThirdPersonFindBackgroundHitFraction(coord3d *from, coord3d *
     if (best <= 1.0f)
     {
         *outfrac = best;
+        if (outroom != NULL)
+        {
+            *outroom = bestroom;
+        }
         return TRUE;
     }
 
     return FALSE;
+}
+
+/* Keep camera, wall and ceiling callers on their original API. */
+static s32 bondviewThirdPersonFindBackgroundHitFraction(
+    coord3d *from, coord3d *to, f32 *outfrac)
+{
+    return bondviewThirdPersonFindBackgroundHitFractionInRoom(
+        from, to, outfrac, NULL);
 }
 
 /*
@@ -11351,7 +11805,11 @@ void mp_respawn_handler(void)
     bondviewClearUpperTextDisplayFlag(-1);
 
 
-    if ((getPlayerCount() >= 2) && (startpadcount > 0))
+    if ((getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+        || MOD_SOLO_COMPETITIVE_MP
+#endif
+        ) && (startpadcount > 0))
     {
         var_v1 = bondviewGetRandomSpawnPadIndex();
     }
@@ -11772,7 +12230,11 @@ Gfx *maybe_mp_interface(Gfx *gdl)
             if (doblood)
             {
                 die_blood_image_routine(0);
-                if (getPlayerCount() == 1)
+                if (getPlayerCount() == 1
+#ifdef GE_MODDED_CHEATS
+                    && !MOD_SOLO_COMPETITIVE_MP
+#endif
+                )
                 {
                     // This unusual comma-expression syntax is required for a byte match.
                     set_missionstate((musicStopSlot(-1), 0));
@@ -11846,7 +12308,11 @@ Gfx *maybe_mp_interface(Gfx *gdl)
                  * this point only after deathanimfinished becomes true. */
                 if (g_CurrentPlayer->deathanimfinished && currentPlayerIsFadeComplete())
                 {
-                    if (getPlayerCount() == 1)
+                    if (getPlayerCount() == 1
+#ifdef GE_MODDED_CHEATS
+                        && !MOD_SOLO_COMPETITIVE_MP
+#endif
+                    )
                     {
                         bondviewSetCameraMode(CAMERAMODE_DEATH_CAM_SP);
                     }
@@ -12115,7 +12581,11 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         hudMakeDamageSegments(g_CurrentPlayer->health_display_values, 0x2E, -1, currentPlayerGetHealth());
     }
 
-    if (getPlayerCount() < 2 || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
+    if ((getPlayerCount() < 2
+#ifdef GE_MODDED_CHEATS
+         && !MOD_SOLO_COMPETITIVE_MP
+#endif
+        ) || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
     {
         if (g_PlayerIsInTank == 1)
         {
@@ -12132,7 +12602,11 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
             }
         }
 
-        if (getPlayerCount() >= 2 && get_scenario() == SCENARIO_LTK)
+        if ((getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+            || MOD_SOLO_COMPETITIVE_MP
+#endif
+            ) && get_scenario() == SCENARIO_LTK)
         {
             // the damage dealt is always equivalent to how much health and armor the player has
             // the result of this is to always kill the player regardless of how much damage he can sustain
@@ -12140,14 +12614,22 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         }
 
         if (g_CurrentPlayer->cheatBondInvincible == FALSE && g_CurrentPlayer->bonddead == FALSE && g_PlayerInvincible == FALSE &&
-            (g_CurrentPlayer->damageshowtime < 0 || (getPlayerCount() >= 2 && g_CurrentPlayer->damageshowtime == 0)))
+            (g_CurrentPlayer->damageshowtime < 0 || ((getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+                || MOD_SOLO_COMPETITIVE_MP
+#endif
+                ) && g_CurrentPlayer->damageshowtime == 0)))
         {
             if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x5 && g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0xc)
             {
                 g_CurrentPlayer->oldhealth = g_CurrentPlayer->bondhealth;
                 g_CurrentPlayer->oldarmour = g_CurrentPlayer->bondarmour;
 
-                if (getPlayerCount() >= 2)
+                if (getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+                    || MOD_SOLO_COMPETITIVE_MP
+#endif
+                )
                 {
                     cur_player_num = get_cur_playernum();
 
@@ -12205,7 +12687,11 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 
                     if (g_CurrentPlayer->bondhealth <= 0.0f)
                     {
-                        if (getPlayerCount() >= 2)
+                        if (getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+                            || MOD_SOLO_COMPETITIVE_MP
+#endif
+                        )
                         {
                             sp2C = get_cur_playernum();
                             sp28 = 0;

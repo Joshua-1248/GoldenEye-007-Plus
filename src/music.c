@@ -82,7 +82,6 @@ s32 g_musicUnused = 0;
 #ifdef GE_MODDED_CHEATS
 extern u8 g_ModSiloXMusicLoopFixEnabled;
 extern s32 mission_state;
-static u8 g_ModSiloXLoopRestartQueued;
 #endif
 
 /**
@@ -460,8 +459,17 @@ s16 g_musicDefaultTrackVolume[MAX_NUM_MUSIC_TRACKS_W_NONE] = {
      */
     0x7332,
     
+#ifdef GE_MODDED_CHEATS
+    /* Appended watch themes; preserve all existing music IDs and defaults. */
+    0x6665, /* M_WATCH_GF */
+    0x6665, /* M_WATCH_TMD */
+    0x6665, /* M_WATCH_TSWLM */
+    0x6665, /* M_FOLDERS_GF */
+    0x6665, /* M_FOLDERS_TMD */
+    0x6665, /* M_FOLDERS_TSWLM */
+#endif
     /**
-     * Index 63, unknown / unused / removed.
+     * Index 63 (+3 in GE+) unknown / unused / removed.
      */
     0x7998,
 
@@ -1427,16 +1435,50 @@ void musicFadeTick(void)
         }
     }
 
-#ifdef GE_MODDED_CHEATS
-    /* R27Z: fully reload Silo's X-track after natural completion. */
-    if (g_ModSiloXMusicLoopFixEnabled
-        && (mission_state == MISSION_STATE_2 || mission_state == MISSION_STATE_5)
-        && g_musicXTrack2CurrentTrackNum == M_SILOX)
-    {
-        if (alCSPGetState(g_musicXTrack2SeqPlayer) == AL_STOPPED)
-        {
-            musicTrack2Play(M_SILOX);
-        }
-    }
-#endif
 }
+
+#ifdef GE_MODDED_CHEATS
+/* Compact Silo X replay in the ORIGINAL resident music module.
+ * R1's separate Track 1/2 restart paths exceeded the fixed resident
+ * ROM section.  Reuse the existing sequence object and select one player;
+ * musicTrack1Play/2Play have already assigned that object as the target.
+ * The existing game-thread call performs no DMA or decompression.
+ */
+void musicSiloXLoopTick(void)
+{
+    ALCSPlayer *player;
+    ALCSeq *seq;
+    u8 *data;
+
+    if (!g_ModSiloXMusicLoopFixEnabled || g_sndBootswitchSound)
+        return;
+
+    /* Silo's temporary X-track takes precedence if it is still audible. */
+    if (g_musicXTrack2CurrentTrackNum == M_SILOX
+        && g_musicXTrack2Volume != 0)
+    {
+        player = g_musicXTrack2SeqPlayer;
+        seq = &g_musicXTrack2Seq;
+        data = g_musicXTrack2SeqData;
+    }
+    else if (g_musicXTrack1CurrentTrackNum == M_SILOX
+        && g_musicXTrack1Volume != 0)
+    {
+        player = g_musicXTrack1SeqPlayer;
+        seq = &g_musicXTrack1Seq;
+        data = g_musicXTrack1SeqData;
+    }
+    else
+        return;
+
+    /* Only a naturally exhausted sequence can restart.  Stopped/faded
+     * music is guarded above by its current ID and zero volume.  The
+     * same sequence remains the player's target, so no SetSeq event is
+     * necessary; resetting validTracks also prevents duplicate replays. */
+    if (seq->validTracks == 0 && player->state == AL_STOPPED)
+    {
+        alCSeqNew(seq, data);
+        alCSPPlay(player);
+    }
+}
+#endif

@@ -120,7 +120,8 @@ static s32 mpwatchConfigRows(s32 mode)
     }
     if (mode == 5) return 7;
     if (mode == 6) return 11;
-    if (mode == 7 || mode == 8) return 1;
+    if (mode == 7) return 1;
+    if (mode == 8) return 2;
     if (mode == 9) return 3;
     if (mode == 10) return 2;
     return 1;
@@ -557,11 +558,18 @@ static s32 mpwatchConfigHandleInput(s32 player)
             mpwatchPlayBeep();
         }
         else if (mode == 8)
-{
-    modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
-    mpcfg_globals_dirty = TRUE;
-    mpwatchPlayBeep();
-}
+        {
+            if (row == 0)
+            {
+                modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
+                mpcfg_globals_dirty = TRUE;
+            }
+            else if (row == 1)
+            {
+                modSetMoveAnywhereEnabled(!modMoveAnywhereEnabled());
+            }
+            mpwatchPlayBeep();
+        }
         else if (mode == 10)
         {
             if (mpcfg_row[player]) g_ModStaggeringBackwardsDeathEnabled ^= 1;
@@ -2426,8 +2434,8 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                 }
                 else if (mode == 8)
                 {
-                    label=frontModGetOptionLabel(75);
-                    value=modExperimentalJumpEnabled();
+                    label=row == 0 ? frontModGetOptionLabel(75) : "Move Anywhere";
+                    value=row == 0 ? modExperimentalJumpEnabled() : modMoveAnywhereEnabled();
                     vtext=value ? "on" : "off";
                 }
                 else if (mode == 10)

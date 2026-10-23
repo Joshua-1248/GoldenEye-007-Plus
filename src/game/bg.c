@@ -22,9 +22,11 @@
 #include "explosion.h"
 #include "bgroomtrans.h"
 #ifdef GE_MODDED_CHEATS
+#include "ob.h"
 #include "front.h"
 #include "mirroredlevels.h"
 #include "levelmodifiers.h"
+#include "../../assets/obseg/file_resource_id_enums.h"
 #include "cheat.h"
 #endif
 
@@ -262,6 +264,212 @@ s32 g_BgCurrentRoom = 1;
  * rooms. */
 static s32 g_ModThirdPersonBgOriginActive = FALSE;
 static coord3d g_ModThirdPersonBgOrigin;
+
+/* Move Anywhere portal accommodation: one geometric BG room per viewport.
+ * The room is chosen from authored bounds, not from a synthetic STAN tile.
+ * Keep the normal portal root as well; ordinary gameplay visibility remains
+ * entirely unchanged when the Experimental option is off. */
+static u8 g_ModMoveAnywhereBgRooms[4];
+/* The true room owner of the most recent near-feet BG floor contact.
+ * The portal/geometry-bounds choice above remains the fallback whenever
+ * no supporting triangle has been found this player tick. */
+static u8 g_ModMoveAnywhereSupportRooms[4];
+
+void bgModMoveAnywhereSetSupportingRoom(s32 room)
+{
+    s32 player = get_cur_playernum();
+
+    if ((u32)player >= 4)
+    {
+        return;
+    }
+
+    if (room > 0 && room < g_MaxNumRooms && room < 0xff)
+    {
+        g_ModMoveAnywhereSupportRooms[player] = (u8)room;
+        g_ModMoveAnywhereBgRooms[player] = (u8)room;
+    }
+    else
+    {
+        g_ModMoveAnywhereSupportRooms[player] = 0;
+    }
+}
+
+s32 bgModMoveAnywhereRoomForCurrentPlayer(void)
+{
+    s32 player = get_cur_playernum();
+
+    /* Room tracking is needed during free flight and No-Clipping too; neither
+     * cheat should be constrained to the last STAN room for rendering. */
+    if (!modMoveAnywhereEnabled()
+        || (u32)player >= 4)
+    {
+        return 0;
+    }
+
+    return g_ModMoveAnywhereBgRooms[player];
+}
+
+/* Authored BG bounds are in room-data/asset coordinates. Player movement,
+ * including field_488.collision_position and field_70, is in gameplay world
+ * coordinates. The original collision code multiplies world ray positions by
+ * room_data_float1 before intersecting BG geometry; use the reciprocal here
+ * rather than directly comparing unmatched units (especially on Dam). */
+static f32 bgModMoveAnywhereGapFromBgBoundsWorld(f32 position, f32 bgmin,
+    f32 bgmax)
+{
+    f32 minworld = bgmin * room_data_float2;
+    f32 maxworld = bgmax * room_data_float2;
+
+    if (position < minworld)
+        return minworld - position;
+    if (position > maxworld)
+        return position - maxworld;
+    return 0.0f;
+}
+
+/* The background owns its own 3D room bounds, even where STAN has no tile.
+ * Use those precomputed bounds to nominate ONE additional portal root near
+ * Bond's actual feet. A narrow tolerance handles rooftop seams and ledges.
+ * The small room-size tie break avoids the giant lake BG winning over an
+ * overlapping tower/structure; previous room preference reduces flicker. */
+static s32 bgModMoveAnywhereFindNearbyRoom(coord3d *pos, s32 previous)
+{
+    s32 room;
+    s32 best = 0;
+    f32 bestscore = 10000000.0f;
+
+    for (room = 1; room < g_MaxNumRooms; room++)
+    {
+        s_room_info *info = &g_BgRoomInfo[room];
+        f32 dx = 0.0f;
+        f32 dy = 0.0f;
+        f32 dz = 0.0f;
+        f32 score;
+
+        if (info->csize_primary_DL_binary <= 0)
+        {
+            continue;
+        }
+
+        dx = bgModMoveAnywhereGapFromBgBoundsWorld(pos->x,
+            info->minbounds.x, info->maxbounds.x);
+        dz = bgModMoveAnywhereGapFromBgBoundsWorld(pos->z,
+            info->minbounds.z, info->maxbounds.z);
+        dy = bgModMoveAnywhereGapFromBgBoundsWorld(pos->y,
+            info->minbounds.y, info->maxbounds.y);
+
+        /* This is a visibility anchor, not a new world-space collision map.
+         * Reject distant boxes instead of seeding unrelated rooms. */
+        if (dx > 40.0f || dz > 40.0f || dy > 100.0f)
+        {
+            continue;
+        }
+
+        score = dx * dx + dz * dz + dy * dy
+            + (info->maxbounds.x - info->minbounds.x
+                + info->maxbounds.z - info->minbounds.z)
+                * room_data_float2 * 0.002f;
+        if (room == previous)
+        {
+            score -= 32.0f;
+        }
+
+        if (score < bestscore)
+        {
+            best = room;
+            bestscore = score;
+        }
+    }
+
+    return best;
+}
+
+/* Move Anywhere R7: nearby geometric rooms are not necessarily connected to
+ * Bond's last STAN room. Nominate a small, ordered set from the existing
+ * persistent room bounds, without loading rooms or retaining geometry pointers.
+ * The caller decides whether to render or raycast the nominated rooms. */
+s32 bgModMoveAnywhereFindNearbyGeometryRooms(coord3d *pos, s32 skiproom1,
+    s32 skiproom2, s32 *rooms, s32 maxrooms)
+{
+    f32 scores[3];
+    s32 count = 0;
+    s32 room;
+    s32 i;
+
+    if (pos == NULL || rooms == NULL || maxrooms <= 0)
+    {
+        return 0;
+    }
+
+    if (maxrooms > 3)
+    {
+        maxrooms = 3;
+    }
+
+    for (room = 1; room < g_MaxNumRooms && room < 0xff; room++)
+    {
+        s_room_info *info = &g_BgRoomInfo[room];
+        f32 dx = 0.0f;
+        f32 dy = 0.0f;
+        f32 dz = 0.0f;
+        f32 score;
+        s32 slot;
+
+        if (room == skiproom1 || room == skiproom2
+            || info->csize_primary_DL_binary <= 0)
+        {
+            continue;
+        }
+
+        dx = bgModMoveAnywhereGapFromBgBoundsWorld(pos->x,
+            info->minbounds.x, info->maxbounds.x);
+        dz = bgModMoveAnywhereGapFromBgBoundsWorld(pos->z,
+            info->minbounds.z, info->maxbounds.z);
+        dy = bgModMoveAnywhereGapFromBgBoundsWorld(pos->y,
+            info->minbounds.y, info->maxbounds.y);
+
+        /* Only bridge/ledge transition neighbors, never remote portal rooms. */
+        if (dx > 90.0f || dz > 90.0f || dy > 140.0f)
+        {
+            continue;
+        }
+
+        score = dx * dx + dz * dz + dy * dy * 0.1f
+            + (info->maxbounds.x - info->minbounds.x
+                + info->maxbounds.z - info->minbounds.z)
+                * room_data_float2 * 0.002f;
+
+        for (slot = 0; slot < count; slot++)
+        {
+            if (score < scores[slot])
+            {
+                break;
+            }
+        }
+
+        if (slot >= maxrooms)
+        {
+            continue;
+        }
+
+        if (count < maxrooms)
+        {
+            count++;
+        }
+
+        for (i = count - 1; i > slot; i--)
+        {
+            rooms[i] = rooms[i - 1];
+            scores[i] = scores[i - 1];
+        }
+
+        rooms[slot] = room;
+        scores[slot] = score;
+    }
+
+    return count;
+}
 
 static coord3d *bgGetVisibilityOrigin(void)
 {
@@ -1244,7 +1452,15 @@ void load_bg_file(LEVEL_INDEX levelid)
     ptr_bg_data = (s32) mempAllocBytesInBank(size, 4);
     obLoadBGFileBytesAtOffset(levelinfotable[levelentry_index].bg_seg_filename, (u8 *) ptr_bg_data, 0, size);
  
-    gptr_stan = (s32) _fileNameLoadToBank(levelinfotable[levelentry_index].bg_stan_filename, 2, 0, 4);
+    /* Select an alternate STAN before allocating/loading it.  Runtime tile
+     * replacement after stanLoadFile would invalidate collision links and room
+     * bounds, and allocating both 90 KiB STANs would waste stage memory. */
+#ifdef GE_MODDED_CHEATS
+    if (levelModifiersDamIslandShouldLoad(levelid))
+        gptr_stan = (s32)fileIndexLoadToBank(BG_DAM_ISLAND_FIXED_STAN, 2, 0, 4);
+    else
+#endif
+        gptr_stan = (s32)_fileNameLoadToBank(levelinfotable[levelentry_index].bg_stan_filename, 2, 0, 4);
 #ifdef GE_MODDED_CHEATS
     levelModifiersOnStanLoaded(levelid, (u8 *)gptr_stan);
 #endif
@@ -1328,6 +1544,14 @@ void load_bg_file(LEVEL_INDEX levelid)
             }
         }
  
+#ifdef GE_MODDED_CHEATS
+        for (i = 0; i < 4; i++)
+        {
+            g_ModMoveAnywhereBgRooms[i] = 0;
+            g_ModMoveAnywhereSupportRooms[i] = 0;
+        }
+#endif
+
         for (i = 1; i < g_MaxNumRooms; i++)
         {
             g_BgRoomInfo[i].model_bin_loaded = 0;
@@ -1618,6 +1842,87 @@ void bgRoomVisibilityRelated(void)
     }
 
     g_BgCurrentRoom = room;
+
+#ifdef GE_MODDED_CHEATS
+    {
+        s32 playernum = get_cur_playernum();
+
+        if ((u32)playernum < 4)
+        {
+            if (modMoveAnywhereEnabled()
+                && g_CurrentPlayer != NULL
+                && g_CurrentPlayer->prop != NULL
+                && g_CurrentPlayer->field_488.current_tile_ptr != NULL
+                && !g_PlayerIsInTank
+                && (cammode == CAMERAMODE_FP || cammode == CAMERAMODE_MP))
+            {
+                coord3d feet = g_CurrentPlayer->field_488.collision_position;
+                s32 owner = g_ModMoveAnywhereSupportRooms[playernum];
+                feet.y = g_CurrentPlayer->field_70 + 12.0f;
+
+                /* An old ground triangle cannot own a free-flight or
+                 * No-Clipping position. Let the existing scaled room-bounds
+                 * lookup choose the camera's current geometry room instead. */
+                if (cheatIsActive(CHEAT_NO_CLIPPING)
+                    || cheatIsActive(CHEAT_FLY_MODE))
+                {
+                    owner = 0;
+                    g_ModMoveAnywhereSupportRooms[playernum] = 0;
+                }
+
+                /* Prefer the room of the *actual hit triangle* when a near-
+                 * feet floor ray establishes it. Bounds-only selection can
+                 * otherwise choose the wrong floor of an overlapping tower.
+                 * Verify the room still surrounds Bond before honoring the
+                 * cached contact after teleporting or stepping off a ledge. */
+                if (owner > 0 && owner < g_MaxNumRooms)
+                {
+                    s_room_info *info = &g_BgRoomInfo[owner];
+                    if (info->csize_primary_DL_binary <= 0
+                        || bgModMoveAnywhereGapFromBgBoundsWorld(feet.x,
+                            info->minbounds.x, info->maxbounds.x) > 40.0f
+                        || bgModMoveAnywhereGapFromBgBoundsWorld(feet.z,
+                            info->minbounds.z, info->maxbounds.z) > 40.0f
+                        || bgModMoveAnywhereGapFromBgBoundsWorld(feet.y,
+                            info->minbounds.y, info->maxbounds.y) > 100.0f)
+                    {
+                        owner = 0;
+                        g_ModMoveAnywhereSupportRooms[playernum] = 0;
+                    }
+                }
+
+                if (owner > 0)
+                {
+                    g_ModMoveAnywhereBgRooms[playernum] = (u8)owner;
+                }
+                else
+                {
+                    g_ModMoveAnywhereBgRooms[playernum] =
+                        (u8)bgModMoveAnywhereFindNearbyRoom(
+                            &feet, g_ModMoveAnywhereBgRooms[playernum]);
+                }
+
+                /* Move Anywhere R6: request its geometric support room before
+                 * normal visibility/rendering consumes the room-load budget.
+                 * Preserve at least one load for the ordinary renderer.
+                 * The existing loader owns the allocation and failure path. */
+                owner = g_ModMoveAnywhereBgRooms[playernum];
+                if (owner > 0 && owner < g_MaxNumRooms
+                    && g_BgRoomInfo[owner].model_bin_loaded == 0
+                    && g_RoomLoadBudget > 1)
+                {
+                    g_RoomLoadBudget--;
+                    bgLoadRoomModelData(owner);
+                }
+            }
+            else
+            {
+                g_ModMoveAnywhereBgRooms[playernum] = 0;
+                g_ModMoveAnywhereSupportRooms[playernum] = 0;
+            }
+        }
+    }
+#endif
 
 #ifdef GE_MODDED_CHEATS
     /* Third Person visibility is camera-space, not player-space.
@@ -3305,6 +3610,32 @@ void bgRoomsTickUnload(void)
 
     for(i = 1; i < g_MaxNumRooms; i++)
     {
+#ifdef GE_MODDED_CHEATS
+        /* Keep exactly the room(s) supporting a Move Anywhere viewport
+         * in the existing dynamic room cache. If the option is switched off
+         * they resume the stock aging/unload policy automatically. */
+        if (modMoveAnywhereEnabled()
+            && g_BgRoomInfo[i].model_bin_loaded)
+        {
+            s32 playernum;
+            s32 is_support_room = FALSE;
+
+            for (playernum = 0; playernum < 4; playernum++)
+            {
+                if (g_ModMoveAnywhereBgRooms[playernum] == i)
+                {
+                    is_support_room = TRUE;
+                    break;
+                }
+            }
+
+            if (is_support_room)
+            {
+                g_BgRoomInfo[i].model_bin_loaded = 1;
+                continue;
+            }
+        }
+#endif
         if (g_BgRoomInfo[i].field_35 == 0)
         {
             if (g_BgRoomInfo[i].model_bin_loaded == 4)
@@ -3709,7 +4040,30 @@ bool bgTestRayIntersectsBbox(coord3d *origin, coord3d *dir, s32 *bbox_min, s32 *
 }
 
 
-bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomVtxBatchBounds *point, s32 roomnum, struct HitThing *hitthing)
+#ifdef GE_MODDED_CHEATS
+/* Move Anywhere uses a floor-only query. Filter at the individual triangle,
+ * before a batch decides which hit wins, so a steep face cannot hide ground
+ * behind it. The original bullet collision API remains unfiltered. */
+static bool bgModMoveAnywhereFloorHitEligible(HitThing *hit,
+    coord3d *from, coord3d *to)
+{
+    f32 nx = hit->normal.x;
+    f32 ny = hit->normal.y;
+    f32 nz = hit->normal.z;
+    f32 norm2 = nx * nx + ny * ny + nz * nz;
+
+    return norm2 > 0.0f && ny * ny >= norm2 * 0.0625f
+        && hit->hitpos.y <= from->y
+        && hit->hitpos.y >= to->y - 0.5f * room_data_float1;
+}
+
+static bool bgTestRayIntersectionInRoomFloorMode(coord3d *from, coord3d *to,
+    coord3d *dir, RoomVtxBatchBounds *point, s32 roomnum,
+    struct HitThing *hitthing, s32 flooronly)
+#else
+bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir,
+    RoomVtxBatchBounds *point, s32 roomnum, struct HitThing *hitthing)
+#endif
 {
     Vertex *vtxbase;
     Vertex *v;
@@ -3821,7 +4175,11 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
 
                 if (bgTestRayIntersectsBbox(from, dir, (s32 *) (&bboxMin), (s32 *) (&bboxMax)))
                 {
-                    if (intersectRayTriangle((Vertex *)((s32)vtxbase - (0 - (idx[0] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx[1] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx[2] << 4))), (coord3d *) (((roomnum * 24) + ((s32) ptr_bgdata_room_fileposition_list)) + 12), from, to, dir, &hitbuf))
+                    if (intersectRayTriangle((Vertex *)((s32)vtxbase - (0 - (idx[0] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx[1] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx[2] << 4))), (coord3d *) (((roomnum * 24) + ((s32) ptr_bgdata_room_fileposition_list)) + 12), from, to, dir, &hitbuf)
+#ifdef GE_MODDED_CHEATS
+                        && (!flooronly || bgModMoveAnywhereFloorHitEligible(&hitbuf, from, to))
+#endif
+                        )
                     {
                         tcmd = gdl;
                         dx = ((s32) hitbuf.hitpos.x) - ((s32) from->x);
@@ -3829,6 +4187,9 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
                         dz = ((s32) hitbuf.hitpos.z) - ((s32) from->z);
                         dist = ((dx * dx) + (dy * dy)) + (dz * dz);
                         score = dist;
+#ifdef GE_MODDED_CHEATS
+                        if (!flooronly)
+#endif
                         found = 1;
 
                         if (((*((u8 *) gdl)) != G_SETTIMG) && (dist || vtxbase || 1) && (((Gfx *) local.roominfo->ptr_expanded_mapping_info) < gdl))
@@ -3862,7 +4223,13 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
                         if (dist);
 
                         // Texture 0x4FD is used for the light shafts that come through windows in Archives.
+#ifdef GE_MODDED_CHEATS
+                        if ((texnum != 0x4FD) && (flooronly
+                                ? (!found || hitbuf.hitpos.y > hitthing->hitpos.y)
+                                : score < bestScore))
+#else
                         if ((score < bestScore) && (texnum != 0x4FD))
+#endif
                         {
                             bestScore = score;
                             hitthing->hitpos.x = hitbuf.hitpos.x;
@@ -3877,6 +4244,10 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
                             hitthing->texturenum = texnum;
                             hitthing->tricmd = gdl;
                             hitthing->unk28 = 0;
+#ifdef GE_MODDED_CHEATS
+                            if (flooronly)
+                                found = 1;
+#endif
                         }
                     }
                 }
@@ -3959,7 +4330,11 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
 
                         if (bgTestRayIntersectsBbox(from, dir, (s32 *) (&bboxMin2), (s32 *) (&bboxMax2)))
                         {
-                            if (intersectRayTriangle((Vertex *)((s32)vtxbase - (0 - (idx2[0] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx2[1] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx2[2] << 4))), (coord3d *) (((roomnum * 24) + ((s32) ptr_bgdata_room_fileposition_list)) + 12), from, to, dir, &hitbuf))
+                            if (intersectRayTriangle((Vertex *)((s32)vtxbase - (0 - (idx2[0] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx2[1] << 4))), (Vertex *)((s32)vtxbase - (0 - (idx2[2] << 4))), (coord3d *) (((roomnum * 24) + ((s32) ptr_bgdata_room_fileposition_list)) + 12), from, to, dir, &hitbuf)
+#ifdef GE_MODDED_CHEATS
+                                && (!flooronly || bgModMoveAnywhereFloorHitEligible(&hitbuf, from, to))
+#endif
+                                )
                             {
                                 tcmd = gdl;
                                 dx = ((s32) hitbuf.hitpos.x) - ((s32) from->x);
@@ -3967,6 +4342,9 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
                                 dz = ((s32) hitbuf.hitpos.z) - ((s32) from->z);
                                 dist = ((dx * dx) + (dy * dy)) + (dz * dz);
                                 score = dist;
+#ifdef GE_MODDED_CHEATS
+                                if (!flooronly)
+#endif
                                 found = 1;
 
                                 if (((*((u8 *) gdl)) != G_SETTIMG) && (dist || vtxbase || 1) && (((Gfx *) local.roominfo->ptr_expanded_mapping_info) < gdl))
@@ -3999,7 +4377,13 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
 
                                 if ((score || dist));
 
+#ifdef GE_MODDED_CHEATS
+                                if ((texnum != 0x4FD) && (flooronly
+                                        ? (!found || hitbuf.hitpos.y > hitthing->hitpos.y)
+                                        : score < bestScore))
+#else
                                 if ((score < bestScore) && (texnum != 0x4FD))
+#endif
                                 {
                                     bestScore = score;
                                     hitthing->hitpos.x = hitbuf.hitpos.x;
@@ -4014,6 +4398,10 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
                                     hitthing->texturenum = texnum;
                                     hitthing->tricmd = gdl;
                                     hitthing->unk28 = s2 + 1;
+#ifdef GE_MODDED_CHEATS
+                                    if (flooronly)
+                                        found = 1;
+#endif
                                 }
                             }
                         }
@@ -4032,6 +4420,70 @@ bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir, RoomV
     return found;
 }
 
+
+#ifdef GE_MODDED_CHEATS
+bool bgTestRayIntersectionInRoom(coord3d *from, coord3d *to, coord3d *dir,
+    RoomVtxBatchBounds *point, s32 roomnum, struct HitThing *hitthing)
+{
+    return bgTestRayIntersectionInRoomFloorMode(from, to, dir, point,
+        roomnum, hitthing, FALSE);
+}
+
+/* This floor query traverses the same loaded BG batches as the native bullet
+ * query, but chooses the highest eligible floor triangle in the room. Unlike
+ * repeated bullet probes it does not re-run the triangle intersection math
+ * after encountering a wall or ceiling. Heights returned are world-space. */
+bool bgModMoveAnywhereFindFloorInRoom(coord3d *from, coord3d *to,
+    s32 roomnum, f32 *outheight)
+{
+    s_room_info *info = &g_BgRoomInfo[roomnum];
+    coord3d fromscaled;
+    coord3d toscaled;
+    coord3d dir;
+    HitThing hit;
+    f32 besty = 0.0f;
+    s32 found = FALSE;
+    s32 i;
+    f32 scale = room_data_float1;
+
+    if (info->vtx_batch_bounds == NULL)
+        return FALSE;
+
+    fromscaled.x = from->x * scale;
+    fromscaled.y = from->y * scale;
+    fromscaled.z = from->z * scale;
+    toscaled.x = to->x * scale;
+    toscaled.y = to->y * scale;
+    toscaled.z = to->z * scale;
+    dir.x = toscaled.x - fromscaled.x;
+    dir.y = toscaled.y - fromscaled.y;
+    dir.z = toscaled.z - fromscaled.z;
+
+    for (i = 0; i < info->num_vtx_batch_bounds; i++)
+    {
+        RoomVtxBatchBounds *bounds = &info->vtx_batch_bounds[i];
+
+        if (!bgTestRayIntersectsBbox(&fromscaled, &dir,
+                &bounds->xmin, &bounds->xmax))
+            continue;
+
+        if (!bgTestRayIntersectionInRoomFloorMode(&fromscaled, &toscaled,
+                &dir, bounds, roomnum, &hit, TRUE))
+            continue;
+
+        if (!found || hit.hitpos.y > besty)
+        {
+            besty = hit.hitpos.y;
+            found = TRUE;
+        }
+    }
+
+    if (found)
+        *outheight = besty * get_room_data_float2();
+
+    return found;
+}
+#endif
 
 /**
  * In order to make bgTestBulletHitBackground match, 4 bytes had to dropped from the regular HitThing struct.
@@ -5171,6 +5623,57 @@ void bgDetermineVisibleRooms(void)
 
             bgQueueRootRoomPortals(temp_v1, screenbounds);
         }
+
+        /* R7: the next walkable BG surface may have no traversable portal
+         * connection to the last STAN. Include up to three nearby geometry
+         * owners as supplementary roots. These are screen-culled and use the
+         * normal room-loading and display-list paths; normal gameplay is
+         * unchanged when Move Anywhere is inactive. */
+        temp_v1 = bgModMoveAnywhereRoomForCurrentPlayer();
+        if (temp_v1 > 0 && temp_v1 < g_MaxNumRooms)
+        {
+            coord3d feet = g_CurrentPlayer->field_488.collision_position;
+            s32 nearby[3];
+            s32 nearbycount;
+            s32 k;
+
+            if (temp_v1 != g_BgCurrentRoom
+                && bgIsRoomOnScreen(temp_v1, &g_CurrentPlayer->screensize))
+            {
+                sub_GAME_7F0B39BC(temp_v1, 0,
+                    &g_CurrentPlayer->screensize, 1);
+                bgQueueRootRoomPortals(temp_v1, screenbounds);
+            }
+
+            feet.y = g_CurrentPlayer->field_70 + 12.0f;
+            nearbycount = bgModMoveAnywhereFindNearbyGeometryRooms(
+                &feet, g_BgCurrentRoom, temp_v1, nearby, 3);
+
+            for (k = 0; k < nearbycount; k++)
+            {
+                s32 nearbyroom = nearby[k];
+
+                if (bgIsRoomOnScreen(nearbyroom, &g_CurrentPlayer->screensize))
+                {
+                    /* Warm at most one new neighbor per frame and reserve
+                     * one room load for ordinary portal rendering. Loaded
+                     * nearby rooms need no extra load budget. */
+                    if (g_BgRoomInfo[nearbyroom].model_bin_loaded == 0
+                        && g_RoomLoadBudget > 1)
+                    {
+                        g_RoomLoadBudget--;
+                        bgLoadRoomModelData(nearbyroom);
+                    }
+
+                    if (g_BgRoomInfo[nearbyroom].model_bin_loaded != 0)
+                    {
+                        sub_GAME_7F0B39BC(nearbyroom, 0,
+                            &g_CurrentPlayer->screensize, 1);
+                        bgQueueRootRoomPortals(nearbyroom, screenbounds);
+                    }
+                }
+            }
+        }
 #else
 #ifdef GE_PHYSICAL_FASTPATHS
         {
@@ -5219,6 +5722,113 @@ void bgDetermineVisibleRooms(void)
 #endif
     }
 
+#ifdef GE_MODDED_CHEATS
+    /* R8: local background fallback for traversal outside authored STAN.
+     * R6/R7 can prefetch a supporting room, but the global-visibility bytecode
+     * can DISABLE that room when the last valid STAN room changes. Additional
+     * portal roots alone cannot undo room_loaded_mask. Re-admit nearby,
+     * actually-on-screen rooms after the visibility script AND portal walk.
+     *
+     * Keep this tied to Move Anywhere and to Bond's local space. Do not
+     * increase the stock room-load budget, replace portal traversal, retain
+     * streamed pointers, or allocate new persistent geometry state. */
+    if (modMoveAnywhereEnabled()
+        && g_CurrentPlayer != NULL
+        && g_CurrentPlayer->prop != NULL
+        && g_CurrentPlayer->field_488.current_tile_ptr != NULL
+        && !g_PlayerIsInTank)
+    {
+        coord3d feet = g_CurrentPlayer->field_488.collision_position;
+        s32 rooms[8];
+        f32 distances[8];
+        s32 count = 0;
+        s32 room;
+        s32 slot;
+        s32 j;
+
+        feet.y = g_CurrentPlayer->field_70 + 12.0f;
+
+        /* Examine all authored room bounds: selecting only three (R7)
+         * can omit a bridge room when several large bounds overlap Bond. */
+        for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++)
+        {
+            s_room_info *info = &g_BgRoomInfo[room];
+            f32 dx = 0.0f;
+            f32 dy = 0.0f;
+            f32 dz = 0.0f;
+            f32 score;
+
+            if ((info->csize_primary_DL_binary <= 0
+                && info->csize_secondary_DL_binary <= 0)
+                || (info->room_rendered && !info->room_loaded_mask))
+            {
+                continue;
+            }
+
+            dx = bgModMoveAnywhereGapFromBgBoundsWorld(feet.x,
+                info->minbounds.x, info->maxbounds.x);
+            dy = bgModMoveAnywhereGapFromBgBoundsWorld(feet.y,
+                info->minbounds.y, info->maxbounds.y);
+            dz = bgModMoveAnywhereGapFromBgBoundsWorld(feet.z,
+                info->minbounds.z, info->maxbounds.z);
+
+            /* This is deliberately conservative: the original eight-corner
+             * screen test can reject a BG room which encloses/intersects the
+             * camera's near plane. Limit this override to Bond's actual local
+             * WORLD-space vicinity and retain the eight-room list cap. */
+            if (dx > 240.0f || dz > 240.0f || dy > 180.0f)
+            {
+                continue;
+            }
+
+            score = dx * dx + dz * dz + dy * dy * 0.1f
+                + (info->maxbounds.x - info->minbounds.x
+                    + info->maxbounds.z - info->minbounds.z)
+                    * room_data_float2 * 0.002f;
+
+            for (slot = 0; slot < count; slot++)
+            {
+                if (score < distances[slot])
+                {
+                    break;
+                }
+            }
+            if (slot >= 8)
+            {
+                continue;
+            }
+            if (count < 8)
+            {
+                count++;
+            }
+            for (j = count - 1; j > slot; j--)
+            {
+                rooms[j] = rooms[j - 1];
+                distances[j] = distances[j - 1];
+            }
+            rooms[slot] = room;
+            distances[slot] = score;
+        }
+
+        for (j = 0; j < count; j++)
+        {
+            room = rooms[j];
+
+            /* The US list has 124 entries. Leave four for the original
+             * renderer's margins and do not append when already near full. */
+            if (g_BgNumberOfRoomsDrawn >= 120)
+            {
+                break;
+            }
+
+            /* The authored visibility bytecode may have masked this room
+             * based on the last STAN room. For Move Anywhere only, allow
+             * genuinely nearby geometry through the final draw-list gate. */
+            g_BgRoomInfo[room].room_loaded_mask = 0;
+            sub_GAME_7F0B39BC(room, 0, &g_CurrentPlayer->screensize, 1);
+        }
+    }
+#endif
 
 #ifdef GE_PHYSICAL_FASTPATHS
     for (var_s0 = 0; var_s0 < g_BgFastPortalCount; var_s0++)

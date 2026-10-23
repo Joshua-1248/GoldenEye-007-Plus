@@ -41,6 +41,7 @@
 #ifdef GE_MODDED_CHEATS
 #include "game/mirroredlevels.h"
 #include "game/options.h"
+#include "game/mp_music.h"
 #endif
 #include "PR/R4300.h"
 
@@ -428,6 +429,9 @@ void bossMainloop(void)
             tokenSetString(memallocstringtable[stringIndex].string);
         }
 
+#ifdef GE_MODDED_CHEATS
+        modWatchThemeStageReset();
+#endif
         mempResetBank(MEMPOOL_STAGE);
         obBlankResourcesLoadedInBank(MEMPOOL_STAGE);
         if (tokenFind(1, "-ma"))

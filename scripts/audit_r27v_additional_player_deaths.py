@@ -53,8 +53,21 @@ ck("packed labels are exact and scratch grew only in BSS",
 
 ck("main Special Options renders Enhancements after Experimental",
    "page2labels[10] = {12,13,14,15,30,16,8,29,74,76}" in FR
-   and "s32 count = g_ModOptionsPage ? 10 : 11;" in FR
-   and "s32 maxrow = g_ModOptionsPage ? 9 : 10;" in FR
+   and (("s32 count = g_ModOptionsPage ? 10 : 11;" in FR
+         and "s32 maxrow = g_ModOptionsPage ? 9 : 10;" in FR)
+        or ("s32 count = g_ModOptionsPage ? 11 : 11;" in FR
+            and "s32 maxrow = g_ModOptionsPage ? 10 : 10;" in FR
+            and "g_ModOptionsPage && row == 10" in FR
+            and "g_ModWatchThemeSelecting = TRUE;" in FR
+            and 'g_ModOptionsPage && i == 10 ? "Watch Menu Theme"' in FR)
+        or ("s32 count = g_ModOptionsPage ? 12 : 11;" in FR
+            and "s32 maxrow = g_ModOptionsPage ? 11 : 10;" in FR
+            and "g_ModOptionsPage && row == 10" in FR
+            and "g_ModMainMenuThemeSelecting = TRUE;" in FR
+            and "g_ModOptionsPage && row == 11" in FR
+            and "g_ModWatchThemeSelecting = TRUE;" in FR
+            and 'g_ModOptionsPage && i == 10 ? "Main Menu Theme"' in FR
+            and 'g_ModOptionsPage && i == 11 ? "Watch Menu Theme"' in FR))
    and "MENU_ENHANCEMENTS_OPTIONS" in BC
    and "row == 9" in FR
    and "frontChangeMenu(MENU_ENHANCEMENTS_OPTIONS, FALSE);" in FR
@@ -73,7 +86,7 @@ ck("Experimental, Enhancements and Additional Death Animations share compact wra
    and FR.count("tab_prev_highlight = FALSE; load_walletbond();") == 3)
 
 ck("SP Watch Enhancements is three deferred-save rows before Cheats",
-   "#define MODWATCH_OPTION_ROWS 18" in O
+   ("#define MODWATCH_OPTION_ROWS 18" in O or (("#define MODWATCH_OPTION_ROWS 19" in O or ("#define MODWATCH_OPTION_ROWS 20" in O and "row == 19 + (gamemode == GAMEMODE_MULTI)" in O and '"Main Menu Theme"' in O)) and "row == 18 + (gamemode == GAMEMODE_MULTI)" in O and '"Watch Menu Theme"' in O))
    and "#define MODWATCH_MODE_ENHANCEMENTS 0x700" in O
    and "#define MODWATCH_ENHANCEMENTS_ROWS 3" in O
    and "MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS;" in O
@@ -82,7 +95,7 @@ ck("SP Watch Enhancements is three deferred-save rows before Cheats",
    and "g_ModWatchSettingsDirty = TRUE;" in O)
 
 ck("SP Watch parent order is Debug 14 / Experimental 15 / Enhancements 16 / Cheats 17",
-   "#define MODWATCH_OPTION_ROWS 18" in O
+   ("#define MODWATCH_OPTION_ROWS 18" in O or (("#define MODWATCH_OPTION_ROWS 19" in O or ("#define MODWATCH_OPTION_ROWS 20" in O and "row == 19 + (gamemode == GAMEMODE_MULTI)" in O and '"Main Menu Theme"' in O)) and "row == 18 + (gamemode == GAMEMODE_MULTI)" in O and '"Watch Menu Theme"' in O))
    and "row == 14" in O
    and "MODWATCH_STATE = MODWATCH_MODE_DEBUG;" in O
    and "row == 15" in O

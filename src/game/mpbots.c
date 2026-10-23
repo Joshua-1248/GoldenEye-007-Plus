@@ -195,6 +195,7 @@ struct ModMpBotRuntime
     u8 ismeleeweapon;
     u8 inventorycount;
     u8 pad3;
+    u8 weaponanimreset;
     s32 loadedammo[2];
     s16 timeuntilreload60[2];
     s16 nextbullettimer60[2];
@@ -767,6 +768,7 @@ void modMpBotsResetRuntime(void)
         runtime->punchtimer60[GUNRIGHT] = 0;
         runtime->punchtimer60[GUNLEFT] = -1;
         runtime->changeguntimer60 = 0;
+        runtime->weaponanimreset = FALSE;
         runtime->throwtimer60 = 0;
         runtime->burstsdone[GUNRIGHT] = 0;
         runtime->burstsdone[GUNLEFT] = 0;
@@ -2120,6 +2122,7 @@ static s32 modMpBotsSpawn(s32 slot)
     runtime->punchtimer60[GUNRIGHT] = 0;
     runtime->punchtimer60[GUNLEFT] = -1;
     runtime->changeguntimer60 = 0;
+    runtime->weaponanimreset = FALSE;
     runtime->throwtimer60 = 0;
     runtime->burstsdone[GUNRIGHT] = 0;
     runtime->burstsdone[GUNLEFT] = 0;
@@ -3011,6 +3014,16 @@ static void modMpBotsPdReleaseHeldHand(ChrRecord *chr, s32 hand)
 
     obj = held->obj;
 
+    /* chr->field_20 is the last rendered model hit-entry chain, including
+     * attached held-weapon models.  Its weapon entries must not survive
+     * destruction of their Model instances.  The next normal chr render
+     * reconstructs the chain from the currently attached meshes. */
+    if (chr->field_20 != NULL)
+    {
+        sub_GAME_7F06B248(chr->field_20);
+        chr->field_20 = NULL;
+    }
+
     /* Canonical GE ownership transition; never null weapons_held manually. */
     objDetach(held);
 
@@ -3066,6 +3079,9 @@ static s32 modMpBotsPdSwitchToWeapon(s32 slot, ITEM_IDS item)
         runtime->weaponnum = item;
         runtime->gunfunc = MODBOT_PD_FUNC_PRIMARY;
         runtime->changeguntimer60 = 60;
+        /* A new held-weapon pose must not blend through the old one.
+         * Keep the PD firing lockout timer separate from presentation. */
+        runtime->weaponanimreset = TRUE;
         /* Switching weapons cancels any pending melee swing/impact. */
         runtime->punchtimer60[GUNRIGHT] = 0;
         runtime->punchtimer60[GUNLEFT] = -1;
@@ -3082,6 +3098,13 @@ static s32 modMpBotsPdSwitchToWeapon(s32 slot, ITEM_IDS item)
     }
 
     if (item == ITEM_UNARMED)
+        return TRUE;
+
+    /* PD botinvSwitchToWeapon releases the old mesh immediately, then
+     * bot_tick_unpaused materializes the replacement when its 60-tick
+     * changeguntimer60 reaches zero. Do not attach a new weapon during the
+     * transition, when the model is still using the unarmed pose. */
+    if (runtime->changeguntimer60 > 0)
         return TRUE;
 
     if (runtime->chr->weapons_held[GUNRIGHT] == NULL)
@@ -3193,7 +3216,9 @@ static void modMpBotsCoopGiveIntroLoadout(s32 slot)
     if (starting != ITEM_UNARMED)
     {
         modMpBotsPdSwitchToWeapon(slot, starting);
+        /* Co-Op intro equipment exists at spawn, not after a live switch. */
         runtime->changeguntimer60 = 0;
+        modMpBotsPdSwitchToWeapon(slot, starting);
     }
 }
 
@@ -3212,6 +3237,13 @@ static void modMpBotsPdBotInvTick(s32 slot)
         runtime->random1ttl60 = 120 + (s32)(randomGetNext() % 600U);
         runtime->random1 = randomGetNext();
     }
+
+    /* A switch is a single 60-tick inventory transition. Do not keep
+     * reselecting and rematerializing held-weapon meshes while it is active.
+     * Unarmed fallback remains available if the chosen weapon disappeared. */
+    if (runtime->changeguntimer60 > 0 && runtime->weaponnum != ITEM_UNARMED
+        && modMpBotsPdInventoryHas(runtime, runtime->weaponnum))
+        return;
 
     /* PeaceSim keeps its current weapon in PD. GE has no secondary function. */
     if (modMpBotHasTrait(slot, MODBOT_TRAIT_PACIFIST))
@@ -3778,9 +3810,6 @@ static void modMpBotsPdTickGunfire(s32 slot)
         if (runtime->nextbullettimer60[hand] > 0)
             runtime->nextbullettimer60[hand] -= g_ClockTimer;
     }
-
-    if (runtime->changeguntimer60 > 0)
-        runtime->changeguntimer60 -= g_ClockTimer;
 
     modMpBotsPdTickReload(slot);
 
@@ -5649,6 +5678,21 @@ static void modMpBotsPdTickCore(s32 slot)
 
     /* PD botinv_tick precedes the two-hand combat loop in bot_tick_unpaused. */
     modMpBotsPdBotInvTick(slot);
+
+    /* Weapon drawing is independent of firing and melee. The timer must
+     * expire even for a Sniper buttstock, Slappers, or a Co-Op ally in follow
+     * mode with no combat target; otherwise the new mesh never materializes. */
+    if (runtime->changeguntimer60 > 0)
+    {
+        runtime->changeguntimer60 -= g_ClockTimer;
+        if (runtime->changeguntimer60 <= 0)
+        {
+            runtime->changeguntimer60 = 0;
+            modMpBotsPdSwitchToWeapon(slot, runtime->weaponnum);
+            runtime->weaponanimreset = TRUE;
+        }
+    }
+
     if (!(scenario == SCENARIO_COOP && runtime->targetprop != NULL
         && runtime->targetprop->type == PROP_TYPE_VIEWER))
         modMpBotsPdCombatTick(slot);
@@ -5759,13 +5803,17 @@ static void modMpBotsApplyPlayerAnimation(s32 slot)
     amount *= fa->x;
     cur = objecthandlerGetModelAnim(chr->model);
 
-    if (cur != anim && chr->model->anim2 == NULL)
+    if (runtime->weaponanimreset || (cur != anim && chr->model->anim2 == NULL))
     {
         startframe = fa->y >= 0.0f ? fa->y : 0.0f;
         if (amount < 0.0f && fa->y < 0.0f)
             startframe = anim->unk04 - 1.0f;
 
-        modelSetAnimation(chr->model, anim, 0, startframe, amount, 16.0f);
+        /* Clearing an incompatible old unarmed/weapon blend is cosmetic: it
+         * must not change the inventory or 60-tick weapon-switch lockout. */
+        modelSetAnimation(chr->model, anim, 0, startframe, amount,
+            runtime->weaponanimreset ? 0.0f : 16.0f);
+        runtime->weaponanimreset = FALSE;
         if (fa->y >= 0.0f)
             modelSetAnimLooping(chr->model, fa->y, 16.0f);
         if (fa->z >= 0.0f)

@@ -151,15 +151,28 @@ ck("packed label 73 is Melee Quick-Swap and 52 remains Enemy Bullet Holes",
 
 ck("main-menu Melee Quick-Swap is owned by Enhancements after submenu compaction",
    "page2labels[10] = {12,13,14,15,30,16,8,29,74,76}" in FR
-   and "g_ModOptionsPage ? 10 : 11" in FR
-   and "g_ModOptionsPage ? 9 : 10" in FR
+   and (("g_ModOptionsPage ? 10 : 11" in FR
+         and "g_ModOptionsPage ? 9 : 10" in FR)
+        or ("g_ModOptionsPage ? 11 : 11" in FR
+            and "g_ModOptionsPage ? 10 : 10" in FR
+            and "g_ModOptionsPage && row == 10" in FR
+            and "g_ModWatchThemeSelecting = TRUE;" in FR
+            and 'g_ModOptionsPage && i == 10 ? "Watch Menu Theme"' in FR)
+        or ("s32 count = g_ModOptionsPage ? 12 : 11;" in FR
+            and "s32 maxrow = g_ModOptionsPage ? 11 : 10;" in FR
+            and "g_ModOptionsPage && row == 10" in FR
+            and "g_ModMainMenuThemeSelecting = TRUE;" in FR
+            and "g_ModOptionsPage && row == 11" in FR
+            and "g_ModWatchThemeSelecting = TRUE;" in FR
+            and 'g_ModOptionsPage && i == 10 ? "Main Menu Theme"' in FR
+            and 'g_ModOptionsPage && i == 11 ? "Watch Menu Theme"' in FR))
    and 'frontModGetOptionLabel(73)' in FR
    and 'g_ModMeleeQuickSwapEnabled ? "On" : "Off"' in FR
    and "MENU_EXPERIMENTAL_OPTIONS" in FR
    and "MENU_ENHANCEMENTS_OPTIONS" in FR)
 
 ck("SP Watch keeps direct Melee row and all submenu hierarchy",
-   "#define MODWATCH_OPTION_ROWS 18" in O
+   ("#define MODWATCH_OPTION_ROWS 18" in O or (("#define MODWATCH_OPTION_ROWS 19" in O or ("#define MODWATCH_OPTION_ROWS 20" in O and "row == 19 + (gamemode == GAMEMODE_MULTI)" in O and '"Main Menu Theme"' in O)) and "row == 18 + (gamemode == GAMEMODE_MULTI)" in O and '"Watch Menu Theme"' in O))
    and "frontModGetOptionLabel(73)" in O
    and "MODWATCH_MODE_PATCHES" in O
    and "MODWATCH_MODE_TP_OPTIONS" in O

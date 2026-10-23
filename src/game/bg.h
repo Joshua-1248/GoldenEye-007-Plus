@@ -199,6 +199,10 @@ bool bgRoomsSharePortal(s32 roomA, s32 roomB);
 s32 bgCopyVisibleRoomsToList(s32 *rooms, s32 max);
 u32 bgDecompress(u8* source, u8 *target);
 bool bgTestBulletHitBackground(coord3d *from, coord3d *to, s32 roomnum, struct HitThing *hit);
+#ifdef GE_MODDED_CHEATS
+bool bgModMoveAnywhereFindFloorInRoom(coord3d *from, coord3d *to,
+    s32 roomnum, f32 *outheight);
+#endif
 void delete_room_data(s32 roomID);
 void load_bg_file(LEVEL_INDEX stagenum);
 
@@ -237,6 +241,10 @@ void bgRoomCalcBB(s32 room);
 #ifdef GE_MODDED_CHEATS
 void bgModBeginRoomRenderFrame(s32 bufferindex);
 void bgModPinRoomForFrame(s32 room);
+s32 bgModMoveAnywhereRoomForCurrentPlayer(void);
+void bgModMoveAnywhereSetSupportingRoom(s32 room);
+s32 bgModMoveAnywhereFindNearbyGeometryRooms(coord3d *pos, s32 skiproom1,
+    s32 skiproom2, s32 *rooms, s32 maxrooms);
 void bgModGarbageCollectRoomsForLoad(s32 bytesneeded);
 #endif
 

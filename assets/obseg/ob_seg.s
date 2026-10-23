@@ -960,6 +960,13 @@ obseg_file_Z chr, CheadtegguyZ
 /* Goldfinger 64: additive Hall-of-Famers head models. */
 obseg_file_Z chr, CheadgfsubdragZ
 obseg_file_Z chr, CheadgftrevorZ
+
+/* Dam Island Fixed Collisions (Mark Kane / Wreck derived STAN).
+ * Keep appended physical resource order equal to file_resource_table. */
+.global Tbg_dam_island_stanZ
+Tbg_dam_island_stanZ:
+.incbin "assets/obseg/stan/Tbg_dam_island_stanZ.rz"
+.balign 16
 #endif
 
 .global ob__ob_end_seg

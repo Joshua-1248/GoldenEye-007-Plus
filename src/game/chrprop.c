@@ -1995,9 +1995,13 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     s32 tpactive;
     s32 tpReticleValid;
     s32 tpReticleLocked;
+    s32 tpContactWallBlocked;
+    s32 tpContactWallRoom;
     s32 tpLaserStableMuzzleRay;
     s32 tpBeamVisualOriginValid;
     coord3d tpBeamVisualOrigin;
+    coord3d tpContactWallSource;
+    HitThing tpContactWallHit;
     TpThirdPersonReticleResult tpReticle;
 #endif
 
@@ -2012,6 +2016,7 @@ void chraiDefaultWeaponFireHandler(s32 hand)
     tpactive = modThirdPersonActive(get_cur_playernum());
     tpReticleValid = FALSE;
     tpReticleLocked = FALSE;
+    tpContactWallBlocked = FALSE;
     tpLaserStableMuzzleRay = FALSE;
     tpBeamVisualOriginValid = FALSE;
     if (tpactive)
@@ -2146,6 +2151,44 @@ void chraiDefaultWeaponFireHandler(s32 hand)
             shotdata.gunpos.x = camorigin.x + exactworlddir.x * depth;
             shotdata.gunpos.y = camorigin.y + exactworlddir.y * depth;
             shotdata.gunpos.z = camorigin.z + exactworlddir.z * depth;
+        }
+
+        /* A surface selected by the exact camera reticle may be closer than
+         * the projected muzzle-depth start.  Starting a forward ray beyond
+         * that surface skips it entirely, even though the crosshair is on it.
+         * Move only the origin back along the SAME reticle axis, just outside
+         * the selected surface.  The shot keeps GE's original spread and is
+         * still resolved by the real BG/model hit routines below.  Do not
+         * apply this to weapon-side blocker points, which need not lie on the
+         * camera ray, or to tank-mounted gun origins. */
+        if (g_PlayerIsInTank == 0 && tpReticleValid
+                && !tpReticle.weaponblocked && tpReticle.kind != 0)
+        {
+            coord3d tosurface;
+            f32 surfacedepth;
+            f32 shotdepth;
+
+            tosurface.x = tpReticle.point.x - camorigin.x;
+            tosurface.y = tpReticle.point.y - camorigin.y;
+            tosurface.z = tpReticle.point.z - camorigin.z;
+            surfacedepth = tosurface.x * exactworlddir.x
+                         + tosurface.y * exactworlddir.y
+                         + tosurface.z * exactworlddir.z;
+
+            tosurface.x = shotdata.gunpos.x - camorigin.x;
+            tosurface.y = shotdata.gunpos.y - camorigin.y;
+            tosurface.z = shotdata.gunpos.z - camorigin.z;
+            shotdepth = tosurface.x * exactworlddir.x
+                      + tosurface.y * exactworlddir.y
+                      + tosurface.z * exactworlddir.z;
+
+            if (surfacedepth > 4.0f && shotdepth >= surfacedepth - 1.0f)
+            {
+                f32 safe = surfacedepth - 4.0f;
+                shotdata.gunpos.x = camorigin.x + exactworlddir.x * safe;
+                shotdata.gunpos.y = camorigin.y + exactworlddir.y * safe;
+                shotdata.gunpos.z = camorigin.z + exactworlddir.z * safe;
+            }
         }
 
         if (g_PlayerIsInTank == 0 && shotdata.weapon == ITEM_LASER)
@@ -2291,35 +2334,60 @@ void chraiDefaultWeaponFireHandler(s32 hand)
 
                 if (locklen > 0.001f)
                 {
-                    lockdir.x = dx / locklen;
-                    lockdir.y = dy / locklen;
-                    lockdir.z = dz / locklen;
+                    HitThing contactbg;
+                    s32 contactroom;
+                    f32 contactfrac;
+                    s32 occluded;
 
-                    shotdata.gunpos = lockorigin;
-                    shotdata.dir = lockdir;
-                    shotdata.viewOrigin = lockorigin;
-                    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
-                            &shotdata.viewOrigin);
-                    shotdata.viewDir = lockdir;
-                    mtx4RotateVecInPlace(camGetWorldToScreenMtxf(),
-                            &shotdata.viewDir);
+                    /* Contact lock skips the normal BG candidate pass.  It
+                     * must not claim a target behind a real wall between the
+                     * hand/muzzle and that target.  Carry a closer wall hit
+                     * into the same physical impact/tracer path used below,
+                     * rather than silently discarding the candidate. */
+                    occluded = chrpropThirdPersonBgSegmentHit(&lockorigin,
+                            &tpReticle.point, &contactbg, &contactroom,
+                            &contactfrac)
+                            && contactfrac < 0.995f;
 
-                    for (i_hit = 0; i_hit < 10; i_hit++)
+                    if (occluded)
                     {
-                        shotdata.hits[i_hit].prop = NULL;
-                        shotdata.hits[i_hit].hitpart = 0;
-                        shotdata.hits[i_hit].node = 0;
+                        tpContactWallBlocked = TRUE;
+                        tpContactWallSource = lockorigin;
+                        tpContactWallHit = contactbg;
+                        tpContactWallRoom = contactroom;
                     }
+                    else
+                    {
+                        lockdir.x = dx / locklen;
+                        lockdir.y = dy / locklen;
+                        lockdir.z = dz / locklen;
 
-                    shotdata.hits[0] = tpReticle.hit;
-                    targetview = tpReticle.point;
-                    mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
-                            &targetview);
-                    shotdata.hits[0].dist = -targetview.z;
-                    shotdata.maxdist = -targetview.z + 1.0f;
-                    if (shotdata.maxdist < 0.0f) shotdata.maxdist = 0.0f;
+                        shotdata.gunpos = lockorigin;
+                        shotdata.dir = lockdir;
+                        shotdata.viewOrigin = lockorigin;
+                        mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
+                                &shotdata.viewOrigin);
+                        shotdata.viewDir = lockdir;
+                        mtx4RotateVecInPlace(camGetWorldToScreenMtxf(),
+                                &shotdata.viewDir);
 
-                    tpReticleLocked = TRUE;
+                        for (i_hit = 0; i_hit < 10; i_hit++)
+                        {
+                            shotdata.hits[i_hit].prop = NULL;
+                            shotdata.hits[i_hit].hitpart = 0;
+                            shotdata.hits[i_hit].node = 0;
+                        }
+
+                        shotdata.hits[0] = tpReticle.hit;
+                        targetview = tpReticle.point;
+                        mtx4TransformVecInPlace(camGetWorldToScreenMtxf(),
+                                &targetview);
+                        shotdata.hits[0].dist = -targetview.z;
+                        shotdata.maxdist = -targetview.z + 1.0f;
+                        if (shotdata.maxdist < 0.0f) shotdata.maxdist = 0.0f;
+
+                        tpReticleLocked = TRUE;
+                    }
                 }
             }
         }
@@ -2554,7 +2622,18 @@ void chraiDefaultWeaponFireHandler(s32 hand)
          * V57 segment could cut through a window sill/floor even while the
          * visible weapon was already above the opening.
          */
-        if (g_PlayerIsInTank == 0 && g_ModTpCornerShootingFixEnabled)
+        if (tpContactWallBlocked)
+        {
+            /* The close-range target is physically behind a wall.  Resolve
+             * that nearer wall through GE's normal BG effect path even when
+             * the optional corner-shooting setting is switched off. */
+            tpblockkind = 1;
+            tpblocksource = tpContactWallSource;
+            tpblockimpact = tpContactWallHit.hitpos;
+            tpblockbghit = tpContactWallHit;
+            tpblockroom = tpContactWallRoom;
+        }
+        else if (g_PlayerIsInTank == 0 && g_ModTpCornerShootingFixEnabled)
         {
             tpweaponhasmuzzle = gunGetThirdPersonMuzzleOrigin(hand,
                     &tpweaponmuzzle);

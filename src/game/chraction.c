@@ -158,8 +158,10 @@ static void chrlvStartSimulantPlayerDeath(ChrRecord *self)
         (struct ModelAnimation *)((s32)&ptr_animation_table->data[0] + anim),
         randomGetNext() & 1, 0.0f, 0.5f, 12.0f);
 
-    /* Match human MP inventory drops for bot gunshot and explosion deaths. */
-    modMpBotsDropInventoryOnDeath(self);
+    /* Do not destroy held weapon models or allocate drops inside a hitscan
+     * callback.  ShotData can still own Model/ModelNode references from this
+     * shot.  modMpBotsTick handles the one-shot inventory drop when it first
+     * observes ACT_DIE, after the active shot has finished resolving. */
 }
 #endif
 s32 chrlvAttackAnimationRelated7F026F30       (ChrRecord *self, f32 *result);
@@ -4292,7 +4294,10 @@ void setSeenBondTimeToNow(ChrRecord *self)
     self->seen_bond_time = g_GlobalTimer;
 #ifdef GE_MODDED_CHEATS
     /* Successful sight of Bond is a real Co-Op target-selection stimulus. */
-    chrCoopSetTargetPlayer(self, CHRLV_GET_CUR_PLAYERNUM());
+    if (chrCoopGetBotTargetProp(self) == NULL)
+        chrCoopSetTargetPlayer(self, CHRLV_GET_CUR_PLAYERNUM());
+    else
+        chrCoopMarkBotTargetSeen(self);
 #endif
     return;
 }
@@ -4326,16 +4331,41 @@ s32 chrlvAttackRelated7F0292A8(ChrRecord *self, coord3d *arg1, StandTile *arg2)
     {
         stan = arg2;
         sp3C = chrlvGetChrOrPresetLocation(self, flags, self->act_attack.entityid, &sp40);
+#ifdef GE_MODDED_CHEATS
+        if ((flags & TARGET_BOND) && chrCoopGetBotTargetProp(self) != NULL)
+        {
+            PropRecord *bot = chrCoopGetBotTargetProp(self);
+            sp3C = &bot->pos;
+            sp40 = bot->stan;
+        }
+#endif
         CHRLV_SET_MOVING_STATE(self, 0);
 
         if ((flags & 1) != 0)
         {
             bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);
 
-            if (bondviewGetVisibleToGuardsFlag() != 0)
+            if (bondviewGetVisibleToGuardsFlag() != 0
+#ifdef GE_MODDED_CHEATS
+                || chrCoopGetBotTargetProp(self) != NULL
+#endif
+                )
             {
-                if ((stanTestLineUnobstructed(&stan, arg1->x, arg1->f[2], sp3C->x, sp3C->f[2], CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_CHRS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, arg1->f[1], arg1->f[1], sp3C->f[1], sp3C->f[1]) != 0) && (stan == sp40))
+                /* A bot's own Chr collider is not a visibility obstruction.
+                 * Live firing still uses its actual first physical hit. */
+                if ((stanTestLineUnobstructed(&stan, arg1->x, arg1->f[2],
+                        sp3C->x, sp3C->f[2],
+                        CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE
+#ifdef GE_MODDED_CHEATS
+                        | (chrCoopGetBotTargetProp(self) != NULL ? 0 : CDTYPE_CHRS)
+#else
+                        | CDTYPE_CHRS
+#endif
+                        , arg1->f[1], arg1->f[1], sp3C->f[1], sp3C->f[1]) != 0)
+                    && (stan == sp40))
                 {
+                    /* The normal seen timer still controls guard firing
+                     * cadence; setSeenBondTimeToNow preserves bot ownership. */
                     setSeenBondTimeToNow(self);
                     ret = 1;
                 }
@@ -4378,10 +4408,22 @@ bool chrCanSeeBond(ChrRecord *self)
     StandTile *mystan;
     f32 myheight;
 
-    if (bondviewGetVisibleToGuardsFlag())
+#ifdef GE_MODDED_CHEATS
+    chrCoopTryAcquireBotTarget(self);
+#endif
+    if (bondviewGetVisibleToGuardsFlag()
+#ifdef GE_MODDED_CHEATS
+        || chrCoopGetBotTargetProp(self) != NULL
+#endif
+        )
     {
         myprop   = self->prop;
+#ifdef GE_MODDED_CHEATS
+        bondprop = chrCoopGetBotTargetProp(self) != NULL
+            ? chrCoopGetBotTargetProp(self) : CHRLV_GET_CURRENT_PLAYER_PROP();
+#else
         bondprop = CHRLV_GET_CURRENT_PLAYER_PROP();
+#endif
         myheight = self->chrheight - 20.0f;
 
         CHRLV_SET_MOVING_STATE(self, FALSE);
@@ -4389,7 +4431,15 @@ bool chrCanSeeBond(ChrRecord *self)
 
         mystan = myprop->stan;
 
-        if (stanTestLineUnobstructed(&mystan, myprop->pos.x, myprop->pos.z, bondprop->pos.x, bondprop->pos.z, CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_CHRS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, myheight, myheight, 0.0f, 1.0f) && (mystan == bondprop->stan))
+        if (stanTestLineUnobstructed(&mystan, myprop->pos.x, myprop->pos.z,
+                bondprop->pos.x, bondprop->pos.z,
+                CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE
+#ifdef GE_MODDED_CHEATS
+                | (chrCoopGetBotTargetProp(self) != NULL ? 0 : CDTYPE_CHRS)
+#else
+                | CDTYPE_CHRS
+#endif
+                , myheight, myheight, 0.0f, 1.0f) && (mystan == bondprop->stan))
         {
             setSeenBondTimeToNow(self);
             pass = TRUE;
@@ -4620,10 +4670,18 @@ void chrlvSetTargetToPlayer(ChrRecord *self)
 {
     PropRecord *temp_v0;
 
-    temp_v0 = CHRLV_GET_CURRENT_PLAYER_PROP();
 #ifdef GE_MODDED_CHEATS
-    /* Explicitly targeting Bond owns the Co-Op target too. */
-    chrCoopSetTargetPlayer(self, CHRLV_GET_CUR_PLAYERNUM());
+    temp_v0 = chrCoopGetBotTargetProp(self);
+    if (temp_v0 == NULL)
+    {
+        temp_v0 = CHRLV_GET_CURRENT_PLAYER_PROP();
+        /* Explicit human targeting owns the Co-Op target too. */
+        chrCoopSetTargetPlayer(self, CHRLV_GET_CUR_PLAYERNUM());
+    }
+    else
+        chrCoopMarkBotTargetSeen(self);
+#else
+    temp_v0 = CHRLV_GET_CURRENT_PLAYER_PROP();
 #endif
     self->lastseetarget60 = g_GlobalTimer;
     self->lastknowntargetpos.f[0] = temp_v0->pos.f[0];
@@ -4721,7 +4779,13 @@ bool chrCheckTargetInSight(ChrRecord *self)
     s32         distance;
 
     myprop               = self->prop;
+#ifdef GE_MODDED_CHEATS
+    chrCoopTryAcquireBotTarget(self);
+    bondprop             = chrCoopGetBotTargetProp(self) != NULL
+        ? chrCoopGetBotTargetProp(self) : CHRLV_GET_CURRENT_PLAYER_PROP();
+#else
     bondprop             = CHRLV_GET_CURRENT_PLAYER_PROP();
+#endif
     myRadDirection       = getsubroty(self->model);
     //Note: x and z get swapped
     vec.z                = bondprop->pos.x - myprop->pos.x;
@@ -6391,7 +6455,12 @@ s32 chrlvUpdateAimendsideback(ChrRecord *self, struct weapon_firing_animation_ta
         if (attack_type & TARGET_BOND > 0)
         {
 #ifdef GE_MODDED_CHEATS
-            if (gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP)
+            if (chrCoopGetBotTargetProp(self) != NULL)
+            {
+                /* A Simulant is a ChrRecord, not a Bond player struct. */
+                ducking_height = player_prop->chr->chrheight * 0.5f;
+            }
+            else if (gamemode == GAMEMODE_MULTI && CHRLV_GET_SCENARIO() == SCENARIO_COOP)
             {
                 s32 coopTargetPlayer = chrCoopGetTargetPlayer(self);
                 ducking_height = bondviewGetPlayerDuckingHeightRelated(g_playerPointers[coopTargetPlayer]);
@@ -6939,7 +7008,8 @@ void chrlvUpdateShotbondsum(ChrRecord *self, s32 *arg1, s32 *arg2, ITEM_IDS item
     /* Bots use the physical firing ray for hits.  Retail shotbondsum directly
      * damages g_CurrentPlayer, which is unrelated to an explicit bot target
      * in split-screen multiplayer. */
-    if (modMpBotsGetSlotForChr(self) >= 0)
+    if (modMpBotsGetSlotForChr(self) >= 0
+        || chrCoopGetBotTargetProp(self) != NULL)
     {
         *arg1 = 0;
         *arg2 = 0;
@@ -7768,7 +7838,12 @@ void chrlvFireWeaponRelated(ChrRecord *self, s32 hand)
 
                                 if (stanSavedColl_posData->type == PROP_TYPE_CHR)
                                 {
-                                    if ((self->chrflags & CHRFLAG_CAN_SHOOT_CHRS) != 0)
+                                    if ((self->chrflags & CHRFLAG_CAN_SHOOT_CHRS) != 0
+#ifdef GE_MODDED_CHEATS
+                                        || (chrCoopGetBotTargetProp(self) != NULL
+                                            && chrCoopGetBotTargetProp(self) == stanSavedColl_posData)
+#endif
+                                        )
                                     {
 #ifdef GE_MODDED_CHEATS
                                         if (!modMpBotsFriendlyFireBlocksCoopAlly()

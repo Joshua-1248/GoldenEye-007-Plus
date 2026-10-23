@@ -251,40 +251,118 @@ Source-code regressions and emulator/plugin behavior should be investigated sepa
 
 ---
 
+## Feature Activation and Cheat Guide
+
+This guide describes **GoldenEye 007 Plus with `MODDED_CHEATS=YES`**, not retail GoldenEye's secret button codes. Menu layout and availability can differ between development revisions, Single-Player, Multiplayer, and Co-Op. Some options are save-backed, some apply only to the current mission, and experimental features may not work in every level.
+
+### Where to activate features
+
+| Feature | Where / how to activate it | What it does |
+|---|---|---|
+| **Special Options** | Open **Special Options** on the front-end, or access Special Options from the in-game watch. | Opens the main mod feature categories and game settings. |
+| **Campaign Co-Op** | Select the campaign Co-Op configuration, set the participating players, and begin a mission. | Allows multiple players to complete campaign objectives together, sharing mission-item progression and statistics. |
+| **Simulants (bots)** | Open **Multiplayer** and the **Bots** configuration; select bot slots, characters, difficulty, and traits before the match. | Adds configurable AI opponents or participants (up to eight); Co-Op companions are still experimental. |
+| **Third Person** | **Special Options → Enhancements → Third-Person Options**; corresponding controls are also present in the watch. | Switches to a third-person view; includes camera, crouch-height, shoulder and sight configuration. |
+| **Experimental Jumping** | **Special Options → Experimental → Jumping (Press L)**, then press **L** in-game. | Enables jumping, distinct from Fly Mode. Jump/floor interactions are still experimental. |
+| **Level Modifiers** | **Special Options → Level Modifiers**; choose the relevant stage and option. In-game, the watch presents modifiers applicable to the current level. | Enables stage-specific restorations, collision changes, or gameplay changes. |
+| **Drivable Speedboat (Dam)** | **Level Modifiers → Single-Player → Dam → Drivable Speedboat**. Activate it before loading Dam or select **ACTIVATE** during the level. Approach the boat and press **B** to board; press **B** again to exit. | Creates a driveable boat with steering and deck support. Once activated during a level it remains **ACTIVE** until the level ends/reloads. |
+| **Restore Speedboat (Dam)** | **Level Modifiers → Single-Player → Dam → Restore Speedboat**. | Restores the separate historical speedboat prop; **not** the same as Drivable Speedboat. |
+| **Map Maker** | Requires **`MAP_MAKER=YES`** when compiling; then open the experimental map editor in the available mod menus. | Provides an experimental in-game level editor. The normal gameplay build below uses **`MAP_MAKER=NO`**. |
+
+### Cheat descriptions
+
+Added mod cheats are available through the front-end **Cheats** page and, where supported, the watch's **In-Game Cheats** page. **These added menu toggles do not require entering a controller-code sequence.** Some legacy/unlockable cheats may still be governed by save progression or cheat-unlock conditions.
+
+| Cheat | Effect |
+|---|---|
+| **No Reload** | Removes the normal need to reload equipped weapons; separate from Infinite Ammo. |
+| **Rapid Fire** | Increases weapon firing speed by reducing normal intervals between shots. |
+| **No-Clipping** | Bypasses ordinary player collision restrictions, allowing movement through geometry. Use carefully: Bond can leave valid level space. |
+| **Fly Mode** | Enables free vertical movement controlled by the viewing direction rather than normal floor-following movement. |
+| **Super Kinetics** | Applies **1.5×** explosion death/launch impulse; does **not** increase explosion damage or radius. |
+| **Ultra Kinetics** | Applies **3.5×** explosion death/launch impulse. Enabled together with Super Kinetics, the total multiplier is **5.0×**. |
+| **Super Tank** | Increases the tank's maximum forward/reverse speeds and turning response by **2.5×**. |
+| **Mirrored Levels** | Mirrors supported world geometry, STAN collision, characters, props and doors along the world X axis. Runtime toggling remains experimental. |
+| **Level Never Ends** | Prevents supported normal stage-completion triggers from ending the mission. |
+| **Freeze Timer** | Freezes the **mission countdown**, not every game timer or the mission clock. |
+| **Max Head-On** | Extends/repeats tank-versus-guard head-on impact and crush audio feedback for a bounded duration; the normal initial impact is preserved. |
+| **Infinite Ammo** | Prevents ordinary ammunition depletion; reload behavior is controlled separately. |
+| **Invincibility** | Prevents normal damage to Bond. |
+| **Invisibility** | Enables the classic enemy-visibility cheat behavior. |
+| **All Guns** | Makes the game's weapon collection available in supported game modes. |
+| **DK Mode** | Activates the classic oversized-head effect. |
+| **Tiny Bond** | Makes Bond unusually small. |
+| **Paintball Mode** | Uses paintball-style bullet impact marks. |
+| **Turbo Mode** | Increases Bond's movement speed, separate from Super Tank. |
+| **No Radar (Multiplayer)** | Hides normal multiplayer radar information. |
+
+The following are **one-time actions**, not persistent On/Off toggles:
+
+| Action | Effect |
+|---|---|
+| **Full Health** | Immediately restores Bond's health. |
+| **Full Armor** | Immediately restores Bond's body armor. |
+| **Normal Animation** | Resets Fast/Slow Animation to the normal speed. |
+| **Complete Objectives** | Completes the applicable mission objectives and updates the shared Co-Op objective display. |
+| **Complete Mission** | Immediately exits the current campaign mission through its success path; mission time is reset for the target-time reward logic. |
+
+The original GoldenEye cheats remain available subject to their normal unlocking and game-mode rules. Cheat use may alter mission progression and challenge; use a separate save while experimenting.
+
+### Level Modifier activation rules
+
+Some modifiers are **reversible**, using On/Off while the level is active. Other modifiers are **latched**: selecting **ACTIVATE** changes the option to **ACTIVE**, and it cannot be turned off until leaving/restarting that level. **Drivable Speedboat** is latched; **Restore Speedboat** is a separate reversible modifier.
+
+For Dam, the main modifier entries include **Restore Doors Near Dam Docks**, **Restore Speedboat** and **Drivable Speedboat**. Other stage-specific options include **Beta Vent Start** (Silo), selected original/beta door or object restorations, and some multiplayer geometry/respawn changes. Only modifiers available for the current stage are shown in-game.
+
+### Development status and bug reports
+
+Passing a build or static audit does **not** prove every feature works in-game. Bots, Map Maker, Jumping, moving-platform support, Mirrored Levels, and recent boat performance/collision corrections require continued runtime testing. For a useful bug report, include the mission/map, game mode, player count, active cheats and modifiers, and emulator/hardware used.
+
+---
+
 ## Building GoldenEye 007 Plus
 
-The current development configuration is:
+The standard **gameplay** configuration is NTSC-U, 16 Kbit EEPROM, physical fastpaths, modded cheats and **Map Maker disabled**. Run this from the repository root:
+
+```sh
+GE_CDATA_TURTLE=1 \
+GE_CDATA_TURTLE_WORKERS=4 \
+GE_CDATA_TURTLE_BIN="/absolute/path/to/turtledeflate_app" \
+make VERSION=US \
+    PHYSICAL_CODE=YES \
+    PHYSICAL_FASTPATHS=YES \
+    MODDED_CHEATS=YES \
+    MAP_MAKER=NO \
+    OPT_USE_LLVM=YES \
+    COMPARE=0 \
+    -j4
+```
+
+Replace the Turtledeflate binary path with your own. **Turtledeflate environment-variable integration exists in newer local development builds** and may be ignored by older GitHub snapshots. For a published snapshot without that integration, use the same ordinary flags without the three `GE_CDATA_TURTLE` variables:
 
 ```sh
 make VERSION=US \
     PHYSICAL_CODE=YES \
     PHYSICAL_FASTPATHS=YES \
     MODDED_CHEATS=YES \
-    MAP_MAKER=YES \
+    MAP_MAKER=NO \
     OPT_USE_LLVM=YES \
     COMPARE=0 \
-    -j2
+    -j4
 ```
 
-The build is intentionally limited to **two compilation jobs** in this example.
+`-j4` allows up to four Make jobs. When supported, `GE_CDATA_TURTLE_WORKERS=4` configures four separate compression workers. `MODDED_CHEATS=YES` selects the Plus EEPROM16 default, and the gameplay build uses the `-eep16-nomap` output identity.
 
-The current Plus development configuration uses a 16 Kbit EEPROM save backend. `MODDED_CHEATS=YES` enables that configuration by default, and normal output naming includes `-eep16`.
+To develop Map Maker, set `MAP_MAKER=YES` instead. The supplied `./build_geplus.sh` helper **currently builds with `MAP_MAKER=YES` and defaults to `JOBS=2`**. Its behavior is distinct from the standard gameplay command above; this README update does not silently alter the helper script.
 
-A build helper is also included:
-
-```sh
-./build_geplus.sh
-```
-
-The helper defaults to two build jobs, with optional adjustment through `JOBS`.
-
-A legally obtained, unmodified NTSC-U GoldenEye 007 ROM should be placed in the repository root as:
+Place a legally obtained, unmodified NTSC-U GoldenEye 007 ROM at the repository root as:
 
 ```text
 baserom.u.z64
 ```
 
-The build helper checks the expected original ROM SHA-1 before the extraction/build process.
+The helper checks its original ROM SHA-1 before extraction/build. No retail ROM or built ROM image is distributed here.
+
 
 ---
 

@@ -1236,7 +1236,11 @@ void lvlManageMpGame(void)
         }
     }
 
-    if ((getPlayerCount() >= 2) && (g_CurrentStageToLoad != LEVELID_TITLE))
+    if ((getPlayerCount() >= 2
+#ifdef GE_MODDED_CHEATS
+        || (gamemode == GAMEMODE_MULTI && get_scenario() != SCENARIO_COOP)
+#endif
+        ) && (g_CurrentStageToLoad != LEVELID_TITLE))
     {
         if (get_mission_state() == MISSION_STATE_6)
         {

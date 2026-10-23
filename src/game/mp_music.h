@@ -4,6 +4,14 @@
 
 #include <bondconstants.h>
 
+#ifdef GE_MODDED_CHEATS
+s32 modMainMenuThemeTrackId(void);
+void modMainMenuThemePlay(void);
+s32 modWatchThemeTrackId(void);
+void modWatchThemePlay(void);
+void modWatchThemeApplyDuringPause(void);
+void modWatchThemeStageReset(void);
+#endif
 void             sub_GAME_7F0C1364(void);
 void             sub_GAME_7F0C11FC(s32 stagenum);
 void             set_missionstate(MISSION_STATE_ID arg0);

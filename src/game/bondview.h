@@ -2759,6 +2759,12 @@ void setFontTables(s32 arg0, s32 arg1);
 void bondviewUpdateCameraMatrices(coord3d* cam_pos, coord3d* cam_look_dir, coord3d* cam_up);
 Gfx * bondviewRenderDebugBondView(Gfx *arg0);
 s32 bond_pressed_reload_activate(void);
+#ifdef GE_MODDED_CHEATS
+/* Experimental Move Anywhere is a separate runtime toggle, not No-Clipping. */
+s32 modMoveAnywhereEnabled(void);
+void modSetMoveAnywhereEnabled(s32 enabled);
+#endif
+
 Gfx* write_stan_tiles_in_yellow(Gfx *arg0);
 Gfx * maybe_mp_interface(Gfx *arg0);
 Gfx * bondviewRemoved7F08BCB8(Gfx *arg0);

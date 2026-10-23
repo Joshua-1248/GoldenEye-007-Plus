@@ -20,11 +20,19 @@ checks=[]
 def ck(name, cond):
     cond=bool(cond); checks.append((name,cond)); print(('[PASS] ' if cond else '[FAIL] ')+name)
 
-# Count the first mp_chr_setup branch. Josh and Tegguy are both appended; runtime still uses sizeof.
+# Count the first mp_chr_setup branch. Josh and Tegguy remain; runtime still uses sizeof.
 m = re.search(r'struct MP_selectable_chars mp_chr_setup\[\]\s*=\s*\{(.*?)\n\};', FR, re.S)
 entries = re.findall(r'^\s*\{getStringID\(', m.group(1), re.M) if m else []
 
-ck('current multiplayer character table exposes all 68 entries including Josh_7774, Tegguy1989, SubDrag, Trevor', len(entries) == 68)
+ck('shared selectable roster has 66 entries; Josh and Tegguy retained; SubDrag/Trevor hidden',
+   len(entries) == 66 and
+   FR.count('{getStringID(LTITLE, TITLE_STR_JOSH_7774)') == 2 and
+   FR.count('{getStringID(LTITLE, TITLE_STR_TEGGUY1989)') == 2 and
+   '{getStringID(LTITLE, TITLE_STR_GF_SUBDRAG)' not in FR and
+   '{getStringID(LTITLE, TITLE_STR_GF_TREVOR)' not in FR)
+ck('stale multiplayer character selections are clamped before rendering',
+   'if (player_char[i] >= num_chars_selectable_mp)' in FR and
+   'player_char[i] = i; /* original default for the four players */' in FR)
 ck('SP selector count follows mp_chr_setup size instead of retail unlock cutoff',
    'sizeof(mp_chr_setup) / sizeof(mp_chr_setup[0])' in FR and
    'frontGetMpCharacterCount' in FR and

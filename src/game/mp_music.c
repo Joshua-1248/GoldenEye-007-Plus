@@ -4,6 +4,10 @@
 #include "options.h"
 #include "mp_music.h"
 #include "lv.h"
+#ifdef GE_MODDED_CHEATS
+#include <memp.h>
+#include "file2.h"
+#endif
 
 #ifdef VERSION_EU
 #define MP_MUSIC_FRAMERATE 50
@@ -30,6 +34,188 @@ s32 music_slot_seconds_0[4];
 // data
 //D:800484C0
 s32 mission_state = MISSION_STATE_0;
+
+#ifdef GE_MODDED_CHEATS
+/* Music resident buffer is only 2 KiB; TND's decoded sequence is 5652 bytes.
+ * Use an explicitly bounded, stage-owned additional buffer only while needed.
+ * Do NOT enlarge the 296-KiB permanent pool or overwrite Track 3 data. */
+#define MOD_WATCH_SEQ_BYTES 0x1800
+#define MOD_WATCH_STAGE_MARGIN 0x1000
+/* Alternate Track 1 buffer lives outside the fixed music/permanent heap.
+ * Goldfinger folders decodes to 6764 bytes. Alignment and input staging
+ * require > 6848 bytes; 0x1c00 provides guarded headroom. */
+#define MOD_MAINMENU_SEQ_BYTES 0x1c00
+#define MOD_MAINMENU_RETAIL_TRACK1_BYTES 6344
+#define MOD_MAINMENU_STAGE_MARGIN 0x1000
+extern s32 g_musicXTrack1CurrentTrackNum;
+extern u8 *g_musicXTrack1SeqData;
+extern u8 *g_musicXTrack2SeqData;
+extern ALCSPlayer *g_musicXTrack1SeqPlayer;
+extern ALCSPlayer *g_musicXTrack2SeqPlayer;
+extern u16 g_musicTrackLength[NUM_MUSIC_TRACKS + 1];
+extern u16 g_musicTrackCompressedLength[NUM_MUSIC_TRACKS];
+extern s32 needmemallocation;
+static u8 *g_ModWatchOriginalTrack2Buffer;
+static u8 *g_ModWatchStageBuffer;
+static u8 *g_ModMainMenuOriginalTrack1Buffer;
+static u8 *g_ModMainMenuStageBuffer;
+
+s32 modMainMenuThemeTrackId(void)
+{
+    switch (modMainMenuThemeGetSelection())
+    {
+        case 1: return M_FOLDERS_GF;
+        case 2: return M_FOLDERS_TMD;
+        case 3: return M_FOLDERS_TSWLM;
+        default: return M_FOLDERS;
+    }
+}
+
+void modMainMenuThemePlay(void)
+{
+    s32 track = modMainMenuThemeTrackId();
+    s32 useStageBuffer = FALSE;
+
+    if (track != M_FOLDERS)
+    {
+        u32 decoded = ((u32)g_musicTrackLength[track] + 15u) & ~15u;
+        u32 encoded = ((u32)g_musicTrackCompressedLength[track] + 15u) & ~15u;
+        u32 staging = (NUM_MUSIC_TRACKS + 15u) & ~15u;
+
+        if (encoded > decoded + staging
+            || decoded + staging > MOD_MAINMENU_SEQ_BYTES)
+            track = M_FOLDERS;
+        else if (decoded + staging > MOD_MAINMENU_RETAIL_TRACK1_BYTES)
+            useStageBuffer = TRUE;
+    }
+
+    if (useStageBuffer)
+    {
+        if (!g_ModMainMenuStageBuffer)
+        {
+            /* The stage allocator can redirect overflow into permanent
+             * memory. Decline the large custom track instead. */
+            if (needmemallocation
+                || mempGetBankSizeLeft(MEMPOOL_STAGE)
+                    < MOD_MAINMENU_SEQ_BYTES + MOD_MAINMENU_STAGE_MARGIN)
+                track = M_FOLDERS;
+            else
+                g_ModMainMenuStageBuffer = mempAllocBytesInBank(MOD_MAINMENU_SEQ_BYTES, MEMPOOL_STAGE);
+        }
+        if (g_ModMainMenuStageBuffer)
+        {
+            if (!g_ModMainMenuOriginalTrack1Buffer)
+                g_ModMainMenuOriginalTrack1Buffer = g_musicXTrack1SeqData;
+            g_musicXTrack1SeqData = g_ModMainMenuStageBuffer;
+        }
+    }
+
+    /* TND/TSWLM fit the existing Track 1 allocation. Only Goldfinger
+     * needs the stage buffer; original music keeps its retail path. */
+    if ((!useStageBuffer || track == M_FOLDERS) && g_ModMainMenuOriginalTrack1Buffer)
+        g_musicXTrack1SeqData = g_ModMainMenuOriginalTrack1Buffer;
+
+    /* The old frontend explicitly restarted a naturally completed song. */
+    if (g_musicXTrack1CurrentTrackNum != track
+        || alCSPGetState(g_musicXTrack1SeqPlayer) == AL_STOPPED)
+        musicTrack1Play(track);
+}
+
+s32 modWatchThemeTrackId(void)
+{
+    switch (modWatchThemeGetSelection())
+    {
+        case 1: return M_WATCH_GF;
+        case 2: return M_WATCH_TMD;
+        case 3: return M_WATCH_TSWLM;
+        default: return M_WATCH;
+    }
+}
+
+void modWatchThemePlay(void)
+{
+    s32 track = modWatchThemeTrackId();
+
+    if (track != M_WATCH)
+    {
+        u32 decoded = ((u32)g_musicTrackLength[track] + 15u) & ~15u;
+        u32 encoded = ((u32)g_musicTrackCompressedLength[track] + 15u) & ~15u;
+        u32 staging = (NUM_MUSIC_TRACKS + 15u) & ~15u;
+
+        /* The original decompressor stages compressed input at
+         * decoded+table-staging-encoded. Both ends must remain in-bounds. */
+        if (encoded > decoded + staging
+            || decoded + staging > MOD_WATCH_SEQ_BYTES)
+            track = M_WATCH;
+    }
+
+    if (track != M_WATCH)
+    {
+        if (!g_ModWatchStageBuffer)
+        {
+            /* Without enough stage memory, leave original music intact.
+             * memp's overflow behavior is a fatal trap, not a NULL return. */
+            /* A stage-allocation overflow can redirect into the PERMANENT
+             * bank.  Refuse before entering that allocator fallback. */
+            if (needmemallocation
+                || mempGetBankSizeLeft(MEMPOOL_STAGE)
+                    < MOD_WATCH_SEQ_BYTES + MOD_WATCH_STAGE_MARGIN)
+                track = M_WATCH;
+            else
+                g_ModWatchStageBuffer = mempAllocBytesInBank(MOD_WATCH_SEQ_BYTES, MEMPOOL_STAGE);
+        }
+        if (g_ModWatchStageBuffer)
+        {
+            if (!g_ModWatchOriginalTrack2Buffer)
+                g_ModWatchOriginalTrack2Buffer = g_musicXTrack2SeqData;
+            g_musicXTrack2SeqData = g_ModWatchStageBuffer;
+        }
+    }
+
+    if (track == M_WATCH && g_ModWatchOriginalTrack2Buffer)
+        g_musicXTrack2SeqData = g_ModWatchOriginalTrack2Buffer;
+
+    musicTrack2Play(track);
+}
+
+void modWatchThemeApplyDuringPause(void)
+{
+    /* A confirmed selection replaces only the active watch music. */
+    if (mission_state == MISSION_STATE_3)
+        modWatchThemePlay();
+}
+
+void modWatchThemeStageReset(void)
+{
+    /* The same stage-reset seam must retire the optional main-menu buffer
+     * before the stage bank is reused. Leave unrelated Track 1 music alone. */
+    if (g_ModMainMenuStageBuffer)
+    {
+        if (g_musicXTrack1SeqData == g_ModMainMenuStageBuffer)
+        {
+            musicTrack1Stop();
+            while (alCSPGetState(g_musicXTrack1SeqPlayer) != AL_STOPPED)
+                ;
+            g_musicXTrack1SeqData = g_ModMainMenuOriginalTrack1Buffer;
+        }
+        g_ModMainMenuStageBuffer = NULL;
+        g_ModMainMenuOriginalTrack1Buffer = NULL;
+    }
+    if (g_ModWatchStageBuffer)
+    {
+        /* Restore the resident pointer before stage pool memory is reset. */
+        if (g_musicXTrack2SeqData == g_ModWatchStageBuffer)
+        {
+            musicTrack2Stop();
+            while (alCSPGetState(g_musicXTrack2SeqPlayer) != AL_STOPPED)
+                ;
+            g_musicXTrack2SeqData = g_ModWatchOriginalTrack2Buffer;
+        }
+        g_ModWatchStageBuffer = NULL;
+        g_ModWatchOriginalTrack2Buffer = NULL;
+    }
+}
+#endif
 
 
 
@@ -138,7 +324,11 @@ void set_missionstate(MISSION_STATE_ID arg0)
             case MISSION_STATE_3:
                 musicTrack2ApplySeqpVol(sub_GAME_7F0C0BF0());
                 g_musicXTrack2Fade = 0;
+                #ifdef GE_MODDED_CHEATS
+                modWatchThemePlay();
+#else
                 musicTrack2Play(0x18);
+#endif
                 musicTrack1FadeOut(0.5f);
                 return;
             case MISSION_STATE_5:
@@ -168,7 +358,11 @@ void set_missionstate(MISSION_STATE_ID arg0)
             case MISSION_STATE_3:
                 musicTrack2ApplySeqpVol(sub_GAME_7F0C0BF0());
                 g_musicXTrack2Fade = 0;
+                #ifdef GE_MODDED_CHEATS
+                modWatchThemePlay();
+#else
                 musicTrack2Play(0x18);
+#endif
                 return;
             case MISSION_STATE_4:
                 break;
@@ -227,7 +421,11 @@ void set_missionstate(MISSION_STATE_ID arg0)
             case MISSION_STATE_3:
                 musicTrack2ApplySeqpVol(sub_GAME_7F0C0BF0());
                 g_musicXTrack2Fade = 0;
+                #ifdef GE_MODDED_CHEATS
+                modWatchThemePlay();
+#else
                 musicTrack2Play(0x18);
+#endif
                 musicTrack1FadeOut(0.5f);
                 musicTrack3FadeOut(0.5f);
                 return;
@@ -258,7 +456,11 @@ void set_missionstate(MISSION_STATE_ID arg0)
             case MISSION_STATE_3:
                 musicTrack2ApplySeqpVol(sub_GAME_7F0C0BF0());
                 g_musicXTrack2Fade = 0;
+                #ifdef GE_MODDED_CHEATS
+                modWatchThemePlay();
+#else
                 musicTrack2Play(0x18);
+#endif
                 musicTrack3FadeOut(0.5f);
                 return;
             case MISSION_STATE_4:
@@ -458,6 +660,11 @@ void reset_all_music_slots(void)
         }
     }
 
+#ifdef GE_MODDED_CHEATS
+    /* Game thread, not the VI/retrace scheduler: restarting a compact
+     * sequence must not block or perform ROM I/O in musicFadeTick(). */
+    musicSiloXLoopTick();
+#endif
 }
 
 

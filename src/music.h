@@ -10,7 +10,11 @@
  * are 63 distinct entries. This exlcudes the "NONE" music
  * and control sequence entries.
  */
+#ifdef GE_MODDED_CHEATS
+#define NUM_MUSIC_TRACKS  69
+#else
 #define NUM_MUSIC_TRACKS  63
+#endif
 
 /**
  * Metadata for a sequence "file" entry / data content of single sequence.
@@ -96,6 +100,9 @@ void musicTrack3FadeOut(f32 fadeTime);
 void musicTrack3FadeIn(f32 fadeTime, u16 volume);
 
 void musicFadeTick(void);
+#ifdef GE_MODDED_CHEATS
+void musicSiloXLoopTick(void);
+#endif
 
 extern ALCSPlayer *g_musicXTrack1SeqPlayer;
 extern s32 g_musicXTrack1Fade;

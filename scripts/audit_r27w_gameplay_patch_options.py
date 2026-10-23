@@ -15,6 +15,7 @@ POBJ = (R/"src/game/propobj.c").read_text(errors="replace")
 BV2 = (R/"src/game/bondview2.c").read_text(errors="replace")
 MW = (R/"src/game/mp_weapon.c").read_text(errors="replace")
 MU = (R/"src/music.c").read_text(errors="replace")
+MM = (R/"src/game/mp_music.c").read_text(errors="replace")
 MK = (R/"Makefile").read_text(errors="replace")
 
 checks = []
@@ -84,13 +85,21 @@ ck("Facility gas Death Neck uses the shortened enemy duration",
    and "modelSetAnimEndFrame(&g_CurrentPlayer->model, 241.0f);" in BV2
    and "modelSetAnimEndFrame(ppointers[index]->bodyModel, 241.0f);" in BV2)
 
-ck("Silo X loop fix targets Track 2 only after it is stopped",
-   "g_musicXTrack2CurrentTrackNum == M_SILOX" in MU
-   and "mission_state == MISSION_STATE_2 || mission_state == MISSION_STATE_5" in MU
-   and "alCSPGetState(g_musicXTrack2SeqPlayer) == AL_STOPPED" in MU
-   and ("musicTrack2Play(M_SILOX);" in MU
-        or ("alCSeqNew(&g_musicXTrack2Seq, g_musicXTrack2SeqData);" in MU
-            and "alCSPPlay(g_musicXTrack2SeqPlayer);" in MU)))
+ck("Silo X fix loops MP Track 1 and mission Track 2 after natural song completion",
+   'void musicSiloXLoopTick(void)' in MU
+   and 'musicSiloXLoopTick();' in MM
+   and 'g_ModSiloXMusicLoopFixEnabled' in MU
+   and 'g_sndBootswitchSound' in MU
+   and 'g_musicXTrack1CurrentTrackNum == M_SILOX' in MU
+   and 'g_musicXTrack2CurrentTrackNum == M_SILOX' in MU
+   and 'g_musicXTrack1Volume != 0' in MU
+   and 'g_musicXTrack2Volume != 0' in MU
+   and 'seq->validTracks == 0' in MU
+   and 'player->state == AL_STOPPED' in MU
+   and 'alCSeqNew(seq, data);' in MU
+   and 'alCSPPlay(player);' in MU
+   and 'alCSPSetSeq(' not in MU[MU.find('void musicSiloXLoopTick(void)'):]
+   and 'musicTrack2Play(M_SILOX);' not in MU)
 
 ck("AR33 prop fix is limited to Remote Mines and Timed Mines",
    "set == mp_weapon_set_remote_m || set == mp_weapon_set_timed_m" in MW

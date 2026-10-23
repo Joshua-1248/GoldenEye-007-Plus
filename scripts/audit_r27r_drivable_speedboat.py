@@ -15,8 +15,8 @@ def ck(name, cond):
     checks.append((name,cond))
     print(("[PASS] " if cond else "[FAIL] ")+name)
 
-ck("Dam exposes three modifiers including Drivable Speedboat",
-   "return g_LevelModifierDamRuntimeAvailable ? 3 : 0;" in LM and
+ck("Dam exposes four modifiers including Drivable Speedboat",
+   "return g_LevelModifierDamRuntimeAvailable ? 4 : 0;" in LM and
    '"Drivable Speedboat"' in LM)
 
 ck("Drivable Speedboat is latched ACTIVATE/ACTIVE in-game",
@@ -70,9 +70,19 @@ ck("driving bypasses ordinary on-foot translation",
    "propLevelModifierDamDrivableBoatSetControls(" in B and
    "propLevelModifierDamDrivableBoatTick();" in B)
 
-ck("driver/deck Y support prevents immediate gravity snap",
-   "propLevelModifierDamDrivableBoatCurrentPlayerSupported()" in B and
-   "propLevelModifierDamDrivableBoatDriverY()" in B)
+ck("boat driver uses helm height; standing deck uses shaped floor",
+   "propLevelModifierDamDrivableBoatGetWalkFloor(&r27rBoatWalkFloor)" in B and
+   re.search(r"if\s*\(\s*propLevelModifierDamDrivableBoatCurrentPlayerDriving\(\)"
+             r"\s*\)\s*\{\s*g_CurrentPlayer->stanHeight\s*=\s*"
+             r"propLevelModifierDamDrivableBoatDriverY\(\);", B) is not None)
+
+ck("boat deck supports normal jump requests",
+   "|| r27rBoatWalkFloorActive" in B and
+   "modExperimentalJumpEnabled()" in B)
+
+ck("boat-owned walking snapshots Bond previous position",
+   "g_CurrentPlayer->bondprevpos.f[0] = start_collision_pos_x;" in B and
+   "g_CurrentPlayer->bondprevpos.f[2] = start_collision_pos_z;" in B)
 
 prereq = next((x for x in MK.splitlines() if x.startswith("prerequisites:")), "")
 ck("R27R audit is mandatory",

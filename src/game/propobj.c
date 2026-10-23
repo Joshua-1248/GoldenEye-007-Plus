@@ -1611,6 +1611,11 @@ bool sub_GAME_7F041BB8(ChrRecord *chr, coord3d *arg1, coord3d *arg2, f32 arg3, c
 
     if ((-instSize <= planeDist) && (planeDist <= (arg3 + instSize)) && (prop->flags & PROPFLAG_ONSCREEN)) {
         entry = chr->field_20;
+        /* The detailed character collision list can temporarily be absent
+         * while a bot's held-weapon model is being replaced.  The detailed
+         * hit walker cannot accept a NULL entry; no model hit is possible. */
+        if (entry == NULL)
+            return FALSE;
         bodyPart = sub_GAME_7F06C010(&entry, arg4, arg5, &model, &node);
         if (bodyPart > 0) {
             mtx = modelFindNodeMtx(model, node, 0);

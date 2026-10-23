@@ -55,8 +55,23 @@ check('current compact label is present',
 check('label scratch storage includes room for 32 chars plus terminator',
       ('static u32 text[4][9];' in SPEC or 'static u32 text[4][10];' in SPEC))
 check('main-menu base row bounds reflect submenu restructuring',
-      's32 maxrow = g_ModOptionsPage ? 9 : 10;' in FRONT and
-      'MENU_ENHANCEMENTS_OPTIONS' in FRONT and 'MENU_THIRD_PERSON_OPTIONS' in FRONT)
+      'MENU_ENHANCEMENTS_OPTIONS' in FRONT and 'MENU_THIRD_PERSON_OPTIONS' in FRONT
+      and (
+          ('s32 maxrow = g_ModOptionsPage ? 9 : 10;' in FRONT
+           and 's32 count = g_ModOptionsPage ? 10 : 11;' in FRONT)
+          or ('s32 maxrow = g_ModOptionsPage ? 10 : 10;' in FRONT
+              and 's32 count = g_ModOptionsPage ? 11 : 11;' in FRONT
+              and 'g_ModOptionsPage && row == 10' in FRONT
+              and 'g_ModWatchThemeSelecting = TRUE;' in FRONT
+              and 'g_ModOptionsPage && i == 10 ? "Watch Menu Theme"' in FRONT)
+          or ("s32 count = g_ModOptionsPage ? 12 : 11;" in FRONT
+            and "s32 maxrow = g_ModOptionsPage ? 11 : 10;" in FRONT
+            and "g_ModOptionsPage && row == 10" in FRONT
+            and "g_ModMainMenuThemeSelecting = TRUE;" in FRONT
+            and "g_ModOptionsPage && row == 11" in FRONT
+            and "g_ModWatchThemeSelecting = TRUE;" in FRONT
+            and 'g_ModOptionsPage && i == 10 ? "Main Menu Theme"' in FRONT
+            and 'g_ModOptionsPage && i == 11 ? "Watch Menu Theme"' in FRONT)))
 check('V33 audit is mandatory build prerequisite',
       'directional-shoulder-toggle-v33-audit:' in MAKE and
       'directional-shoulder-toggle-v33-audit' in MAKE.split('prerequisites:',1)[1].split('\n',1)[0])

@@ -4,6 +4,7 @@
 #include "stan.h"
 #include "bgfog.h"
 #include "bondview.h"
+#include "player.h"
 #include "prop.h"
 
 extern s32 gamemode;
@@ -434,6 +435,77 @@ static s32 g_LevelModifierDamSpeedboatActive = FALSE;
 static s32 g_LevelModifierDamDrivableSpeedboatPreload = FALSE;
 static s32 g_LevelModifierDamDrivableSpeedboatActive = FALSE;
 static s32 g_LevelModifierDamRuntimeAvailable = FALSE;
+/* The Dam island now uses a single dual-state STAN for both configurations.
+ * The additional tiles are held dormant until the repair is activated.  This
+ * changes collision geometry in place without changing any live tile address. */
+static s32 g_LevelModifierDamIslandPreload = FALSE;
+static s32 g_LevelModifierDamIslandActive = FALSE;
+
+/* Always load the dual-state Dam STAN, regardless of initial selection.
+ * It contains the exact retail tile set plus dormant repaired-island tiles. */
+s32 levelModifiersDamIslandShouldLoad(s32 levelid)
+{
+    return levelid == LEVELID_DAM;
+}
+
+/* Repaired-only room 82 triangles are contiguous in the dual-state resource.
+ * The old room 81 tiles remain allocated but become non-collidable when active.
+ * There is no reallocation, memcpy of the STAN, or pointer rebasing at runtime. */
+s32 levelModifiersDamIslandTileDisabled(StandTile *tile)
+{
+    u32 ptr;
+    u32 base;
+
+    if (g_LevelModifierCurrentStage != LEVELID_DAM || !gptr_stan || tile == NULL)
+        return FALSE;
+
+    if (g_LevelModifierDamIslandActive)
+        return tile->room == 81;
+
+    ptr = (u32)tile;
+    base = (u32)gptr_stan;
+    return ptr >= base + 73272 && ptr < base + 75544;
+}
+
+/* This existing room 82 triangle differs only by the ordering of its two
+ * final points.  All 24 point bytes already use the dual-state STAN link base.
+ * The offset is relative to the resource pointer, not a RAM address. */
+static const u8 g_DamIslandRepairedSharedTilePoints[24] = {
+    0xfa, 0x8c, 0xff, 0x9c, 0xfd, 0x3d, 0x23, 0x2f,
+    0xfa, 0x8c, 0xff, 0xa2, 0xfd, 0x3d, 0x00, 0x00,
+    0xfa, 0x83, 0xff, 0xa2, 0xfd, 0x25, 0x23, 0x9b
+};
+
+static void levelModifiersDamIslandApplyRepairedTile(u8 *stan)
+{
+    s32 i;
+
+    if (stan == NULL)
+        return;
+
+    for (i = 0; i < (s32)sizeof(g_DamIslandRepairedSharedTilePoints); i++)
+        stan[71928 + 8 + i] = g_DamIslandRepairedSharedTilePoints[i];
+}
+
+s32 levelModifiersDamIslandActive(void)
+{
+    return g_LevelModifierDamIslandActive;
+}
+
+s32 levelModifiersGetDamIslandPreload(void)
+{
+    return g_LevelModifierDamIslandPreload;
+}
+
+void levelModifiersSetDamIslandPreload(s32 enabled)
+{
+    g_LevelModifierDamIslandPreload = enabled ? TRUE : FALSE;
+}
+
+LevelModifierPolicy levelModifiersGetDamIslandPolicy(void)
+{
+    return LEVELMOD_POLICY_LATCHED;
+}
 
 
 static void levelModifiersApplySiloBetaVentStan(u8 *stan)
@@ -469,7 +541,12 @@ void levelModifiersOnStanLoaded(s32 levelid, u8 *stan)
     g_LevelModifierDamDoorsActive = FALSE;
     g_LevelModifierDamSpeedboatActive = FALSE;
     g_LevelModifierDamDrivableSpeedboatActive = FALSE;
+    g_LevelModifierDamIslandActive = levelid == LEVELID_DAM
+        && g_LevelModifierDamIslandPreload;
     g_LevelModifierDamRuntimeAvailable = FALSE;
+
+    if (g_LevelModifierDamIslandActive)
+        levelModifiersDamIslandApplyRepairedTile(stan);
 
     if (levelid == LEVELID_SILO && g_LevelModifierSiloBetaVentPreload)
     {
@@ -564,7 +641,7 @@ s32 levelModifiersGetCurrentStageModifierCount(void)
     if (levelModifiersCradleMpContext()) return 1;
 
     if (g_LevelModifierCurrentStage == LEVELID_DAM)
-        return g_LevelModifierDamRuntimeAvailable ? 3 : 0;
+        return g_LevelModifierDamRuntimeAvailable ? 4 : 0;
     if (g_LevelModifierCurrentStage == LEVELID_SILO)
         return 1;
     if (g_LevelModifierCurrentStage == LEVELID_CITADEL)
@@ -851,6 +928,7 @@ void levelModifiersOnStageCleanup(s32 levelid)
 
     g_LevelModifierDamDoorsActive = FALSE;
     g_LevelModifierDamSpeedboatActive = FALSE;
+    g_LevelModifierDamIslandActive = FALSE;
     g_LevelModifierDamRuntimeAvailable = FALSE;
 }
 
@@ -996,6 +1074,8 @@ const char *levelModifiersGetCurrentStageModifierName(s32 index)
             return "Restore Speedboat";
         if (index == 2)
             return "Drivable Speedboat";
+        if (index == 3)
+            return "Dam Island Fixed Collisions";
     }
     else if (g_LevelModifierCurrentStage == LEVELID_SILO && index == 0)
     {
@@ -1039,6 +1119,8 @@ const char *levelModifiersGetCurrentStageModifierValue(s32 index)
             return g_LevelModifierDamSpeedboatActive ? "ON" : "OFF";
         if (index == 2)
             return g_LevelModifierDamDrivableSpeedboatActive ? "ACTIVE" : "ACTIVATE";
+        if (index == 3)
+            return g_LevelModifierDamIslandActive ? "ACTIVE" : "ACTIVATE";
     }
     else if (g_LevelModifierCurrentStage == LEVELID_SILO && index == 0)
     {
@@ -1092,6 +1174,37 @@ s32 levelModifiersToggleCurrentStageModifier(s32 index)
                 return FALSE;
             return levelModifiersActivateDamDrivableSpeedboat();
         }
+        if (index == 3)
+        {
+            coord3d probe;
+            StandTile *replacement;
+
+            /* One-way like Drivable Speedboat, but active THIS stage. */
+            if (g_LevelModifierDamIslandActive || g_LevelModifierDamIslandPreload
+                || gptr_stan == 0)
+                return FALSE;
+
+            levelModifiersDamIslandApplyRepairedTile((u8 *)gptr_stan);
+            g_LevelModifierDamIslandActive = TRUE;
+            levelModifiersSetDamIslandPreload(TRUE);
+            stanRebuildRoomData();
+            stanResetHits();
+
+            /* A player standing on a former room 81 triangle needs a live
+             * floor reference from the now-active island topology.  Never
+             * leave an old disabled tile as the authoritative player STAN. */
+            if (g_CurrentPlayer != NULL && g_CurrentPlayer->prop != NULL
+                && g_CurrentPlayer->prop->stan != NULL
+                && g_CurrentPlayer->prop->stan->room == 81)
+            {
+                probe = g_CurrentPlayer->prop->pos;
+                probe.y += 256.0f;
+                replacement = stanFindGroundAtCyl(&probe, 25.0f, NULL, NULL);
+                if (replacement != NULL && replacement->room != 81)
+                    g_CurrentPlayer->prop->stan = replacement;
+            }
+            return TRUE;
+        }
         return FALSE;
     }
 
@@ -1144,6 +1257,10 @@ s32 levelModifiersCurrentStageModifierLocked(s32 index)
     {
         return TRUE;
     }
+    if (g_LevelModifierCurrentStage == LEVELID_DAM
+        && index == 3
+        && (g_LevelModifierDamIslandActive || g_LevelModifierDamIslandPreload))
+        return TRUE;
 
     return FALSE;
 }
@@ -1153,7 +1270,7 @@ s32 levelModifiersGetFrontendModifierCount(s32 category, s32 levelIndex)
     if (category == LEVELMOD_CATEGORY_MULTIPLAYER && levelIndex == 11) return 1;
 
     if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER && levelIndex == 0) /* Dam */
-        return 3;
+        return 4;
     if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER && levelIndex == 5) /* Silo */
         return 1;
     if (category == LEVELMOD_CATEGORY_MISCELLANEOUS && levelIndex == 1) /* Citadel */
@@ -1180,6 +1297,8 @@ const char *levelModifiersGetFrontendModifierName(s32 category, s32 levelIndex, 
             return "Restore Speedboat";
         if (modifierIndex == 2)
             return "Drivable Speedboat";
+        if (modifierIndex == 3)
+            return "Dam Island Fixed Collisions";
     }
 
     if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER
@@ -1227,6 +1346,8 @@ const char *levelModifiersGetFrontendModifierValue(s32 category, s32 levelIndex,
             return g_LevelModifierDamSpeedboatPreload ? "On" : "Off";
         if (modifierIndex == 2)
             return g_LevelModifierDamDrivableSpeedboatPreload ? "On" : "Off";
+        if (modifierIndex == 3)
+            return g_LevelModifierDamIslandPreload ? "On" : "Off";
     }
 
     if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER
@@ -1290,6 +1411,11 @@ s32 levelModifiersToggleFrontendModifier(s32 category, s32 levelIndex, s32 modif
                 !g_LevelModifierDamDrivableSpeedboatPreload);
             return TRUE;
         }
+        if (modifierIndex == 3)
+        {
+            levelModifiersSetDamIslandPreload(!g_LevelModifierDamIslandPreload);
+            return TRUE;
+        }
 
         return FALSE;
     }
@@ -1337,6 +1463,8 @@ return FALSE;
 
 const char *levelModifiersGetFrontendModifierDescription(s32 category, s32 levelIndex, s32 modifierIndex)
 {
+    if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER && levelIndex == 0 && modifierIndex == 3)
+        return "Repairs Dam Island collision tiles immediately; cannot deactivate this level.";
     if (category == LEVELMOD_CATEGORY_MULTIPLAYER && levelIndex == 11 && modifierIndex == 0) return "Kills players who fall below Y -2550.";
 
     if (category == LEVELMOD_CATEGORY_MULTIPLAYER && levelIndex == 0 && modifierIndex == 0)
@@ -1352,6 +1480,8 @@ const char *levelModifiersGetFrontendModifierDescription(s32 category, s32 level
 
 const char *levelModifiersGetFrontendModifierCredit(s32 category, s32 levelIndex, s32 modifierIndex)
 {
+    if (category == LEVELMOD_CATEGORY_SINGLE_PLAYER && levelIndex == 0 && modifierIndex == 3)
+        return "Dam Island mod by Mark Kane; later edits by Wreck.";
     if (category == LEVELMOD_CATEGORY_MULTIPLAYER && levelIndex == 11 && modifierIndex == 0) return "Original Cradle MP modifier by Zoinkity.";
 
     if (category == LEVELMOD_CATEGORY_MULTIPLAYER && levelIndex == 0 && modifierIndex == 1)

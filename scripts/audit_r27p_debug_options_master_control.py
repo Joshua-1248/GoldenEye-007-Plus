@@ -77,7 +77,7 @@ ck("main Debug menu has full update/init/input/render dispatch",
 ck("SP Watch keeps Debug row 14 before Experimental, Enhancements and Cheats",
    "#define MODWATCH_MODE_DEBUG 0x500" in O and
    "#define MODWATCH_DEBUG_ROWS 1" in O and
-   "#define MODWATCH_OPTION_ROWS 18" in O and
+   ("#define MODWATCH_OPTION_ROWS 18" in O or (("#define MODWATCH_OPTION_ROWS 19" in O or ("#define MODWATCH_OPTION_ROWS 20" in O and "row == 19 + (gamemode == GAMEMODE_MULTI)" in O and '"Main Menu Theme"' in O)) and "row == 18 + (gamemode == GAMEMODE_MULTI)" in O and '"Watch Menu Theme"' in O)) and
    "MODWATCH_STATE = MODWATCH_MODE_DEBUG;" in O and
    "row == 14" in O and
    "row == 15" in O and

@@ -873,5 +873,6 @@ extern u8 CheadjoshZ[];
 extern u8 CheadtegguyZ[];
 extern u8 CheadgfsubdragZ[];
 extern u8 CheadgftrevorZ[];
+extern u8 Tbg_dam_island_stanZ[];
 #endif
 extern u8 ob__ob_end_seg[];

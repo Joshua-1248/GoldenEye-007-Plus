@@ -882,6 +882,7 @@ struct fileentry file_resource_table[] = {
     {HEADTEGGUY, "CheadtegguyZ", &CheadtegguyZ},
     {HEADGFSUBDRAG, "CheadgfsubdragZ", &CheadgfsubdragZ},
     {HEADGFTREVOR, "CheadgftrevorZ", &CheadgftrevorZ},
+    {BG_DAM_ISLAND_FIXED_STAN, "di", &Tbg_dam_island_stanZ},
 #endif
     
     {OBENDSEG, "ob/ob_end.seg", &ob__ob_end_seg},

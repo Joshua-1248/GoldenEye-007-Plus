@@ -128,7 +128,9 @@ typedef struct CoopChrTargetState
     s32 laststimulus60;
     s8 playernum;
     s8 escortowner;
-    u8 pad[2];
+    s8 botslot;
+    u8 pad;
+    s32 lastbotseen60;
 } CoopChrTargetState;
 
 static CoopChrTargetState *g_CoopChrTargetState = NULL;
@@ -165,6 +167,8 @@ void chrCoopAllocTargetCache(s32 count)
             g_CoopChrTargetState[i].laststimulus60 = -1;
             g_CoopChrTargetState[i].playernum = -1;
             g_CoopChrTargetState[i].escortowner = -1;
+            g_CoopChrTargetState[i].botslot = -1;
+            g_CoopChrTargetState[i].lastbotseen60 = -1;
         }
     }
 }
@@ -380,6 +384,7 @@ void chrCoopSetTargetPlayer(ChrRecord *chr, s32 playernum)
             return;
         }
 
+        state->botslot = -1;
         state->playernum = playernum;
         state->lastupdate60 = g_GlobalTimer;
         state->laststimulus60 = g_GlobalTimer;
@@ -548,9 +553,140 @@ s32 chrCoopGetTargetPlayer(ChrRecord *chr)
     return nextplayer;
 }
 
+/* A guard's human "Bond" context remains untouched for campaign scripts,
+ * escorts and cutscenes. Its combat sight/aim may instead follow one living
+ * allied Simulant, stored by slot rather than a stale stage Prop pointer. */
+PropRecord *chrCoopGetBotTargetProp(ChrRecord *chr)
+{
+    CoopChrTargetState *state;
+    PropRecord *bot;
+
+    if (gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP
+        || lvlIsCoopEndCutscene() || chr == NULL || chrCoopShouldFollowNearestPlayer(chr))
+        return NULL;
+
+    state = chrCoopGetTargetState(chr);
+    if (state == NULL || state->botslot < 0)
+        return NULL;
+
+    bot = modMpBotsGetBotProp(state->botslot);
+    if (bot == NULL || (state->lastbotseen60 >= 0
+        && g_GlobalTimer - state->lastbotseen60 >= CHRLV_10_SEC_TIMER
+        && chrCoopActionAllowsTargetScan(chr)))
+    {
+        state->botslot = -1;
+        return NULL;
+    }
+
+    return bot;
+}
+
+void chrCoopMarkBotTargetSeen(ChrRecord *chr)
+{
+    CoopChrTargetState *state = chrCoopGetTargetState(chr);
+    if (state != NULL && chrCoopGetBotTargetProp(chr) != NULL)
+        state->lastbotseen60 = g_GlobalTimer;
+}
+
+/* This is a guard-local, bounded passive sight acquisition. It never rewrites
+ * g_CurrentPlayer, the guard's scripting context or the Simulant's navigation.
+ * A freshly stimulated human owner takes precedence over bot acquisition. */
+void chrCoopTryAcquireBotTarget(ChrRecord *chr)
+{
+    CoopChrTargetState *state;
+    PropRecord *human;
+    PropRecord *bot;
+    StandTile *stan;
+    f32 maxrange, bestd2, dx, dy, dz, d2;
+    f32 height;
+    s32 i, playernum, bestslot;
+
+    if (gamemode != GAMEMODE_MULTI || get_scenario() != SCENARIO_COOP
+        || lvlIsCoopEndCutscene() || modMpBotsGetCount() <= 0
+        || chr == NULL || chr->prop == NULL || chr->prop->stan == NULL
+        || chr->model == NULL || chr->chrnum == 0xfe
+        || modMpBotsGetSlotForChr(chr) >= 0
+        || chrCoopShouldFollowNearestPlayer(chr))
+        return;
+
+    state = chrCoopGetTargetState(chr);
+    if (state == NULL || chrCoopGetBotTargetProp(chr) != NULL)
+        return;
+    if (state->laststimulus60 >= 0
+        && g_GlobalTimer - state->laststimulus60 < CHRLV_SEEN_RECENT_CHECK)
+        return;
+    /* Stagger the candidate scan across frames to avoid a guard/bot spike. */
+    if ((g_GlobalTimer + (s32)(chr - g_ChrSlots)) % 12 != 0)
+        return;
+
+    playernum = chrCoopGetTargetPlayer(chr);
+    human = chrCoopPlayerIsTargetable(playernum) ? g_playerPointers[playernum]->prop : NULL;
+    maxrange = chr->visionrange * 100.0f;
+    if (maxrange < 200.0f)
+        maxrange = 200.0f;
+    bestd2 = maxrange * maxrange;
+    if (human != NULL)
+    {
+        dx = human->pos.x - chr->prop->pos.x;
+        dy = human->pos.y - chr->prop->pos.y;
+        dz = human->pos.z - chr->prop->pos.z;
+        d2 = dx * dx + dy * dy + dz * dz;
+        /* A nearer visible human retains priority; one hidden behind a wall
+         * cannot prevent the guard from noticing an exposed bot. */
+        if (d2 < bestd2 && human->stan != NULL)
+        {
+            stan = chr->prop->stan;
+            if (stanTestLineUnobstructed(&stan, chr->prop->pos.x,
+                    chr->prop->pos.z, human->pos.x, human->pos.z,
+                    CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_CHRS
+                        | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE,
+                    chr->chrheight - 20.0f, chr->chrheight - 20.0f,
+                    0.0f, 1.0f)
+                && stan == human->stan)
+                bestd2 = d2;
+        }
+    }
+
+    height = chr->chrheight - 20.0f;
+    bestslot = -1;
+    for (i = 0; i < modMpBotsGetCount(); i++)
+    {
+        bot = modMpBotsGetBotProp(i);
+        if (bot == NULL || bot->stan == NULL)
+            continue;
+        dx = bot->pos.x - chr->prop->pos.x;
+        dy = bot->pos.y - chr->prop->pos.y;
+        dz = bot->pos.z - chr->prop->pos.z;
+        d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= bestd2)
+            continue;
+        stan = chr->prop->stan;
+        /* Do not put the intended character itself in the sight blockers.
+         * Solid geometry and doors still obstruct; real fire resolves CHRS. */
+        if (!stanTestLineUnobstructed(&stan, chr->prop->pos.x,
+                chr->prop->pos.z, bot->pos.x, bot->pos.z,
+                CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE,
+                height, height, 0.0f, 1.0f)
+            || stan != bot->stan)
+            continue;
+        bestslot = i;
+        bestd2 = d2;
+    }
+
+    if (bestslot >= 0)
+    {
+        state->botslot = bestslot;
+        state->lastbotseen60 = g_GlobalTimer;
+    }
+}
+
 PropRecord *chrCoopGetTargetProp(ChrRecord *chr)
 {
     s32 playernum;
+    PropRecord *bot = chrCoopGetBotTargetProp(chr);
+
+    if (bot != NULL)
+        return bot;
 
     if (gamemode == GAMEMODE_MULTI && get_scenario() == SCENARIO_COOP)
     {
@@ -4312,6 +4448,15 @@ void chrTestHit(PropRecord *prop, ShotData *shotdata)
     {
         return;
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* Bot weapon transitions can invalidate their previous rendered hit list
+     * before the next chr render builds a new one.  sub_GAME_7F06C010()
+     * dereferences its entry argument without accepting NULL.  Never probe
+     * stale or absent bot model entries; normal guards retain their path. */
+    if (chr->field_20 == NULL && modMpBotsGetSlotForChr(chr) >= 0)
+        return;
+#endif
 
     model = chr->model;
 #ifdef GE_PHYSICAL_FASTPATHS

@@ -26,6 +26,7 @@
 #ifdef GE_MODDED_CHEATS
 #include "cheat.h"
 #include "file2.h"
+#include "mp_music.h"
 #include "debugmenu_handler.h"
 #include "levelmodifiers.h"
 #endif
@@ -90,12 +91,16 @@ u32 game_options_index = 0;
 #define MODWATCH_MODE_EXPERIMENTAL 0x600
 #define MODWATCH_MODE_ENHANCEMENTS 0x700
 #define MODWATCH_DEATH_SUBMENU_FLAG 0x800
+#define MODWATCH_THEME_SELECTOR_FLAG 0x1000
+#define MODWATCH_MAIN_THEME_SELECTOR_FLAG 0x2000
+static s32 g_ModWatchThemePending;
+static s32 g_ModMainMenuThemePending;
 #define MODWATCH_CHEAT_MODE MODWATCH_MODE_CHEATS
-#define MODWATCH_OPTION_ROWS 18
+#define MODWATCH_OPTION_ROWS 20
 #define MODWATCH_PATCH_ROWS 7
 #define MODWATCH_TP_ROWS 11
 #define MODWATCH_DEBUG_ROWS 1
-#define MODWATCH_EXPERIMENTAL_ROWS 1
+#define MODWATCH_EXPERIMENTAL_ROWS 2
 #define MODWATCH_ENHANCEMENTS_ROWS 3
 #define MODWATCH_TOGGLE_ROWS (CHEAT_INVALID - 1)
 #define MODWATCH_ACTION_ROWS 5
@@ -495,6 +500,8 @@ void init_watch_at_start_of_stage(int stage)
     watch_screen_index = WATCH_INDEX_MISSION_STATUS;
 #ifdef GE_MODDED_CHEATS
     MODWATCH_STATE = 0;
+    g_ModWatchThemePending = modWatchThemeGetSelection();
+    g_ModMainMenuThemePending = modMainMenuThemeGetSelection();
 #endif
     controller_options_index = CONTROLLER_OPTIONS_INDEX_STYLE;
     game_options_index = GAME_OPTIONS_INDEX_MUSIC;
@@ -1555,6 +1562,48 @@ void watch_special_options_navigation(void)
     s32 rows;
     u32 pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xffff);
 
+    if (MODWATCH_STATE & MODWATCH_MAIN_THEME_SELECTOR_FLAG)
+    {
+        if (pressed & B_BUTTON)
+            MODWATCH_STATE &= ~MODWATCH_MAIN_THEME_SELECTOR_FLAG;
+        else if ((pressed & (L_JPAD | L_CBUTTONS | U_JPAD | U_CBUTTONS)) || sub_GAME_7F0A4FB0())
+            g_ModMainMenuThemePending = (g_ModMainMenuThemePending + 3) & 3;
+        else if ((pressed & (R_JPAD | R_CBUTTONS | D_JPAD | D_CBUTTONS)) || sub_GAME_7F0A4FEC())
+            g_ModMainMenuThemePending = (g_ModMainMenuThemePending + 1) & 3;
+        else if (pressed & A_BUTTON)
+        {
+            if (modMainMenuThemeSetSelection(g_ModMainMenuThemePending))
+            {
+                g_ModWatchSettingsDirty = TRUE;
+                modWatchCommitDeferredSettings();
+                /* Next frontend entry will start the selected theme. */
+            }
+            MODWATCH_STATE &= ~MODWATCH_MAIN_THEME_SELECTOR_FLAG;
+        }
+        return;
+    }
+
+    if (MODWATCH_STATE & MODWATCH_THEME_SELECTOR_FLAG)
+    {
+        if (pressed & B_BUTTON)
+            MODWATCH_STATE &= ~MODWATCH_THEME_SELECTOR_FLAG;
+        else if ((pressed & (L_JPAD | L_CBUTTONS | U_JPAD | U_CBUTTONS)) || sub_GAME_7F0A4FB0())
+            g_ModWatchThemePending = (g_ModWatchThemePending + 3) & 3;
+        else if ((pressed & (R_JPAD | R_CBUTTONS | D_JPAD | D_CBUTTONS)) || sub_GAME_7F0A4FEC())
+            g_ModWatchThemePending = (g_ModWatchThemePending + 1) & 3;
+        else if (pressed & A_BUTTON)
+        {
+            if (modWatchThemeSetSelection(g_ModWatchThemePending))
+            {
+                g_ModWatchSettingsDirty = TRUE;
+                modWatchCommitDeferredSettings();
+                modWatchThemeApplyDuringPause();
+            }
+            MODWATCH_STATE &= ~MODWATCH_THEME_SELECTOR_FLAG;
+        }
+        return;
+    }
+
     if (deathsubmenu)
         rows = 2;
     else if (mode == MODWATCH_MODE_CHEATS)
@@ -1621,8 +1670,15 @@ void watch_special_options_navigation(void)
         }
         else if (mode == MODWATCH_MODE_EXPERIMENTAL)
         {
-            modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
-            g_ModWatchSettingsDirty = TRUE;
+            if (row == 0)
+            {
+                modSetExperimentalJumpEnabled(!modExperimentalJumpEnabled());
+                g_ModWatchSettingsDirty = TRUE;
+            }
+            else if (row == 1)
+            {
+                modSetMoveAnywhereEnabled(!modMoveAnywhereEnabled());
+            }
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else if (deathsubmenu)
@@ -1678,6 +1734,18 @@ void watch_special_options_navigation(void)
         {
             modWatchCommitDeferredSettings();
             MODWATCH_STATE = MODWATCH_MODE_ENHANCEMENTS;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 19 + (gamemode == GAMEMODE_MULTI))
+        {
+            g_ModMainMenuThemePending = modMainMenuThemeGetSelection();
+            MODWATCH_STATE |= MODWATCH_MAIN_THEME_SELECTOR_FLAG;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        }
+        else if (row == 18 + (gamemode == GAMEMODE_MULTI))
+        {
+            g_ModWatchThemePending = modWatchThemeGetSelection();
+            MODWATCH_STATE |= MODWATCH_THEME_SELECTOR_FLAG;
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
         }
         else if (row == 18 && gamemode == GAMEMODE_MULTI)
@@ -2324,6 +2392,8 @@ void sub_GAME_7F0A69A8(void)
     watch_screen_index = WATCH_INDEX_MISSION_STATUS;
 #ifdef GE_MODDED_CHEATS
     MODWATCH_STATE = 0;
+    g_ModWatchThemePending = modWatchThemeGetSelection();
+    g_ModMainMenuThemePending = modMainMenuThemeGetSelection();
 #endif
     mission_brief_index = BRIEF_INDEX_OBJECTIVES;
     D_800409C8 = 0.999f;
@@ -4942,6 +5012,39 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         title = "SPECIAL OPTIONS";
     }
 
+    if (MODWATCH_STATE & MODWATCH_MAIN_THEME_SELECTOR_FLAG)
+    {
+        static const char *names[4] = {
+            "GoldenEye 007", "Goldfinger 64",
+            "Tomorrow Never Dies 64", "The Spy Who Loved Me 64"
+        };
+        gdl = draw_background_health_and_armor(gdl, param_2, 0);
+        if (check_watch_page_transistion_running() == 1) return gdl;
+        gdl = microcode_constructor(gdl);
+        gdl = draw_watch_mod_text(gdl,0xa0,0x24,"MAIN MENU THEME",0xa0ffa0f0,1,0);
+        gdl = draw_watch_mod_text(gdl,0xa0,0x71,(char *)names[g_ModMainMenuThemePending & 3],0xa0ffa0f0,1,0);
+        gdl = draw_watch_mod_text(gdl,0x37,0x71,"<",0xa0ffa0f0,0,0);
+        gdl = draw_watch_mod_text(gdl,0x10b,0x71,">",0xa0ffa0f0,0,0);
+        gdl = draw_watch_mod_text(gdl,0xa0,0xc8,"A: SELECT   B: CANCEL",0x00ff00b0,1,0);
+        return gdl;
+    }
+    if (MODWATCH_STATE & MODWATCH_THEME_SELECTOR_FLAG)
+    {
+        static const char *names[4] = {
+            "GoldenEye 007", "Goldfinger 64",
+            "Tomorrow Never Dies 64", "The Spy Who Loved Me 64"
+        };
+        gdl = draw_background_health_and_armor(gdl, param_2, 0);
+        if (check_watch_page_transistion_running() == 1) return gdl;
+        gdl = microcode_constructor(gdl);
+        gdl = draw_watch_mod_text(gdl,0xa0,0x24,"WATCH MENU THEME",0xa0ffa0f0,1,0);
+        gdl = draw_watch_mod_text(gdl,0xa0,0x71,(char *)names[g_ModWatchThemePending & 3],0xa0ffa0f0,1,0);
+        gdl = draw_watch_mod_text(gdl,0x37,0x71,"<",0xa0ffa0f0,0,0);
+        gdl = draw_watch_mod_text(gdl,0x10b,0x71,">",0xa0ffa0f0,0,0);
+        gdl = draw_watch_mod_text(gdl,0xa0,0xc8,"A: SELECT   B: CANCEL",0x00ff00b0,1,0);
+        return gdl;
+    }
+
     visibleRows = mode == MODWATCH_MODE_SPECIAL && !deathsubmenu ? 6 : MODWATCH_VISIBLE_ROWS;
 
     top = selected >= visibleRows - 1 ? selected - (visibleRows - 2) : 0;
@@ -5011,8 +5114,10 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         }
         else if (mode == MODWATCH_MODE_EXPERIMENTAL)
         {
-            label = frontModGetOptionLabel(75);
-            value = modExperimentalJumpEnabled() ? "on" : "off";
+            label = row == 0 ? frontModGetOptionLabel(75) : "Move Anywhere";
+            value = row == 0
+                ? (modExperimentalJumpEnabled() ? "on" : "off")
+                : (modMoveAnywhereEnabled() ? "on" : "off");
         }
         else if (deathsubmenu)
         {
@@ -5072,6 +5177,10 @@ Gfx *draw_watch_special_options_page(Gfx *gdl, Mtx *param_2)
         else if (row == 16) { label = frontModGetOptionLabel(76); value = ">"; }
         else if (row == 18 && gamemode == GAMEMODE_MULTI)
             { label = "Friendly Fire"; value = g_ModMpFriendlyFireEnabled ? "ON" : "OFF"; }
+        else if (row == 18 + (gamemode == GAMEMODE_MULTI))
+            { label = "Watch Menu Theme"; value = ">"; }
+        else if (row == 19 + (gamemode == GAMEMODE_MULTI))
+            { label = "Main Menu Theme"; value = ">"; }
         else { label = frontModGetOptionLabel(65); value = ">"; }
 
         drawy = y;

@@ -72,6 +72,8 @@ void setupDoor(s32 arg0, struct DoorRecord *door, s32 arg2);
 
 /* R27S_R3_COMPACT_PATCH_TABLES_SAFE: exact R2 edits, compact run encoding. */
 extern s32 gptr_stan;
+/* Defined by STAN; needed to compare world positions with STAN room bounds. */
+extern f32 level_scale;
 static void lmPatchByteRun(u8 *b,u32 o,s32 n,u32 d,u8 a,u8 z,s32 on){u8 v=on?z:a;while(n--){b[o]=v;o+=d;}}
 static void lmPatchHalfRun(u8 *b,u32 o,s32 n,u32 d,u16 a,u16 z,s32 on){u16 v=on?z:a;while(n--){b[o]=(u8)(v>>8);b[o+1]=(u8)v;o+=d;}}
 s32 propLevelModifierApplyBetaSetupPatches(s32 levelid,s32 facilityDoors,s32 facilityTanks,s32 surfaceDoors,s32 bunkerDoors,s32 frigateKeepClear,s32 frigateRemoved)
@@ -149,6 +151,12 @@ static f32 g_LevelModifierDamDrivableBoatEnterStartYaw = 0.0f;
 static coord3d g_LevelModifierDamDrivableBoatEnterStartPos;
 static f32 g_LevelModifierDamDrivableBoatSteeringApplied = 0.0f;
 static s32 g_LevelModifierDamDrivableBoatUseWaterEnvelope = FALSE;
+/* R3: Remember the last registered pose, including live mirror toggles.
+ * A newly created/replaced boat must always register its first transform. */
+static coord3d g_LevelModifierDamDrivableBoatAppliedPos;
+static f32 g_LevelModifierDamDrivableBoatAppliedHeading;
+static s32 g_LevelModifierDamDrivableBoatAppliedMirror;
+static s32 g_LevelModifierDamDrivableBoatTransformValid = FALSE;
 
 #define DAM_DRIVABLE_BOAT_START_X        448.0f
 #define DAM_DRIVABLE_BOAT_START_Y       -768.0f
@@ -191,6 +199,7 @@ static s32 g_LevelModifierDamDrivableBoatUseWaterEnvelope = FALSE;
 #define DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z     (DAM_DRIVABLE_BOAT_DECK_HALF_Z + DAM_DRIVABLE_BOAT_DECK_SEAM_MARGIN)
 /* R27R_R9_CLIP_BRIDGE_SMOOTH_ENTRY_STEERING */
 #define DAM_DRIVABLE_BOAT_CLIP_RELAX_EXTRA      18.0f
+#define DAM_DRIVABLE_BOAT_CLIP_MAX_EXTRA        72.0f
 #define DAM_DRIVABLE_BOAT_STEER_RESPONSE          0.060f
 /* R27R_R16_STATIONARY_TURN_SLOWER_ACCEL_LOWER_DRIVER */
 #define DAM_DRIVABLE_BOAT_STATIONARY_TURN_SCALE  0.10f
@@ -396,19 +405,18 @@ static s32 propLevelModifierDamDrivableBoatLandUnderHull(
 }
 
 static void propLevelModifierDamDrivableBoatHullPoint(
-    coord3d *out, const coord3d *center, f32 heading,
+    coord3d *out, const coord3d *center, Mtxf *rotation,
     f32 localx, f32 localz, f32 yoffset)
 {
-    Mtxf rot;
     coord3d local;
 
     local.x = localx;
     local.y = 0.0f;
     local.z = localz;
 
-    matrix_4x4_set_rotation_around_y(
-        M_TAU_F - heading + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET, &rot);
-    mtx4RotateVecInPlace(&rot, &local);
+    /* R3: The heading matrix is unchanged across hull sample points.
+     * Reuse the sweep's matrix while retaining the original vector math. */
+    mtx4RotateVecInPlace(rotation, &local);
 
     out->x = center->x + local.x;
     out->y = DAM_DRIVABLE_BOAT_START_Y + yoffset;
@@ -450,6 +458,9 @@ static s32 propLevelModifierDamDrivableBoatHullBlocked(
     const coord3d *newpos, f32 newheading)
 {
     ObjectRecord *obj = &g_LevelModifierDamDrivableBoatRuntime;
+    Mtxf oldRotation;
+    Mtxf newRotation;
+    Mtxf *candidateRotation;
     f32 xmin;
     f32 xmax;
     f32 zmin;
@@ -503,14 +514,29 @@ static s32 propLevelModifierDamDrivableBoatHullBlocked(
     yoffsets[1] = 64.0f;
     yoffsets[2] = 132.0f;
 
+    /* R3: Calculate the two rotations once per sweep, not once per
+     * point and height. A translation needs only the old rotation. */
+    matrix_4x4_set_rotation_around_y(
+        M_TAU_F - oldheading + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET,
+        &oldRotation);
+    candidateRotation = &oldRotation;
+
+    if (newheading != oldheading)
+    {
+        matrix_4x4_set_rotation_around_y(
+            M_TAU_F - newheading + DAM_DRIVABLE_BOAT_MODEL_YAW_OFFSET,
+            &newRotation);
+        candidateRotation = &newRotation;
+    }
+
     for (h = 0; h < 3; h++)
     {
         for (i = 0; i < 9; i++)
         {
             propLevelModifierDamDrivableBoatHullPoint(
-                &from, oldpos, oldheading, lx[i], lz[i], yoffsets[h]);
+                &from, oldpos, &oldRotation, lx[i], lz[i], yoffsets[h]);
             propLevelModifierDamDrivableBoatHullPoint(
-                &to, newpos, newheading, lx[i], lz[i], yoffsets[h]);
+                &to, newpos, candidateRotation, lx[i], lz[i], yoffsets[h]);
 
             if (propLevelModifierDamDrivableBoatBgSegmentBlocked(
                     &from, &to))
@@ -541,6 +567,10 @@ static void propLevelModifierDamDrivableBoatApplyTransform(void)
     obj->runtime_pos = obj->prop->pos;
     setupUpdateObjectRoomPosition(obj);
     chrobjCollisionRelated(obj);
+    g_LevelModifierDamDrivableBoatAppliedPos = obj->prop->pos;
+    g_LevelModifierDamDrivableBoatAppliedHeading = g_LevelModifierDamDrivableBoatHeading;
+    g_LevelModifierDamDrivableBoatAppliedMirror = mirrorLevelsIsEnabled();
+    g_LevelModifierDamDrivableBoatTransformValid = TRUE;
 }
 
 static void propLevelModifierDamDrivableBoatPlaceDriver(void)
@@ -634,6 +664,7 @@ static void propLevelModifierFreeDamDrivableBoat(void)
     g_LevelModifierDamDrivableBoatEnterBlend = 1.0f;
     g_LevelModifierDamDrivableBoatEnterStartYaw = 0.0f;
     g_LevelModifierDamDrivableBoatUseWaterEnvelope = FALSE;
+    g_LevelModifierDamDrivableBoatTransformValid = FALSE;
 
     if (g_LevelModifierDamDrivableBoatRuntime.prop != NULL)
         objFreePermanently(&g_LevelModifierDamDrivableBoatRuntime, TRUE);
@@ -668,6 +699,7 @@ s32 propLevelModifierPrepareDamRestorations(enum LEVELID stageId)
     g_LevelModifierDamDrivableBoatRuntime.prop = NULL;
     g_LevelModifierDamDrivableBoatDriver = -1;
     g_LevelModifierDamDrivableBoatHeading = DAM_DRIVABLE_BOAT_START_HEADING;
+    g_LevelModifierDamDrivableBoatTransformValid = FALSE;
     g_LevelModifierDamDrivableBoatSpeed = 0.0f;
     g_LevelModifierDamDrivableBoatThrottle = 0.0f;
     g_LevelModifierDamDrivableBoatSteering = 0.0f;
@@ -897,6 +929,7 @@ s32 propLevelModifierActivateDamDrivableSpeedboat(void)
     g_LevelModifierDamDrivableBoatRuntime.state |= PROPSTATE_20;
 
     g_LevelModifierDamDrivableBoatHeading = DAM_DRIVABLE_BOAT_START_HEADING;
+    g_LevelModifierDamDrivableBoatTransformValid = FALSE;
     g_LevelModifierDamDrivableBoatSpeed = 0.0f;
     g_LevelModifierDamDrivableBoatThrottle = 0.0f;
     g_LevelModifierDamDrivableBoatSteering = 0.0f;
@@ -1040,6 +1073,27 @@ f32 propLevelModifierDamDrivableBoatDriverY(void)
         + DAM_DRIVABLE_BOAT_DRIVER_Y_OFFSET;
 }
 
+/* R27R boat R2: all deck, transition, and clip-halo footprints fit
+ * inside this heading-independent circle.  Reject distant players before
+ * paying for boat-local trigonometry, without narrowing boarding geometry. */
+static s32 propLevelModifierDamDrivableBoatWithinOuterReach(
+    const coord3d *world)
+{
+    f32 dx;
+    f32 dz;
+    f32 reachX;
+    f32 reachZ;
+
+    dx = world->x - g_LevelModifierDamDrivableBoatRuntime.prop->pos.x;
+    dz = world->z - g_LevelModifierDamDrivableBoatRuntime.prop->pos.z;
+    reachX = DAM_DRIVABLE_BOAT_TRANSITION_HALF_X
+        + DAM_DRIVABLE_BOAT_CLIP_MAX_EXTRA;
+    reachZ = DAM_DRIVABLE_BOAT_TRANSITION_HALF_Z
+        + DAM_DRIVABLE_BOAT_CLIP_MAX_EXTRA;
+
+    return dx * dx + dz * dz <= reachX * reachX + reachZ * reachZ;
+}
+
 static void propLevelModifierDamDrivableBoatWorldToLocal(
     const coord3d *world, f32 *localx, f32 *localz)
 {
@@ -1076,6 +1130,9 @@ static void propLevelModifierDamDrivableBoatLocalToWorld(
     world->z = g_LevelModifierDamDrivableBoatRuntime.prop->pos.z
         + localx * s + localz * c;
 }
+
+static s32 propLevelModifierDamDrivableBoatWorldLandAt(
+    const coord3d *world, StandTile **tileOut, f32 *groundYOut);
 
 static s32 propLevelModifierDamDrivableBoatTryLandTransfer(
     const coord3d *candidate, const coord3d *moveOffset)
@@ -1259,9 +1316,65 @@ static s32 propLevelModifierDamDrivableBoatNearbyValidStan(
     s32 sample;
     f32 ox[8];
     f32 oz[8];
+    u8 roomFilter[8];
+    u8 *eligibleRooms = NULL;
 
     if (world == NULL || g_CurrentPlayer == NULL)
         return FALSE;
+
+    /* All 32 sample cylinders are contained in this expanded square.
+     * Preselect any STAN room whose native bounds might intersect it.
+     * The resolver still performs the same full-polygon floor selection.
+     * Its existing room-filter API accepts eight rooms; if more qualify,
+     * fall back to the original unrestricted query rather than drop rooms. */
+    if (level_scale > 0.0f)
+    {
+        f32 scaledX = world->x * level_scale;
+        f32 scaledZ = world->z * level_scale;
+        f32 reach = (DAM_DRIVABLE_BOAT_STAN_SAMPLE_STEP
+            * DAM_DRIVABLE_BOAT_STAN_SAMPLE_RINGS
+            + DAM_DRIVABLE_BOAT_STAN_SAMPLE_RADIUS + 2.0f)
+            * level_scale;
+        s32 count = 0;
+        s32 room;
+
+        for (room = 0; room < dword_CODE_bss_8007B9DC; room++)
+        {
+            StanRoomBounds *bounds;
+
+            if (firststaninroom[room] == NULL)
+                continue;
+
+            bounds = &g_StanRoomBounds[room];
+
+            if (scaledX + reach < bounds->minX
+                || scaledX - reach > bounds->maxX
+                || scaledZ + reach < bounds->minZ
+                || scaledZ - reach > bounds->maxZ)
+            {
+                continue;
+            }
+
+            if (count < 8)
+                roomFilter[count] = (u8)room;
+
+            count++;
+
+            if (count > 8)
+                break;
+        }
+
+        if (count == 0)
+            return FALSE;
+
+        if (count <= 8)
+        {
+            if (count < 8)
+                roomFilter[count] = 0xff;
+
+            eligibleRooms = roomFilter;
+        }
+    }
 
     for (ring = 1; ring <= DAM_DRIVABLE_BOAT_STAN_SAMPLE_RINGS; ring++)
     {
@@ -1287,7 +1400,7 @@ static s32 propLevelModifierDamDrivableBoatNearbyValidStan(
 
             tile = stanFindGroundAtCyl(
                 &probe, DAM_DRIVABLE_BOAT_STAN_SAMPLE_RADIUS,
-                NULL, &groundY);
+                eligibleRooms, &groundY);
 
             if (tile != NULL
                 && groundY > DAM_DRIVABLE_BOAT_DECK_LAND_MIN_Y)
@@ -1381,8 +1494,8 @@ static s32 propLevelModifierDamDrivableBoatTransitionClipHaloAtWorld(
 
     if (extra < 30.0f)
         extra = 30.0f;
-    if (extra > 72.0f)
-        extra = 72.0f;
+    if (extra > DAM_DRIVABLE_BOAT_CLIP_MAX_EXTRA)
+        extra = DAM_DRIVABLE_BOAT_CLIP_MAX_EXTRA;
 
     propLevelModifierDamDrivableBoatWorldToLocal(world, &localx, &localz);
 
@@ -1427,6 +1540,9 @@ s32 propLevelModifierDamDrivableBoatGetWalkFloor(f32 *floorY)
     }
 
     pos = g_CurrentPlayer->field_488.collision_position;
+
+    if (!propLevelModifierDamDrivableBoatWithinOuterReach(&pos))
+        return FALSE;
 
     if (propLevelModifierDamDrivableBoatDeckFloorAtWorld(
             &pos, 0.0f, &deckY))
@@ -1569,6 +1685,12 @@ s32 propLevelModifierDamDrivableBoatHandleFootMovement(
     candidate = current;
     candidate.x += moveOffset->x;
     candidate.z += moveOffset->z;
+
+    if (!propLevelModifierDamDrivableBoatWithinOuterReach(&current)
+        && !propLevelModifierDamDrivableBoatWithinOuterReach(&candidate))
+    {
+        return FALSE;
+    }
 
     currentOnDeck = propLevelModifierDamDrivableBoatDeckFloorAtWorld(
         &current, 0.0f, &currentFloor);
@@ -1922,12 +2044,17 @@ void propLevelModifierDamDrivableBoatTick(void)
     while (candidateHeading < 0.0f)
         candidateHeading += M_TAU_F;
 
-    candidatePos.x += g_LevelModifierDamDrivableBoatSpeed
-        * sinf(M_TAU_F - candidateHeading)
-        * g_GlobalTimerDelta;
-    candidatePos.z += g_LevelModifierDamDrivableBoatSpeed
-        * cosf(M_TAU_F - candidateHeading)
-        * g_GlobalTimerDelta;
+    /* R3: No heading-based translation is necessary at exact rest.
+     * Steering can still change candidateHeading while stationary. */
+    if (g_LevelModifierDamDrivableBoatSpeed != 0.0f)
+    {
+        candidatePos.x += g_LevelModifierDamDrivableBoatSpeed
+            * sinf(M_TAU_F - candidateHeading)
+            * g_GlobalTimerDelta;
+        candidatePos.z += g_LevelModifierDamDrivableBoatSpeed
+            * cosf(M_TAU_F - candidateHeading)
+            * g_GlobalTimerDelta;
+    }
     candidatePos.y = DAM_DRIVABLE_BOAT_START_Y;
 
     /*
@@ -1937,23 +2064,42 @@ void propLevelModifierDamDrivableBoatTick(void)
      * tick. Keep the existing water envelope + hard hull/background collision
      * as the movement authority until a true BG-room boundary test is added.
      */
-    if (!propLevelModifierDamDrivableBoatHullBlocked(
-            &oldpos, oldHeading, &candidatePos, candidateHeading))
+    /* R3: Only a changed position or heading has a swept hull to test.
+     * Zero movement leaves the current throttle and speed untouched. */
+    if (candidatePos.x != oldpos.x || candidatePos.y != oldpos.y
+        || candidatePos.z != oldpos.z || candidateHeading != oldHeading)
     {
-        g_LevelModifierDamDrivableBoatHeading = candidateHeading;
-        obj->prop->pos = candidatePos;
-    }
-    else
-    {
-        g_LevelModifierDamDrivableBoatSpeed = 0.0f;
-        g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+        if (!propLevelModifierDamDrivableBoatHullBlocked(
+                &oldpos, oldHeading, &candidatePos, candidateHeading))
+        {
+            g_LevelModifierDamDrivableBoatHeading = candidateHeading;
+            obj->prop->pos = candidatePos;
+        }
+        else
+        {
+            g_LevelModifierDamDrivableBoatSpeed = 0.0f;
+            g_LevelModifierDamDrivableBoatThrottle = 0.0f;
+        }
     }
 
     obj->prop->pos.y = DAM_DRIVABLE_BOAT_START_Y;
     propLevelModifierDamDrivableBoatCarryPassengers(
         &oldpos, oldHeading, &obj->prop->pos,
         g_LevelModifierDamDrivableBoatHeading);
-    propLevelModifierDamDrivableBoatApplyTransform();
+
+    /* R3: An unchanged, already registered pose needs no collision rebuild.
+     * Cached pose and mirror mode catch external world reflections/reposition. */
+    if (!g_LevelModifierDamDrivableBoatTransformValid
+        || g_LevelModifierDamDrivableBoatAppliedHeading
+            != g_LevelModifierDamDrivableBoatHeading
+        || g_LevelModifierDamDrivableBoatAppliedMirror
+            != mirrorLevelsIsEnabled()
+        || g_LevelModifierDamDrivableBoatAppliedPos.x != obj->prop->pos.x
+        || g_LevelModifierDamDrivableBoatAppliedPos.y != obj->prop->pos.y
+        || g_LevelModifierDamDrivableBoatAppliedPos.z != obj->prop->pos.z)
+    {
+        propLevelModifierDamDrivableBoatApplyTransform();
+    }
 
     headingdeg = g_LevelModifierDamDrivableBoatHeading * 360.0f / M_TAU_F;
     oldHeadingDeg = oldHeading * 360.0f / M_TAU_F;

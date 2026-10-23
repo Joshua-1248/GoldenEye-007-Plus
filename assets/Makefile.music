@@ -31,6 +31,9 @@ MUSIC_RZ_FILES = \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mfacility.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mfacilityx.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders_gf.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders_tmd.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders_tswlm.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mfrigate_outro.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mfrigate.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mfrigatex.rz \
@@ -65,6 +68,24 @@ MUSIC_RZ_FILES = \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mtrain.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mtrainx.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mwatchmusic.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mwatch_gf.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mwatch_tmd.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mwatch_tswlm.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mwatercaverns.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mwatercavernsx.rz \
     $(BUILD_DIR)/$(MUSIC_DIR)/Mwindblowing.rz
+
+# New watch themes are assembled into music.o via .incbin.  Make must finish
+# compressing their .rz files before starting the music assembler, even with -j4.
+# This adds prerequisites only; the existing compressor and assembly rules stay intact.
+$(BUILD_DIR)/$(MUSIC_DIR)/music.o: \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mwatch_gf.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mwatch_tmd.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mwatch_tswlm.rz
+
+# Main-menu music is incbin-backed as well. These explicit prerequisites
+# prevent a parallel -j4 assembly race; existing compression remains unchanged.
+$(BUILD_DIR)/$(MUSIC_DIR)/music.o: \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders_gf.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders_tmd.rz \
+    $(BUILD_DIR)/$(MUSIC_DIR)/Mfolders_tswlm.rz

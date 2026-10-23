@@ -1,6 +1,12 @@
 #ifndef _FILE2_H_
 #define _FILE2_H_
 #include <ultra64.h>
+#ifdef GE_MODDED_CHEATS
+s32 modMainMenuThemeGetSelection(void);
+s32 modMainMenuThemeSetSelection(s32 selection);
+s32 modWatchThemeGetSelection(void);
+s32 modWatchThemeSetSelection(s32 selection);
+#endif
 
 #include <bondconstants.h>
 #include <bondtypes.h>

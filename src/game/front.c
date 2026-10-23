@@ -24,6 +24,7 @@ static void frontModCommitDeferredSubmenuSettings(void);
 #include "cheat.h"
 #include "chrobjdata.h"
 #include "file2.h"
+#include "mp_music.h"
 #include "front.h"
 #include "gun.h"
 #include "image_bank.h"
@@ -648,8 +649,16 @@ s32 num_chars_selectable_mp = 8;
 #ifdef GE_MODDED_CHEATS
 #define MP_JOSH_7774_HEAD HEAD_Male_Josh
 #define MP_TEGGUY1989_HEAD HEAD_Male_Tegguy1989
+/* Pilot heads are disabled by default; retain their character slots/IDs.
+ * Keep safe retail fallback heads until the pilot is explicitly re-enabled.
+ */
+#if defined(GE_ENABLE_GF64_HEADS)
 #define MP_GFSUBDRAG_HEAD HEAD_Male_GFSubDrag
 #define MP_GFTREVOR_HEAD HEAD_Male_GFTrevor
+#else
+#define MP_GFSUBDRAG_HEAD HEAD_Male_Shaun
+#define MP_GFTREVOR_HEAD HEAD_Male_Shaun
+#endif
 #else
 #define MP_JOSH_7774_HEAD HEAD_Male_Dwayne
 #define MP_TEGGUY1989_HEAD HEAD_Male_Shaun
@@ -723,10 +732,8 @@ struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_224_MARION), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Marion_Rosika, 1.0446},
     {getStringID(LTITLE, TITLE_STR_225_MANDY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Mandy, 1.0446},
     {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446},
-    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_JOSH_7774_HEAD, 1.0},
-    {getStringID(LTITLE, TITLE_STR_TEGGUY1989), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_TEGGUY1989_HEAD, 1.0},
-    {getStringID(LTITLE, TITLE_STR_GF_SUBDRAG), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFSUBDRAG_HEAD, 1.0},
-    {getStringID(LTITLE, TITLE_STR_GF_TREVOR), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFTREVOR_HEAD, 1.0}
+    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Janus_Special_Forces, MP_JOSH_7774_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_TEGGUY1989), MALE, IMG_MPC_RANDOM, BODY_Janus_Special_Forces, MP_TEGGUY1989_HEAD, 1.0}
 };
 #else
 struct MP_selectable_chars mp_chr_setup[] = {
@@ -794,10 +801,8 @@ struct MP_selectable_chars mp_chr_setup[] = {
     {getStringID(LTITLE, TITLE_STR_224_MARION), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Marion_Rosika, 1.0446},
     {getStringID(LTITLE, TITLE_STR_225_MANDY), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Mandy, 1.0446},
     {getStringID(LTITLE, TITLE_STR_226_VIVIEN), FEMALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo,                   HEAD_Female_Vivien, 1.0446},
-    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_JOSH_7774_HEAD, 1.0},
-    {getStringID(LTITLE, TITLE_STR_TEGGUY1989), MALE, IMG_MPC_RANDOM, BODY_Civilian_4, MP_TEGGUY1989_HEAD, 1.0},
-    {getStringID(LTITLE, TITLE_STR_GF_SUBDRAG), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFSUBDRAG_HEAD, 1.0},
-    {getStringID(LTITLE, TITLE_STR_GF_TREVOR), MALE, IMG_MPC_RANDOM, BODY_Brosnan_Tuxedo, MP_GFTREVOR_HEAD, 1.0}
+    {getStringID(LTITLE, TITLE_STR_JOSH_7774), MALE, IMG_MPC_RANDOM, BODY_Janus_Special_Forces, MP_JOSH_7774_HEAD, 1.0},
+    {getStringID(LTITLE, TITLE_STR_TEGGUY1989), MALE, IMG_MPC_RANDOM, BODY_Janus_Special_Forces, MP_TEGGUY1989_HEAD, 1.0}
 };
 #endif
 
@@ -2428,7 +2433,11 @@ void init_menu05_fileselect(void)
     sub_GAME_7F008DE4(&DL, &size);
     load_walletbond();
     if (maybe_is_in_menu){
+        #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
         musicTrack1Play(M_FOLDERS);
+#endif
         maybe_is_in_menu = FALSE;
     }
     g_MenuTimer = 0;
@@ -3015,6 +3024,14 @@ void init_menu06_modeselect(void)
     tab_prev_selected = FALSE;
     load_walletbond();
     fileUpdateBondInCurrentFolder();
+#ifdef GE_MODDED_CHEATS
+#if defined(GE_SAVE_SRAM) || defined(GE_SAVE_EEPROM16K)
+    /* Choosing a save folder must restore its menu theme without requiring
+     * a visit to Special Options. Do not write any EEPROM here. */
+    fileLoadExtendedSettings(fileGetSaveForFoldernum(selected_folder_num));
+#endif
+    modMainMenuThemePlay();
+#endif
 }
 
 
@@ -3724,7 +3741,11 @@ void init_menu07_missionselect(void)
 #ifdef GE_MODDED_CHEATS
         frontModApplyMenuAudioFromSave();
 #endif
+        #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
         musicTrack1Play(M_FOLDERS);
+#endif
         maybe_is_in_menu = FALSE;
     }
     load_walletbond();
@@ -5080,7 +5101,11 @@ void init_menu0E_mpoptions(void)
         musicTrack1ApplySeqpVol(0x7fff);
 #endif
         g_musicXTrack1Fade = MUSIC_FADESTATE_UNSET;
+        #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
         musicTrack1Play(M_FOLDERS);
+#endif
         maybe_is_in_menu = FALSE;
     }
 
@@ -6705,6 +6730,17 @@ void init_menu0f_mpcharsel(void)
             }
         }
     }
+
+#ifdef GE_MODDED_CHEATS
+    /* The retired Goldfinger64 character slots (66/67) may be left selected
+     * by a previous session. Keep the existing roster and menu machinery,
+     * but never let an out-of-range index reach mp_chr_setup[]. */
+    for (i = 0; i < MAX_PLAYER_COUNT; i++)
+    {
+        if (player_char[i] >= num_chars_selectable_mp)
+            player_char[i] = i; /* original default for the four players */
+    }
+#endif
 
     for (i = 0; i < MAX_PLAYER_COUNT; i++)
     {
@@ -8903,7 +8939,11 @@ void init_menu0C_missionfailed(void)
     musicTrack1ApplySeqpVol(0x7fff);
 #endif
     g_musicXTrack1Fade = MUSIC_FADESTATE_UNSET;
-    musicTrack1Play(M_FOLDERS);
+    #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
+        musicTrack1Play(M_FOLDERS);
+#endif
     maybe_is_in_menu = FALSE;
   }
 }
@@ -10161,6 +10201,14 @@ static s32 g_ModOptionsPatchesHover;
 static s32 g_ModOptionsThirdPersonHover;
 static s32 g_ModOptionsSinglePlayerCharacterHover;
 static s32 g_ModOptionsDebugHover;
+static s32 g_ModMainMenuThemeSelecting;
+static s32 g_ModMainMenuThemePending;
+static s32 g_ModWatchThemeSelecting;
+static s32 g_ModWatchThemePending;
+static const char *g_ModWatchThemeNames[4] = {
+    "GoldenEye 007", "Goldfinger 64",
+    "Tomorrow Never Dies 64", "The Spy Who Loved Me 64"
+};
 static s32 g_ModOptionsStartPage2;
 static s32 g_PatchesMenuChoice;
 static s32 g_ThirdPersonOptionsMenuChoice;
@@ -10207,6 +10255,10 @@ void init_menu_mod_options(void)
     g_ModOptionsThirdPersonHover = FALSE;
     g_ModOptionsSinglePlayerCharacterHover = FALSE;
     g_ModOptionsDebugHover = FALSE;
+    g_ModMainMenuThemeSelecting = FALSE;
+    g_ModMainMenuThemePending = modMainMenuThemeGetSelection();
+    g_ModWatchThemeSelecting = FALSE;
+    g_ModWatchThemePending = modWatchThemeGetSelection();
 
     if (save && !(save->options & OPTION_R21_MIGRATED))
     {
@@ -10378,13 +10430,64 @@ static void frontModOptionsChange(s32 direction)
 void interface_menu_mod_options(void)
 {
     s32 row;
-    s32 maxrow = g_ModOptionsPage ? 9 : 10;
+    s32 maxrow = g_ModOptionsPage ? 11 : 10;
     u32 pressed;
 
     viSetFovY(FOV_Y_F); viSetAspect(ASPECT_RATIO_SD); viSetZRange(100.0f, 10000.0f); viSetUseZBuf(FALSE);
     tab_prev_highlight = frontCheckCursorOnPreviousTab();
     tab_next_highlight = !g_ModOptionsPage && frontCheckCursorOnNextTab();
     pressed = joyGetButtonsPressedThisFrame(PLAYER_1, 0xFFFF);
+    if (g_ModMainMenuThemeSelecting)
+    {
+        if (pressed & B_BUTTON)
+            g_ModMainMenuThemeSelecting = FALSE;
+        else if (pressed & (L_JPAD | L_CBUTTONS | U_JPAD | U_CBUTTONS))
+            g_ModMainMenuThemePending = (g_ModMainMenuThemePending + 3) & 3;
+        else if (pressed & (R_JPAD | R_CBUTTONS | D_JPAD | D_CBUTTONS))
+            g_ModMainMenuThemePending = (g_ModMainMenuThemePending + 1) & 3;
+        else if (pressed & (START_BUTTON | Z_TRIG | A_BUTTON))
+        {
+            if (modMainMenuThemeSetSelection(g_ModMainMenuThemePending))
+            {
+                g_ModOptionsDirty = TRUE;
+                modMainMenuThemePlay();
+            }
+            g_ModMainMenuThemeSelecting = FALSE;
+        }
+        if (!g_ModMainMenuThemeSelecting)
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        disable_all_switches(walletinst[0]);
+        set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
+        set_item_visibility_in_objinstance(walletinst[0], SW_BLANK, 1);
+        frontUpdateControlStickPosition();
+        return;
+    }
+    if (g_ModWatchThemeSelecting)
+    {
+        if (pressed & B_BUTTON)
+            g_ModWatchThemeSelecting = FALSE;
+        else if (pressed & (L_JPAD | L_CBUTTONS | U_JPAD | U_CBUTTONS))
+            g_ModWatchThemePending = (g_ModWatchThemePending + 3) & 3;
+        else if (pressed & (R_JPAD | R_CBUTTONS | D_JPAD | D_CBUTTONS))
+            g_ModWatchThemePending = (g_ModWatchThemePending + 1) & 3;
+        else if (pressed & (START_BUTTON | Z_TRIG | A_BUTTON))
+        {
+            if (modWatchThemeSetSelection(g_ModWatchThemePending))
+            {
+                /* Commit through the existing Special Options exit path.
+                 * No EEPROM journal write occurs inside the selector. */
+                g_ModOptionsDirty = TRUE;
+            }
+            g_ModWatchThemeSelecting = FALSE;
+        }
+        if (!g_ModWatchThemeSelecting)
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+        disable_all_switches(walletinst[0]);
+        set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
+        set_item_visibility_in_objinstance(walletinst[0], SW_BLANK, 1);
+        frontUpdateControlStickPosition();
+        return;
+    }
 if (g_ModOptionsUnlockConfirm)
     {
         /* Confirmation page: No on the left, Yes on the right. */
@@ -10514,6 +10617,22 @@ if (g_ModOptionsUnlockConfirm)
             frontModCommitDeferredSubmenuSettings();
             sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
             frontChangeMenu(MENU_ENHANCEMENTS_OPTIONS, FALSE);
+            return;
+        }
+        if (g_ModOptionsPage && row == 10
+            && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | R_JPAD | R_CBUTTONS)))
+        {
+            g_ModMainMenuThemePending = modMainMenuThemeGetSelection();
+            g_ModMainMenuThemeSelecting = TRUE;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+            return;
+        }
+        if (g_ModOptionsPage && row == 11
+            && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON | R_JPAD | R_CBUTTONS)))
+        {
+            g_ModWatchThemePending = modWatchThemeGetSelection();
+            g_ModWatchThemeSelecting = TRUE;
+            sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
             return;
         }
 #ifdef GE_MAP_MAKER
@@ -10714,7 +10833,7 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
 {
     save_data *save = fileGetSaveForFoldernum(selected_folder_num);
     s32 i, x, y, value;
-    s32 count = g_ModOptionsPage ? 10 : 11;
+    s32 count = g_ModOptionsPage ? 12 : 11;
     s32 sliderfill;
     s32 percent;
     char percenttext[8];
@@ -10724,6 +10843,63 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
     u8 opt3 = save ? save->mod_options3 : DEFAULT_MOD_OPTIONS3;
 
     DL = viSetFillColor(DL,0,0,0); DL = viFillScreen(DL); DL = frontSetupMenuBackground(DL); DL = microcode_constructor(DL);
+
+    if (g_ModMainMenuThemeSelecting)
+    {
+        const char *name = g_ModWatchThemeNames[g_ModMainMenuThemePending & 3];
+        s32 th, tw;
+        x = 55; y = 42;
+        DL = frontPrintText(DL, &x, &y, "Main Menu Theme",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        textMeasure(&th, &tw, (u8 *)name, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        x = 220 - (tw >> 1); y = 116;
+        DL = frontPrintText(DL, &x, &y, (u8 *)name,
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        x = 77; y = 116;
+        DL = frontPrintText(DL, &x, &y, "<",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        x = 355; y = 116;
+        DL = frontPrintText(DL, &x, &y, ">",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        x = 90; y = 177;
+        DL = frontPrintText(DL, &x, &y, "A: SELECT    B: CANCEL",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        DL = frontDrawCursor(DL);
+        return DL;
+    }
+    if (g_ModWatchThemeSelecting)
+    {
+        const char *name = g_ModWatchThemeNames[g_ModWatchThemePending & 3];
+        s32 th, tw;
+        x = 55; y = 42;
+        DL = frontPrintText(DL, &x, &y, "Watch Menu Theme",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        textMeasure(&th, &tw, (u8 *)name, ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        x = 220 - (tw >> 1); y = 116;
+        DL = frontPrintText(DL, &x, &y, (u8 *)name,
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        x = 77; y = 116;
+        DL = frontPrintText(DL, &x, &y, "<",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        x = 355; y = 116;
+        DL = frontPrintText(DL, &x, &y, ">",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        x = 90; y = 177;
+        DL = frontPrintText(DL, &x, &y, "A: SELECT    B: CANCEL",
+            ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF,
+            viGetX(), viGetY(), 0, 0);
+        DL = frontDrawCursor(DL);
+        return DL;
+    }
 
     if (g_ModOptionsUnlockConfirm)
     {
@@ -10829,7 +11005,9 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
     {
         static const u8 page1labels[11] = {0,1,2,3,4,5,6,7,9,10,11};
         static const u8 page2labels[10] = {12,13,14,15,30,16,8,29,74,76};
-        char *label = frontModGetOptionLabel(g_ModOptionsPage ? page2labels[i] : page1labels[i]);
+        char *label = g_ModOptionsPage && i == 10 ? "Main Menu Theme"
+            : g_ModOptionsPage && i == 11 ? "Watch Menu Theme"
+            : frontModGetOptionLabel(g_ModOptionsPage ? page2labels[i] : page1labels[i]);
         y=MOD_OPTIONS_FIRST_ROW_Y+i*(g_ModOptionsPage ? MOD_SPECIAL_OPTIONS_ROW_HEIGHT : MOD_OPTIONS_ROW_HEIGHT); x=55;
 #ifdef GE_MAP_MAKER
         if (i==g_ModOptionsHighlighted && !g_ModOptionsUnlockHover && !g_ModOptionsMapMakerHover && !g_ModOptionsLevelModifiersHover && !g_ModOptionsPatchesHover && !g_ModOptionsThirdPersonHover && !g_ModOptionsSinglePlayerCharacterHover && !g_ModOptionsDebugHover && !tab_prev_highlight && !tab_next_highlight)
@@ -10857,7 +11035,19 @@ Gfx *constructor_menu_mod_options(Gfx *DL)
         }
 
         valueptr="Off";
-        if (g_ModOptionsPage && i >= 8)
+        if (g_ModOptionsPage && i == 10)
+        {
+            valueptr = g_ModWatchThemeNames[modMainMenuThemeGetSelection()];
+            if (modMainMenuThemeGetSelection() == 2) valueptr = "TND 64";
+            if (modMainMenuThemeGetSelection() == 3) valueptr = "TSWLM 64";
+        }
+        else if (g_ModOptionsPage && i == 11)
+        {
+            valueptr = g_ModWatchThemeNames[modWatchThemeGetSelection()];
+            if (modWatchThemeGetSelection() == 2) valueptr = "TND 64";
+            if (modWatchThemeGetSelection() == 3) valueptr = "TSWLM 64";
+        }
+        else if (g_ModOptionsPage && i >= 8)
         {
             valueptr = ">";
         }
@@ -11452,6 +11642,14 @@ void interface_menu_experimental_options(void)
         g_ModOptionsDirty = TRUE;
         sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
     }
+    else if (!tab_prev_highlight
+        && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 99.0f && cursor_v_pos <= 115.0f
+        && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON)))
+    {
+        modSetMoveAnywhereEnabled(!modMoveAnywhereEnabled());
+        sndPlaySfx(g_musicSfxBufferPtr, OPTION_CHOOSE_SFX, NULL);
+    }
 
     frontUpdateControlStickPosition();
 }
@@ -11478,6 +11676,19 @@ Gfx *constructor_menu_experimental_options(Gfx *DL)
     y = 82;
     if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
         && cursor_v_pos >= 81.0f && cursor_v_pos <= 97.0f)
+        DL = microcode_constructor_related_to_menus(DL,53,y-1,390,y+15,0x32);
+    x = 55;
+    DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,
+            0xFF,viGetX(),viGetY(),0,0);
+    x = 330;
+    DL = frontPrintText(DL,&x,&y,value,ptrFontZurichBoldChars,ptrFontZurichBold,
+            0xFF,viGetX(),viGetY(),0,0);
+
+    label = "Move Anywhere";
+    value = modMoveAnywhereEnabled() ? "On" : "Off";
+    y = 100;
+    if (!tab_prev_highlight && cursor_h_pos >= 53.0f && cursor_h_pos <= 390.0f
+        && cursor_v_pos >= 99.0f && cursor_v_pos <= 115.0f)
         DL = microcode_constructor_related_to_menus(DL,53,y-1,390,y+15,0x32);
     x = 55;
     DL = frontPrintText(DL,&x,&y,label,ptrFontZurichBoldChars,ptrFontZurichBold,
@@ -11796,9 +12007,7 @@ void interface_menu_level_modifiers(void)
     if ((pressed & B_BUTTON)
         || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
     {
-#ifdef GE_MAP_MAKER
         g_ModOptionsStartPage2 = 1;
-#endif
         frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
         sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         return;
@@ -12349,7 +12558,11 @@ void interface_menu_map_maker(void)
         || (tab_prev_highlight && (pressed & (A_BUTTON | Z_TRIG | START_BUTTON))))
     {
         g_ModOptionsStartPage2 = 1;
+        #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
         musicTrack1Play(M_FOLDERS);
+#endif
         frontChangeMenu(MENU_MOD_OPTIONS, FALSE);
         sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
         return;
@@ -12459,7 +12672,11 @@ void interface_menu_map_maker_basic(void)
                 return;
             }
 
-            musicTrack1Play(M_FOLDERS);
+            #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
+        musicTrack1Play(M_FOLDERS);
+#endif
             frontChangeMenu(MENU_MAP_MAKER, FALSE);
         }
     }
@@ -13793,7 +14010,11 @@ case MENU_DEBUG_OPTIONS:              interface_menu_debug_options();
             if (mapmakerNativeTestShouldReturnToEditor())
             {
                 mapmakerNativeTestFinishReturn();
-                musicTrack1Play(M_FOLDERS);
+                #ifdef GE_MODDED_CHEATS
+        modMainMenuThemePlay();
+#else
+        musicTrack1Play(M_FOLDERS);
+#endif
                 frontChangeMenu(MENU_MAP_MAKER_BASIC, TRUE);
             }
             else

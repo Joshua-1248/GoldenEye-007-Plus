@@ -102,6 +102,9 @@ char* HeadSwitchNames[] = {
 #include <assets/obseg/chr/headjosh/modelFileHeader.inc.c>
 /* Additive copy of Shaun UV/head model for Tegguy1989. */
 #include <assets/obseg/chr/headtegguy/modelFileHeader.inc.c>
+/* Keep the two GF64 model headers out of the default runtime model table. */
+#if defined(GE_ENABLE_GF64_HEADS)
 #include <assets/obseg/chr/headgfsubdrag/modelFileHeader.inc.c>
 #include <assets/obseg/chr/headgftrevor/modelFileHeader.inc.c>
+#endif
 #endif

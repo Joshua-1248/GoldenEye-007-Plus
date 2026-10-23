@@ -63,7 +63,7 @@ ck("frontend Experimental submenu is one save-backed On/Off row",
    and "g_ModOptionsDirty = TRUE;" in FR)
 
 ck("SP Watch appends Experimental after Debug and before Cheats",
-   "#define MODWATCH_OPTION_ROWS 18" in O
+   ("#define MODWATCH_OPTION_ROWS 18" in O or (("#define MODWATCH_OPTION_ROWS 19" in O or ("#define MODWATCH_OPTION_ROWS 20" in O and "row == 19 + (gamemode == GAMEMODE_MULTI)" in O and '"Main Menu Theme"' in O)) and "row == 18 + (gamemode == GAMEMODE_MULTI)" in O and '"Watch Menu Theme"' in O))
    and "#define MODWATCH_MODE_EXPERIMENTAL 0x600" in O
    and "MODWATCH_STATE = MODWATCH_MODE_EXPERIMENTAL;" in O
    and "row == 15" in O
@@ -79,7 +79,8 @@ ck("SP Experimental toggle follows deferred-save policy",
 
 ck("MP/Co-op Watch appends Experimental mode 8 after Debug",
    "if (mode == 2) return 19;" in MP
-   and "if (mode == 7 || mode == 8) return 1;" in MP
+   and "if (mode == 7) return 1;" in MP
+   and "if (mode == 8) return 2;" in MP
    and "mpcfg_mode[player]=8" in MP
    and "mpcfg_row[player]=16" in MP
    and 'mpcfg_mode[curplayernum] == 8 ? "EXPERIMENTAL"' in MP)

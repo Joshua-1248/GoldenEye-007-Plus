@@ -52,8 +52,8 @@ ck("Dam is implemented in the frontend Level Modifiers catalog",
    "index == 0) /* Dam */" in LM and
    "levelModifiersLevelImplemented" in F)
 
-ck("Dam current-stage page exposes all three modifier rows",
-   re.search(r'g_LevelModifierCurrentStage\s*==\s*LEVELID_DAM\)\s*\n\s*return\s+g_LevelModifierDamRuntimeAvailable\s*\?\s*3\s*:\s*0\s*;', LM) is not None)
+ck("Dam current-stage page exposes all four modifier rows",
+   re.search(r'g_LevelModifierCurrentStage\s*==\s*LEVELID_DAM\)\s*\n\s*return\s+g_LevelModifierDamRuntimeAvailable\s*\?\s*4\s*:\s*0\s*;', LM) is not None)
 
 ck("requested Dam modifier labels are exact",
    '"Restore Doors Near Dam Docks"' in LM and
