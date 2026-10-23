@@ -1,878 +1,386 @@
 # GoldenEye 007 Plus
 
-**GoldenEye 007 Plus** is a community modification of *GoldenEye 007* for the Nintendo 64, built upon the GoldenEye 007 decompilation project.
+**GoldenEye 007 Plus** is a community modification of **GoldenEye 007 for Nintendo 64**, built upon the GoldenEye 007 decompilation. It expands the original game with performance optimizations, campaign Co-Op, Perfect Dark-derived Simulants, enhanced Multiplayer, Third-Person gameplay, optional gameplay fixes, restored content, cheats, and experimental features.
 
-The project expands the original game with performance improvements, multiplayer enhancements, campaign Co-Op, Perfect Dark-inspired features, AI Simulants, Third-Person gameplay, additional cheats, restored content, experimental features, and numerous quality-of-life improvements.
+The aim is to preserve the original game's mechanics and presentation wherever possible while offering optional improvements. Backported Perfect Dark behavior is adapted to GoldenEye only where necessary.
 
-The goal is to improve and expand GoldenEye while remaining faithful to the original game's mechanics, presentation, and overall experience.
+**Source-only distribution:** No retail GoldenEye ROM or built game ROM is supplied. To build the project, provide your own legally obtained, unmodified original ROM. See [Building](#building-goldeneye-007-plus), [Credits](#credits-and-acknowledgments), and `LICENSES_AND_NOTICES.txt`.
 
-**This repository contains source code and development materials only. It does not distribute the original GoldenEye 007 ROM.**
+> **Development status (October 2026):** This repository contains the current public R22-derived GoldenEye 007 Plus source with later R27/R30 integration. Experimental features and some recent gameplay fixes still need runtime verification. A successful compile or static audit is not proof that every feature works in-game.
 
----
+## Contents
 
-## Current Development Status — October 2026
-
-GoldenEye 007 Plus is under active development.
-
-Major implemented and ongoing features include:
-
-- Performance optimizations and physical-code improvements.
-- Expanded campaign Co-Op supporting up to four human players.
-- Perfect Dark-derived AI Simulants for Multiplayer and experimental campaign Co-Op.
-- Additional Multiplayer levels and configuration options.
-- Third-Person gameplay with adjustable camera settings.
-- Expanded Special Options and gameplay preferences.
-- Additional cheats and cheat actions.
-- Restored level content and Level Modifiers.
-- The original **Master Control Debug Menu**, accessible through a new activation option.
-- Experimental Jumping and Move Anywhere.
-- A drivable speedboat in Dam.
-- Additional player death animations.
-- Enhanced mission statistics and reports.
-- Mirrored Levels.
-- Experimental Map Maker support.
-- Customizable Main Menu and Watch Menu themes.
-
-Not every feature is finalized. Experimental systems, especially Simulant navigation and moving-platform collision, remain subject to gameplay testing.
-
-A successful build or static audit does not necessarily establish that every feature operates correctly during gameplay.
+- [Feature overview](#feature-overview)
+- [Special Options: access and complete menu guide](#special-options-access-and-complete-menu-guide)
+- [Melee Quick-Swap](#melee-quick-swap)
+- [Master Control Debug Menu](#master-control-debug-menu)
+- [Cheats and one-shot actions](#cheats-and-one-shot-actions)
+- [Level Modifiers](#level-modifiers)
+- [Third-Person Options](#third-person-options)
+- [Experimental features](#experimental-features)
+- [Multiplayer and Simulants](#multiplayer-and-simulants)
+- [Campaign Co-Op](#campaign-co-op)
+- [Building](#building-goldeneye-007-plus)
+- [Repository, development, credits, and legal notes](#repository-structure)
 
 ---
 
-# Special Options and Feature Activation
+## Feature overview
 
-GoldenEye 007 Plus introduces an expanded **Special Options** menu.
+- Physical-code execution and audited performance improvements for Nintendo 64.
+- Single-Player and **1–4-human-player campaign Co-Op**, with enhanced objectives, statistics, deaths, and mission reports.
+- Expanded Multiplayer maps, playable characters, duplicate-character selection, guns, dual-wielding, settings, and HUD presentation.
+- Up to **eight configurable Perfect Dark-derived Simulants** in Multiplayer; experimental campaign companion Simulants.
+- Optional Third-Person camera and related aiming, camera, and death-presentation controls.
+- Extended **Special Options**, **Enhancements**, **Patches**, **Debug**, **Experimental**, **Level Modifiers**, and in-game watch configuration pages.
+- **Melee Quick-Swap**, additional death animations, and other quality-of-life features.
+- Restored **Master Control Debug Menu** access using a dedicated enabled/disabled option and controller combination.
+- Modded and original GoldenEye cheats, including No Reload, Rapid Fire, Fly Mode, No-Clipping, Mirrored Levels, Super Tank, Super/Ultra Kinetics, and immediate mission actions.
+- Dam restoration and a **Drivable Speedboat**; additional Facility, Silo, Surface, Bunker, Frigate, Citadel, and Multiplayer Level Modifiers.
+- Experimental **Jumping**, **Move Anywhere**, and the optional **Map Maker** build.
+- Main Menu Theme and Watch Menu Theme selection.
 
-This menu provides access to additional gameplay settings, visual enhancements, cheats, experimental features, Level Modifiers, debugging options, and other modifications.
+---
 
-Many settings can also be accessed through the in-game watch.
+## Special Options: access and complete menu guide
 
-## Accessing Special Options
+**Special Options** is the principal location for GoldenEye 007 Plus gameplay settings. Open it from the front-end/main menu; its settings span multiple pages. The in-game watch exposes a corresponding Special Options page, with different presentation and some mode-specific differences in Single-Player, Multiplayer, and Co-Op.
 
-From the game's main menu:
+Use the menu's normal selection controls to change a setting, select a category to enter its submenu, and back out when finished. Some changes are immediate, while saved settings are committed when leaving the relevant menu or submenu. Certain settings depend on the active save, game mode, or stage.
 
-1. Open **Special Options**.
-2. Navigate between the available pages using the menu controls.
-3. Select a setting to change its value or open its submenu.
-4. Return to the previous screen when finished.
+**Important:** This is the modified game's menu system (`MODDED_CHEATS=YES`), not a list of retail GoldenEye secret controller sequences. The exact menu positions may differ between the front-end and the watch.
 
-In Single-Player, Multiplayer, and Co-Op, supported options are also available through the in-game watch.
+### Standard Options
 
-Certain settings take effect immediately, while others are saved or applied when the next level begins.
+| Menu option | Function |
+|---|---|
+| Music Volume | Adjust music volume; the front-end displays the percentage. |
+| FX Volume | Adjust sound effects volume; the front-end displays the percentage. |
+| Control Style | Choose the control scheme. |
+| Look Up/Down | Select standard or reversed vertical look. |
+| Auto Aim | Enable or disable auto-aim assistance. |
+| Aim Control | Select Hold or Toggle behavior. |
+| Sight On Screen | Show or hide the aiming sight as configured. |
+| Look Ahead | Control automatic view recentering. |
+| Ammo On Screen | Display ammunition information. |
+| Screen Size | Choose Full, Wide, or Cinema presentation. |
+| Screen Ratio | Choose **4:3, 16:9, 21:9, or 32:9**. |
 
-Some settings may be unavailable in particular game modes.
+### Special Options gameplay settings
 
-## Special Options — Main Settings
+| Menu option | Function |
+|---|---|
+| Head Roll | Enable or disable the head-roll camera effect. |
+| Endless Death Cam | Keep the death camera active instead of ending the view at the normal limit. |
+| Real-Time Collapse | Allow relevant death/collapse animation behavior to proceed in real time. |
+| Damage Hitstun | When disabled, allows firing even while taking damage. |
+| Damage Knockback | Enable or disable movement knockback when hit. |
+| Damage Flash | Enable or disable the white screen flash caused by damage. |
+| Crosshair | Show or hide the crosshair. |
+| Taking Damage Sound | Enable or disable the sound played when the player takes damage. |
+| Third Person | Enable Third-Person presentation where the mode permits it. |
+| Enemy Bullet Holes | Enable additional bullet-hole effects on supported enemy surfaces. |
+| **Melee Quick-Swap** | Enable the Slappers/Sniper Rifle Buttstock shortcut; see the complete instructions below. |
+| Watch Menu Theme | Select the in-game watch's musical theme. |
+| Main Menu Theme | Select the front-end main menu's musical theme. |
 
-The expanded menu includes the original gameplay settings and additional modifications.
+The Special Options interface also links to the categories below. Their order and access method may vary between front-end and watch menus.
+
+### Special Options categories
+
+| Category | What it contains |
+|---|---|
+| **Level Modifiers** | Stage-by-stage restored content and gameplay changes, including the Dam boat and island collision modifier. |
+| **Patches** | Optional optimizations, rendering choices, compatibility fixes, and gameplay corrections. |
+| **Third-Person Options** | Camera position, crosshair, crouch height, shoulder, and death-camera settings. |
+| **Single-Player Options** | Character Modifier and Match View Height. |
+| **Debug** | **Master Control Debug Menu** On/Off setting. |
+| **Experimental** | **Jumping (Press L)** and **Move Anywhere**. |
+| **Enhancements** | Additional player death animations, Always Show Crosshair, and Disable Body Armor. |
+| **In-Game Cheats** | Toggle cheats and immediate actions where supported. |
+| **Map Maker** | Experimental editor, only if the game was compiled with `MAP_MAKER=YES`. |
+
+### Enhancements: every currently named entry
 
 | Option | Description |
 |---|---|
-| Music Volume | Adjusts the game's music volume, with a percentage indicator. |
-| FX Volume | Adjusts sound-effects volume, with a percentage indicator. |
-| Control Style | Selects the controller configuration. |
-| Look Up/Down | Changes the vertical-look direction. |
-| Auto Aim | Enables or disables automatic aiming assistance. |
-| Aim Control | Selects Hold or Toggle aiming behavior. |
-| Sight On Screen | Controls the standard aiming sight. |
-| Look Ahead | Controls automatic camera centering. |
-| Ammo On Screen | Shows or hides ammunition information. |
-| Screen Size | Selects the screen presentation. |
-| Screen Ratio | Supports 4:3, 16:9, 21:9, and 32:9 configurations. |
-| Head Roll | Controls the head-roll movement effect. |
-| Endless Death Cam | Allows the death camera to continue without automatically ending the view. |
-| Real-Time Collapse | Controls whether certain death and collapse events continue in real time. |
-| Damage Hitstun | Enables or disables the player's hitstun response when taking damage. |
-| Damage Knockback | Enables or disables movement knockback caused by damage. |
-| Damage Flash | Controls the screen-flash effect when taking damage. |
-| Crosshair | Enables or disables the standard crosshair. |
-| Taking Damage Sound | Controls the sound associated with taking damage. |
-| Experimental | Opens experimental gameplay features. |
-| Enhancements | Opens additional gameplay and visual enhancements. |
-| Main Menu Theme | Selects the music theme used by the main menu. |
-| Watch Menu Theme | Selects the watch menu's music theme. |
+| **Additional Death Animations For Player** | Opens additional death animation choices for the player. |
+| **Facility Gas Leak Death** | Enables the associated player death animation/behavior. |
+| **Staggering Backwards Death** | Enables the additional staggering-backward death behavior. |
+| **Always Show Crosshair** | Keeps the supported crosshair displayed rather than relying solely on its normal context. |
+| **Disable Body Armor** | Disables supported body armor behavior. |
 
-Additional submenus are available for Level Modifiers, Patches, Single-Player Options, Third-Person Options, and Debug.
+The two death-animation options are grouped under **Additional Death Animations For Player** where that submenu is present. They are optional and should be tested under the intended game mode.
 
-## Special Options — Additional Categories
-
-| Category | Purpose |
-|---|---|
-| Enhancements | Additional gameplay, presentation, and quality-of-life settings. |
-| Experimental | Features still under development, including Jumping and Move Anywhere. |
-| Level Modifiers | Stage-specific changes, restored content, and experimental alterations. |
-| Patches | Optional gameplay fixes and behavior adjustments. |
-| Third-Person Options | Third-Person camera, aiming, and related settings. |
-| Single-Player Options | Single-player character and associated presentation settings. |
-| Debug | Access to the Master Control Debug Menu activation setting. |
-| Map Maker | Experimental map editor, available only in Map Maker-enabled builds. |
-
-The options shown may differ between the main menu and in-game watch.
-
-### Enhancements
-
-The Enhancements category contains optional improvements and additional functionality.
-
-Examples include:
-
-- Third-Person gameplay-related options.
-- Additional player death animations.
-- Staggering Backwards Death.
-- Other visual and gameplay preferences.
-
-Certain enhancements are configurable through their own submenus.
-
-### Patches
-
-The Patches category provides optional corrections and gameplay modifications.
-
-These include features such as:
+### Patches: every currently named entry
 
 | Option | Description |
 |---|---|
-| Micro-Optimizations | Enables supported runtime micro-optimizations. |
-| Noise Dithering | Controls the relevant dithering presentation option. |
-| Unlimited Explosions | Removes the normal restriction on the number of simultaneous explosions. |
-| Disable Body Armor | Disables supported body-armor pickup behavior. |
-| Silo X Music Loop Fix | Addresses the Silo X music-loop issue. |
-| AR33 Prop Fix (MP) | Applies the associated multiplayer weapon-prop correction. |
+| **Micro-Optimizations** | Enable or disable the supported runtime micro-optimization paths. |
+| **Noise Dithering** | Toggle the relevant display dithering behavior. |
+| **Anti-Aliasing** | Toggle the supported anti-aliasing presentation setting. |
+| **TP Corner Shooting Fix** | Optional Third-Person corner-shooting correction. |
+| **Unlimited Explosions** | Removes the original limit on simultaneously active explosions where supported. |
+| **Silo X Music Loop Fix** | Optional correction for the Silo X music-loop behavior. |
+| **AR33 Prop Fix (MP)** | Optional AR33 prop-related correction in Multiplayer. |
 
-Other patch options may be available depending on the development revision.
+**Patches are selectable options, not a promise that every historical or emulator-related issue is fixed.** If an option is experimental or untested on your configuration, verify it during gameplay.
 
-### Main Menu and Watch Menu Themes
+### Single-Player Options
 
-GoldenEye 007 Plus supports selectable music themes.
+| Option | Description |
+|---|---|
+| **Character Modifier** | Override the Single-Player character selection with a supported character. |
+| **Match View Height** | Adjust the Single-Player viewpoint height to match the selected character where supported. |
 
-Available selections include:
+### Main Menu and Watch Menu themes
 
-- GoldenEye 007
-- Goldfinger 64
-- Tomorrow Never Dies 64
-- The Spy Who Loved Me 64
-
-The Main Menu Theme and Watch Menu Theme are separate settings.
-
-These settings are saved where supported by the selected save backend.
+Main Menu Theme and Watch Menu Theme are independent selectors. The supported track choices include **GoldenEye 007**, **Goldfinger 64**, **Tomorrow Never Dies 64**, and **The Spy Who Loved Me 64**. Theme changes are saved in the supported Plus save settings.
 
 ---
 
-# Master Control Debug Menu
+## Melee Quick-Swap
 
-GoldenEye 007 Plus restores access to GoldenEye's original **Master Control Debug Menu** through a configurable option.
+**Melee Quick-Swap is a gameplay option, not a cheat. It is Off by default.** It lets the player switch the presentation of GoldenEye's melee/Fist slot between **Slappers** and **Sniper Rifle Buttstock**.
 
-This is an internal debugging interface originating from the game's development systems.
+### Enable it
 
-It is intended for exploration, testing, and investigating the game's behavior.
+Open **Special Options**, find **Melee Quick-Swap**, and set it to **On**. It is available through the corresponding Special Options page of the in-game watch in supported modes. The selection is save-backed where supported.
 
-**The Master Control Debug Menu is disabled by default.**
+### Use it during gameplay
 
-## How to Enable the Master Control Debug Menu
+1. Equip the **Slappers/Fists** melee slot.
+2. **Hold B first.**
+3. While continuing to hold B, **press Z** (a fresh Z press).
+4. The game switches between the Slappers and Sniper Rifle Buttstock presentation when the alternate is available.
 
-From the main menu:
+**The Sniper Rifle must be owned to select its buttstock.** If it is not available, the game falls back to Slappers/Fists rather than granting a free sniper-rifle melee style. The shortcut applies to the melee slot; it does **not** cycle arbitrary guns.
 
-1. Open **Special Options**.
-2. Select **Debug**.
-3. Find **Master Control Debug Menu**.
-4. Change the option from **Off** to **On**.
-5. Start a mission or enter gameplay.
+The swap waits until the melee action is idle: it does not interrupt an active punch or buttstock strike. It uses the game's existing weapon lower/swap/raise transition, suppresses the normal fire/action side effects of the shortcut, and tracks the player's explicit melee choice independently for each player. Normal automatic melee selection still operates until the player makes an explicit choice. If the Sniper Rifle becomes unavailable, the style falls back safely to Fists.
 
-The Debug submenu is located alongside the other additional Special Options categories.
-
-The option can also be changed through the corresponding **Debug** page in the in-game watch, where supported.
-
-This setting is saved using GoldenEye 007 Plus's extended settings system.
-
-## How to Open the Master Control Debug Menu
-
-Once the setting is enabled and you are inside a level, press the following buttons simultaneously:
-
-**L + R + D-Pad Up + C-Up**
-
-The complete combination is:
-
-| Button | Required |
-|---|---|
-| L | Hold |
-| R | Hold |
-| D-Pad Up | Hold |
-| C-Up | Hold |
-
-All four buttons must be held together. At least one of the combination's buttons must register a new press.
-
-The combination is handled by Controller 1.
-
-It is intended for use during gameplay, not on the title screen.
-
-## Master Control Debug Menu Controls
-
-| Control | Action |
-|---|---|
-| D-Pad Up | Move the selection upward. |
-| D-Pad Down | Move the selection downward. |
-| D-Pad Left | Navigate or adjust the selected debug option. |
-| D-Pad Right | Navigate or adjust the selected debug option. |
-| A | Activate the highlighted option. |
-| Start | Close the Master Control Debug Menu and return to gameplay. |
-
-The menu retains the original GoldenEye debugging functionality, with adaptations to its activation and input handling.
-
-Its available operations include development-oriented display and gameplay controls, such as view-related and STAN-related functionality.
-
-Some options affect the internal game state and may behave differently from ordinary gameplay settings.
-
-**Warning:** The Master Control Debug Menu is intended for debugging. Certain operations may interrupt normal gameplay, produce unusual behavior, or make the current mission impossible to complete normally.
-
-Use it with caution.
-
-## Disabling the Master Control Debug Menu
-
-Return to:
-
-**Special Options → Debug → Master Control Debug Menu → Off**
-
-Turning this setting off prevents the debug menu from being opened through the GoldenEye 007 Plus activation combination.
-
-The ordinary retail debug-menu activation behavior is not substituted for this combination in standard modded gameplay builds.
+**In short: turn on Melee Quick-Swap, equip Slappers, hold B, then tap Z.**
 
 ---
 
-# Cheats and Cheat Descriptions
+## Master Control Debug Menu
 
-GoldenEye 007 Plus expands GoldenEye's original cheat system with additional cheats and immediate-action commands.
+GoldenEye 007 Plus restores access to the original game's **Master Control Debug Menu (MCM)**, an internal development-oriented debug interface. It is **Off by default** and is not normally opened by the retail controller combination in modded builds.
 
-Most cheats can be accessed from:
+### Enable it
 
-- The main-menu **Cheats** screen.
-- The in-game watch's **In-Game Cheats** page, where available.
+In the front-end, open **Special Options → Debug → Master Control Debug Menu** and set it to **On**. The Debug page is also available in supported Single-Player and Multiplayer/Co-Op watch menus. Its value is saved through the extended save settings.
 
-Some cheats may require unlocking or appropriate game-mode conditions.
+### Open it during gameplay
 
-Cheats fall into two main categories:
+On **Controller 1**, press and hold **L + R + D-Pad Up + C-Up** together. The game requires the entire combination to be down and at least one newly pressed button edge. This shortcut is available only after enabling the menu and entering a level; it does not work from the title screen.
 
-**Toggle cheats** remain enabled until switched off or otherwise cleared.
+### Controls
 
-**Action cheats** execute an immediate action when selected and do not remain enabled afterward.
-
-## Gameplay Cheats
-
-| Cheat | Description |
+| Button | Function |
 |---|---|
-| Invincibility | Prevents normal damage to Bond. |
-| Invisibility | Enables the original enemy-visibility cheat behavior. |
-| Infinite Ammo | Prevents ordinary ammunition depletion. |
-| No Reload | Removes the normal requirement to reload weapons. |
-| Rapid Fire | Reduces weapon firing delays, allowing weapons to fire more rapidly. |
-| All Guns | Makes the available weapon collection accessible in supported game modes. |
-| No-Clipping | Allows Bond to move through geometry without normal collision restrictions. |
-| Fly Mode | Enables movement through the air using the player's viewing direction. |
-| Turbo Mode | Increases Bond's movement speed. |
-| Tiny Bond | Reduces Bond's size. |
-| DK Mode | Activates the familiar large-head effect. |
-| Paintball Mode | Changes bullet-impact marks to paintball-style effects. |
+| **D-Pad Up / Down** | Navigate the debug entries. |
+| **D-Pad Left / Right** | Move or adjust supported selections. |
+| **A** | Activate the highlighted debug command. |
+| **Start** | Close the debug menu and restore regular gameplay controls. |
 
-### No-Clipping
-
-No-Clipping bypasses normal collision restrictions.
-
-It allows Bond to move through walls and other level geometry.
-
-Because GoldenEye's maps rely on collision and room data, leaving the normal playable environment may cause unusual behavior.
-
-### Fly Mode
-
-Fly Mode enables flight-style movement.
-
-Vertical movement follows the viewing direction rather than relying exclusively on the normal floor-based movement system.
-
-Fly Mode and No-Clipping are separate cheats.
-
-### No Reload and Infinite Ammo
-
-These are independent options.
-
-**No Reload** removes the need to perform normal weapon reload operations.
-
-**Infinite Ammo** prevents ammunition from being consumed normally.
-
-They can be used independently or together.
-
-## Additional GoldenEye 007 Plus Cheats
-
-| Cheat | Description |
-|---|---|
-| Super Kinetics | Increases the explosion-related death/launch impulse by 1.5×. |
-| Ultra Kinetics | Increases the explosion-related death/launch impulse by 3.5×. |
-| Super Tank | Increases the tank's forward/reverse maximum speeds and turning response by 2.5×. |
-| Mirrored Levels | Mirrors supported level geometry and gameplay objects across the world X axis. |
-| Level Never Ends | Prevents supported normal mission-ending events from finishing the level. |
-| Freeze Timer | Freezes the mission countdown. |
-| Max Head-On | Extends the tank-versus-guard head-on impact audio feedback for a limited period. |
-
-### Super Kinetics
-
-Super Kinetics increases the impulse applied to characters by explosions.
-
-The multiplier is **1.5×**.
-
-It changes the resulting launch/death movement rather than increasing explosion damage or blast radius.
-
-### Ultra Kinetics
-
-Ultra Kinetics increases the same impulse by **3.5×**.
-
-When Super Kinetics and Ultra Kinetics are enabled together, the effective multiplier is **5.0×**.
-
-### Super Tank
-
-Super Tank increases the tank's:
-
-- Maximum forward speed.
-- Maximum reverse speed.
-- Turning response.
-
-The speed/handling multiplier is **2.5×**.
-
-### Mirrored Levels
-
-Mirrored Levels reflects supported gameplay geometry and world objects along the world X axis.
-
-Supported transformations include the relevant:
-
-- Stage geometry.
-- STAN collision.
-- Characters.
-- Props.
-- Doors.
-
-Runtime transitions involving this cheat remain experimental and require further gameplay testing.
-
-### Level Never Ends
-
-Level Never Ends blocks supported normal level-ending conditions.
-
-This can be useful when exploring a level or investigating gameplay systems without triggering ordinary mission completion.
-
-### Freeze Timer
-
-Freeze Timer stops the supported mission countdown from decreasing.
-
-It does not freeze every internal game timer or automatically stop all game processing.
-
-### Max Head-On
-
-Max Head-On modifies the tank's head-on collision feedback.
-
-It allows repeated impact/crush audio feedback for a limited, controlled period while retaining the normal initial collision effect.
-
-## Immediate Cheat Actions
-
-Unlike toggle cheats, these commands activate immediately.
-
-| Action | Description |
-|---|---|
-| Full Health | Restores Bond's health. |
-| Full Armor | Restores body armor. |
-| Normal Animation | Restores normal animation speed following Fast/Slow Animation changes. |
-| Complete Objectives | Completes applicable current mission objectives. |
-| Complete Mission | Completes the current campaign mission through its normal success path. |
-
-### Complete Objectives
-
-Marks applicable mission objectives as completed.
-
-In Co-Op, the shared objective display is updated accordingly.
-
-### Complete Mission
-
-Completes the current mission using the normal mission-success and exit processing.
-
-It also resets the mission time used by the associated target-time reward logic.
-
-This is an immediate action, not an On/Off cheat.
-
-**Warning:** Cheat usage can affect progression, gameplay balance, and mission outcomes. Consider using a separate save file when experimenting.
+The code retains the original debug-menu initialization and functionality, including development-oriented view and STAN tools. Internal debug commands can interrupt normal gameplay or put the level in an unintended state. Save progress before experimenting. To prevent further opening, return to **Special Options → Debug** and set **Master Control Debug Menu** to **Off**.
 
 ---
 
-# Level Modifiers
+## Cheats and one-shot actions
 
-Level Modifiers provide optional changes to individual levels.
+Use the front-end **Cheats** screen or the watch's **In-Game Cheats** page where available. The front-end may present multiple pages. Some original cheats still follow their normal unlock conditions. The mod adds menu-accessible cheats and development choices; enabling those does not require typing a secret controller code.
 
-They can restore unused content, modify level collision, alter starting conditions, or introduce experimental gameplay functionality.
+**Toggle cheats** remain enabled until disabled or cleared by a game/reset path. **One-shot actions** execute immediately. Some internal/debug cheats exist for preservation and testing, and their exact side effects can depend on game mode.
 
-## Accessing Level Modifiers
+### Added and expanded cheat toggles
 
-From the main menu:
-
-1. Open **Special Options**.
-2. Select **Level Modifiers**.
-3. Select the appropriate game-mode category.
-4. Select the level.
-5. Choose the modifier.
-
-Supported modifiers can also be accessed through the in-game watch for the current stage.
-
-## Modifier Activation Behavior
-
-Level Modifiers generally use one of two activation methods.
-
-### Reversible Modifiers
-
-These can be enabled or disabled when their implementation supports it.
-
-They typically display **On** or **Off**.
-
-### Latched Modifiers
-
-These use the **ACTIVATE** command.
-
-Once activated, they display **ACTIVE**.
-
-A latched modifier cannot be disabled during the same level.
-
-Its state is reset when the level ends or reloads.
-
-## Dam Level Modifiers
-
-| Modifier | Description |
+| Cheat | Effect |
 |---|---|
-| Restore Doors Near Dam Docks | Restores the additional doors in the Dam dock area. |
-| Restore Speedboat | Restores the historical speedboat prop. |
-| Drivable Speedboat | Adds a player-controllable speedboat. |
+| **No Reload** | Removes the normal requirement to reload. Independent of Infinite Ammo. |
+| **Rapid Fire** | Reduces or relaxes the firing interval to allow faster shots. |
+| **No-Clipping** | Bypasses ordinary player collision restrictions, permitting traversal through solid geometry; moving beyond valid rooms may cause problems. |
+| **Fly Mode** | Enables flight-style movement, with vertical movement related to the view direction. |
+| **Super Kinetics** | Applies a **1.5×** explosion-related launch/death impulse; does not boost damage or explosion radius. |
+| **Ultra Kinetics** | Applies a **3.5×** explosion-related launch/death impulse. When enabled with Super Kinetics, their combined multiplier is **5.0×**. |
+| **Super Tank** | Increases the tank's forward/reverse top speed and turning response by **2.5×**. |
+| **Mirrored Levels** | Mirrors supported stage geometry, STAN collision, characters, props, and doors along the world X axis. In-level transitions remain experimental. |
+| **Level Never Ends** | Blocks supported normal end-of-stage triggers. |
+| **Freeze Timer** | Stops the supported mission countdown from decreasing; it does not freeze every internal clock or all gameplay. |
+| **Max Head-On** | Repeats/extends tank head-on guard impact and crush audio feedback for a limited period while retaining the original initial impact. |
+| **Infinite Ammo** | Prevents normal ammo depletion; it does not automatically disable reload animations. |
+| **Invincibility** | Protects Bond from normal damage. |
+| **Invisibility** | Uses GoldenEye's normal enemy-visibility cheat behavior. |
+| **All Guns** | Makes the game's weapons available in supported modes. |
+| **DK Mode** | Uses the classic oversized-head appearance. |
+| **Tiny Bond** | Makes Bond unusually small. |
+| **Paintball Mode** | Changes bullet-impact markings. |
+| **Turbo Mode** | Increases Bond's movement speed, separately from Super Tank. |
+| **No Radar (MP)** | Removes the normal Multiplayer radar information. |
+| **All MP Characters** | Makes additional Multiplayer character choices available where supported. |
+| **Invisible [Multi]** | Uses the internal Multiplayer invisibility/phase behavior. |
 
-### Drivable Speedboat
+### Other preserved cheat and debug entries
 
-The Drivable Speedboat is separate from the standard restored speedboat.
+The source also includes **Max Ammo**, **2x Health**, **2x Armor**, **10x Health**, **Extra Weapons**, **Deactivate Invincibility**, **Debug Position**, and **Debug Unk5**. These are preserved original/internal/development entries where exposed. **Debug Unk5 is an unknown original debug entry; no unverified gameplay effect is claimed here.** Their availability and exact outcome may depend on the selected build, current level, or game mode.
 
-To activate it:
+### Immediate action cheats (not On/Off toggles)
 
-1. Open **Level Modifiers**.
-2. Select **Single-Player**.
-3. Select **Dam**.
-4. Select **Drivable Speedboat**.
-5. Activate the modifier.
-6. Start or continue the mission.
+| Action | Effect |
+|---|---|
+| **Full Health** | Restore Bond's health immediately. |
+| **Full Armor** | Restore body armor immediately. |
+| **Normal Animation** | Restore the normal animation rate following Fast/Slow Animation changes. |
+| **Complete Objectives** | Mark the applicable mission objectives complete; updates the shared Co-Op objectives display where applicable. |
+| **Complete Mission** | Complete the campaign mission through the supported success/exit route; resets the time used by target-time reward processing. |
 
-During gameplay:
+Cheats can affect save progression, mission awards, difficulty, or the ability to finish a mission normally. Consider a separate save while experimenting.
 
-**Press B near the drivable speedboat to board it.**
+---
 
-**Press B again to exit.**
+## Level Modifiers
 
-The boat supports movement, steering, and deck-related player interaction.
+Go to **Special Options → Level Modifiers**, select **Single-Player**, **Multiplayer**, or **Miscellaneous**, then choose a level and modifier. Where supported, the current level's entries are also available from the in-game watch.
 
-Once activated, the modifier remains active until leaving or restarting the level.
+- **Reversible options** normally show **On/Off** and can be changed as their implementation allows.
+- **Latched options** show **ACTIVATE**, then **ACTIVE** until the current level ends/reloads; they cannot be deactivated mid-level.
+- Some stage changes are intended for **preload**, so selecting the option before entering the level is safest. Certain explicitly runtime-capable modifiers can be activated during the stage.
 
-The system is still being refined, particularly around shoreline collision, moving-platform interaction, and performance.
+### Single-Player Level Modifiers
+
+| Stage | Modifier | Description |
+|---|---|---|
+| **Dam** | Restore Doors Near Dam Docks | Restore the additional doors near the docks. |
+| **Dam** | Restore Speedboat | Restore the static/historical speedboat feature; distinct from the drivable boat. |
+| **Dam** | **Drivable Speedboat** | Make a controllable speedboat available (latched activation). |
+| **Dam** | **Dam Island Fixed Collisions** | Apply the island's corrected collision behavior (latched activation, designed not to require a restart). |
+| **Facility** | Walk Through Grate In Vents | Allow the supported vent-grate traversal behavior. |
+| **Facility** | Restore Beta Facility Doors | Restore the selected beta doors. |
+| **Facility** | Restore Beta Facility Stacked Tanks | Restore the stacked tanks. |
+| **Surface** | White Sky | Select the alternate white-sky presentation. |
+| **Surface** | Beta Doors | Restore the beta doors. |
+| **Bunker** | Beta Doors | Restore the selected beta doors. |
+| **Silo** | Beta Vent Start | Start in the ventilation-shaft configuration. |
+| **Frigate** | "Keep Clear" Doors Leading Into Engine Room | Restore the selected engine-room entry doors. |
+| **Frigate** | Restore Removed Doors | Restore the removed doors. |
+| **Frigate** | Clipping Change In Room With 3 Pipes | Apply the relevant clipping modification in the three-pipe room. |
+
+### Multiplayer and Miscellaneous Level Modifiers
+
+| Mode/stage | Modifier | Description |
+|---|---|---|
+| Multiplayer: Temple | Fall Down Into Hole | Enable falling into the supported hole. |
+| Multiplayer: Temple | Better Respawning | Apply the alternate respawn behavior. |
+| Multiplayer: Complex | Fall Down Into Holes | Enable the supported hole traversal. |
+| Multiplayer: Cradle | Kill Plane | Apply the original community kill-plane behavior, credited to Zoinkity. |
+| Miscellaneous: Citadel | Water | Enable the Citadel water-related level modifier. |
+
+The list above reflects the named entries in `src/game/levelmodifiers.c`. More modifiers may be added in future versions.
+
+### Drivable Speedboat controls
+
+Choose **Level Modifiers → Single-Player → Dam → Drivable Speedboat**. Activate before entry or choose **ACTIVATE** while playing Dam. Near the speedboat, **press B to board**, then **press B again to exit**. The modifier stays ACTIVE for the remainder of the level. Deck movement, shore transitions, boat collision, and performance are actively being refined. The **Restore Speedboat** entry is a separate feature.
 
 ### Dam Island Fixed Collisions
 
-Dam Island Fixed Collisions is another Dam-specific gameplay modifier.
-
-Its activation is intended to work during gameplay without requiring a level restart.
-
-Once activated, it remains active until leaving the level.
-
-Other Dam restoration features should not be confused with Drivable Speedboat.
-
-## Other Level Modifiers
-
-Additional modifiers include:
-
-- Silo Beta Vent Start.
-- Facility restoration options.
-- Surface and Bunker restoration options.
-- Frigate-related restorations.
-- Multiplayer collision alterations.
-- Multiplayer respawn-related modifications.
-- Cradle multiplayer kill-plane behavior.
-
-Not every modifier is available in every level.
-
-### Cradle Multiplayer Kill Plane
-
-The Cradle multiplayer kill-plane modifier incorporates behavior originally developed by **Zoinkity**.
-
-It uses the relevant vertical boundary behavior for the multiplayer stage while retaining its original setup.
-
-Additional modifier provenance is documented in `CREDITS.txt`.
+This option is intended to take effect immediately while playing Dam, like the drivable-boat activation, and to stay active until the level ends. It is not a generic collision-off cheat and does not replace the game's normal STAN system.
 
 ---
 
-# Experimental Features
+## Third-Person Options
 
-The Experimental category contains features that are still being developed or refined.
-
-These features are optional.
-
-## Jumping
-
-To enable:
-
-**Special Options → Experimental → Jumping (Press L)**
-
-Once enabled:
-
-**Press L during gameplay to jump.**
-
-This introduces jumping functionality beyond GoldenEye's original movement system.
-
-Jumping remains experimental, particularly around moving platforms, unusual floor geometry, and collision boundaries.
-
-## Move Anywhere
-
-Move Anywhere extends movement beyond the original STAN-based traversal restrictions.
-
-It is intended to improve movement across geometry that the original game does not normally allow Bond to traverse.
-
-Development work includes:
-
-- Expanded floor and triangle selection.
-- Improved handling of some floor seams.
-- Geometry and room-visibility handling.
-- Experimental traversal outside ordinary STAN movement paths.
-
-Known limitations still under development include:
-
-- Certain stairs and steep slopes.
-- Some prop collision interactions.
-- Ladder traversal.
-- Interactions with No-Clipping and Fly Mode.
-- Moving platforms, including the Dam speedboat.
-- Additional performance optimization.
-
-Move Anywhere is experimental and is not guaranteed to work correctly with every level feature.
-
-## Map Maker
-
-GoldenEye 007 Plus includes an experimental Map Maker.
-
-The current work covers:
-
-- Basic and Advanced editing functionality.
-- Geometry and mesh editing.
-- Texture selection.
-- Entity and pickup placement.
-- Dedicated Map Maker stage functionality.
-- Native testing.
-- Experimental editing and storage systems.
-
-**Map Maker is disabled in the normal gameplay build.**
-
-To compile a Map Maker-enabled configuration, use:
-
-`MAP_MAKER=YES`
-
-For ordinary GoldenEye 007 Plus gameplay builds, use:
-
-`MAP_MAKER=NO`
-
-Map Maker is not considered finalized.
-
----
-
-# Third-Person Gameplay
-
-GoldenEye 007 Plus supports optional Third-Person gameplay.
-
-This mode provides an alternative camera view while preserving the original First-Person option.
-
-## Accessing Third-Person Options
-
-Open:
-
-**Special Options → Enhancements → Third-Person Options**
-
-The corresponding Third-Person settings are also available through supported in-game menus.
-
-Available settings include:
+Enable **Third Person** from supported gameplay/Special Options controls, then open **Third-Person Options** from Special Options (or its watch submenu) to configure the view.
 
 | Option | Description |
 |---|---|
-| Third Person | Enables or disables Third-Person gameplay. |
-| Stay In TP On Death | Retains the Third-Person presentation during supported death sequences. |
-| TP Crouch Cam | Enables crouch-related camera-height behavior. |
-| Directional Shoulder | Controls directional shoulder-camera behavior. |
-| TP Sight Translucency | Adjusts Third-Person aiming-sight translucency. |
-| TP Cam Distance | Adjusts camera distance from Bond. |
-| TP Cam Height | Adjusts camera height. |
-| TP Cam Horizontal | Adjusts the horizontal camera offset. |
-| TP Cam Down Frame | Adjusts the downward camera framing. |
-| TP Crouched Cam Height | Controls the camera height while crouching. |
-| TP Crosshair Range | Adjusts the Third-Person crosshair range. |
-| TP World-Space Crosshair | Controls the world-space crosshair presentation. |
+| **Stay In TP On Death** | Retain supported Third-Person presentation through the death sequence. |
+| **TP Crouch Cam** | Enable crouch-related camera adjustment. |
+| **Directional Shoulder** | Change the directional shoulder behavior. |
+| **TP Sight Translucency** | Control translucency of the Third-Person sight. |
+| **TP Cam Distance** | Set the camera's distance. |
+| **TP Cam Height** | Set the camera's vertical position. |
+| **TP Cam Horizontal** | Set the lateral offset. |
+| **TP Cam Down Frame** | Adjust downward framing. |
+| **TP Crouched Cam Height** | Set the camera height when crouched. |
+| **TP Crosshair Range** | Set the crosshair range. |
+| **TP World-Space Crosshair** | Control the world-space crosshair representation. |
 
-Additional development work has addressed:
-
-- Camera collision behavior.
-- Aiming and reticle positioning.
-- Projectile and beam alignment.
-- Third-Person death animations.
-- Cutscene transitions.
-- Multiplayer and Co-Op compatibility.
-
-Third-Person integration remains an active development area.
+Third-Person implementation also includes weapon/projectile alignment, cutscene transitions, death presentation, and camera collision work. A Multiplayer **Lock Viewport** setting may restrict changing view modes during a match. Some character or stage-specific camera situations remain subject to testing.
 
 ---
 
-# Perfect Dark-Derived Simulants (AI Bots)
+## Experimental features
 
-One of GoldenEye 007 Plus's largest additions is a backport and adaptation of Perfect Dark's Simulant architecture.
+| Feature | Activation | Notes |
+|---|---|---|
+| **Jumping (Press L)** | **Special Options → Experimental**, enable **Jumping (Press L)**, then press **L** in gameplay. | Extra jumping movement; landing and collision handling remain experimental. |
+| **Move Anywhere** | **Special Options → Experimental → Move Anywhere**. | Broadens movement outside the normal STAN traversal restrictions. |
+| **Map Maker** | Compile with **`MAP_MAKER=YES`**, then use the Map Maker menu. | Experimental Basic/Advanced editor; excluded from standard gameplay builds. |
 
-The original GoldenEye 007 did not contain Perfect Dark's multiplayer Simulant system.
+**Move Anywhere** has received improvements in floor-triangle selection, floor seams, and room/portal geometry handling. Known work remains for stairs, steep slopes, props, ladders, Fly Mode/No-Clipping interactions, and moving-platform support. Do not treat it as a finished general-purpose collision replacement.
 
-GoldenEye 007 Plus introduces AI-controlled participants for supported Multiplayer and campaign Co-Op configurations.
-
-## Multiplayer Simulants
-
-The implementation includes support for **up to eight configurable Simulants**.
-
-Features include:
-
-- Multiple difficulty levels.
-- Independently configurable personality traits.
-- Target selection.
-- AI movement and navigation.
-- Weapon searching and pickup.
-- Weapon switching and reloading.
-- Ranged and melee combat.
-- Body Armor interaction.
-- Radar participation.
-- Multiplayer scoring.
-- Damage and pain reactions.
-- Player-style animations.
-- Death handling and respawning.
-- Door interaction.
-
-## Configuring Simulants
-
-From Multiplayer, open the **Bots** settings.
-
-Available configuration options include:
-
-- Bot slots.
-- Character selection.
-- Difficulty.
-- Team assignment.
-- Personality traits.
-
-The menu supports multiple independently configured AI participants.
-
-Some options depend on the selected Multiplayer mode.
-
-## STAN-Based Navigation
-
-Simulants use a navigation system based on GoldenEye's STAN collision and floor geometry.
-
-This differs from the original guard waypoint navigation system.
-
-The intention is to allow Simulants to navigate levels using their own traversal logic rather than relying on the behavior of regular GoldenEye guards.
-
-Navigation is still being refined and tested.
-
-## Campaign Co-Op Simulants
-
-Experimental campaign Co-Op support allows Simulants to participate alongside human players.
-
-Development includes:
-
-- Following human players.
-- Attacking hostile guards.
-- Weapon and combat behavior.
-- Door interaction.
-- Damage and death handling.
-- Integration with shared campaign objectives.
-
-Campaign Simulants are still experimental.
-
-## Source Code
-
-Primary implementation:
-
-- [`src/game/mpbots.c`](src/game/mpbots.c)
-- [`src/game/mpbots.h`](src/game/mpbots.h)
-
-Relevant source audits can be found in the `scripts/` directory.
-
-**Development warning:** Simulant navigation, animations, multiplayer stability, respawning, and campaign behavior require continued runtime testing.
-
-The implementation does not claim complete behavioral parity with Perfect Dark.
+**Map Maker** includes experimental geometry/mesh editing, textures, entities/pickups, dedicated stage setup, and test features. Use `MAP_MAKER=NO` for the standard build unless intentionally developing the editor.
 
 ---
 
-# Expanded Campaign Co-Op
+## Multiplayer and Simulants
 
-GoldenEye 007 Plus expands the original campaign for multiple players.
+GoldenEye 007 Plus expands the original Multiplayer configuration, weapons, characters, and maps. The game supports duplicate-character selection, more arena choices, additional player options, more weapon handling, and even a single human in Multiplayer.
 
-The current architecture supports up to **four human players**, with additional experimental AI companion functionality.
+### Perfect Dark-derived Simulants
 
-Features and improvements include:
+The mod backports/adapts an AI participant system inspired by **Perfect Dark**. In supported Multiplayer setups, **up to eight Simulants** can be configured. Visit the **Multiplayer → Bots** configuration before launching a match and adjust available bot slots, character selections, difficulty, team, and personality/trait settings.
 
-- Shared mission progression.
-- Shared objective state.
-- Team-wide mission-item handling.
-- Improved player lifecycle management.
-- Friendly-fire handling.
-- Co-Op mission statistics.
-- Multiple-player death and GAME OVER handling.
-- Mission cutscene handling.
-- Expanded split-screen gameplay.
-- Campaign-specific stability improvements.
+Current development covers combat targeting, weapon selection/pickup, ammunition and reloads, armor, radar participation, scoring, movement, death handling, and respawning. Bot navigation uses a separate **STAN-based navigation architecture** rather than simply reusing the original guard waypoints.
 
-## Co-Op Mission Report
+Six difficulty levels, including **Very Easy through Extreme**, and combinable bot traits are part of the expanded design. **The bots remain experimental**: navigation, doorways, animation, multiple-player performance, respawn behavior, and crashes require runtime testing. No complete Perfect Dark behavioral parity is claimed.
 
-The expanded mission report provides additional player statistics.
+Primary implementation: [`src/game/mpbots.c`](src/game/mpbots.c) and [`src/game/mpbots.h`](src/game/mpbots.h). Integration audits live under `scripts/`.
 
-These include:
+### Multiplayer modes and settings
 
-- Mission time.
-- Deaths.
-- Accuracy.
-- Shots fired.
-- Kills.
-- Head hits.
-- Body hits.
-- Limb hits.
-- Other hits.
-- Hit percentages.
-- Weapon of Choice.
+Features include more character/map selections, **All Guns**, dual-wield support, improved split-screen HUDs, bot/player team assignment, optional Friendly Fire, and expanded watch and player settings. Settings may apply to an individual player or the entire match.
 
-Statistics are presented for the relevant participating players.
+### Citadel and Courtyard
 
-## Multiplayer and Co-Op Death Handling
+**Citadel** was first discovered/made playable by **Krijy**, whose earlier implementation used Cradle's setup. **Zoinkity** later reworked the STAN/clipping information for compatibility with the final GoldenEye engine. GoldenEye 007 Plus integrates Citadel as its own Multiplayer stage.
 
-GoldenEye 007 Plus includes improvements to distinguish between:
-
-- Single-Player deaths.
-- Multiplayer deaths.
-- Co-Op player deaths.
-- All-players-dead campaign GAME OVER states.
-
-The goal is to maintain appropriate game-mode behavior without incorrectly invoking the Single-Player death sequence during multiplayer gameplay.
+**Courtyard** was created by **BMW** and is credited as the first GoldenEye level created using Valve Hammer Editor. The project preserves that original authorship.
 
 ---
 
-# Multiplayer Enhancements
+## Campaign Co-Op
 
-GoldenEye 007 Plus expands the original multiplayer experience.
+The project expands the GoldenEye campaign to **one to four human players**, with ongoing experimental AI companion support.
 
-Features include:
+- Shared mission objectives and mission-item handling.
+- Improved escort, guard-targeting, and friendly-fire behavior.
+- Expanded player-death, mission-failure, GAME OVER, and end-cutscene handling.
+- Split-screen camera and player lifecycle fixes.
+- Co-Op mission report and hit-location statistics.
+- Experimental companion Simulant movement, combat, following, and doors.
 
-- Additional playable multiplayer levels.
-- Expanded multiplayer character selection.
-- Duplicate-character selection.
-- Additional weapon selections.
-- Dual-wield support.
-- Expanded HUD configurations.
-- One-human-player multiplayer support.
-- Improved game settings.
-- Simulant support.
-- Additional Level Modifiers.
-- Expanded gameplay and cheat options.
+The expanded mission report includes time, deaths, shots, kills, accuracy, head/body/limb/other hit counts and percentages, and **Weapon of Choice**, with player-specific figures where available. Co-Op avoids incorrectly invoking the standard Single-Player death path for every participant.
 
-## Citadel
-
-Citadel is integrated as a dedicated multiplayer stage.
-
-Special thanks to:
-
-**Krijy** — First discovered Citadel and made the level playable for the wider GoldenEye community. His early playable version reused Cradle's setup because Cradle keeps its rooms loaded simultaneously.
-
-**Zoinkity** — Later reworked Citadel's STAN and clipping information to make it compatible with the final GoldenEye engine's collision system.
-
-GoldenEye 007 Plus builds upon this community restoration work.
-
-## Courtyard
-
-GoldenEye 007 Plus includes Courtyard multiplayer integration.
-
-**BMW** is credited as the creator of Courtyard, the first GoldenEye level created using Valve Hammer Editor.
-
-Original community authorship and contributions remain recognized.
+The campaign and Simulant systems are still being refined; some multiplayer player counts, cutscenes, mission logic, and bot interactions need further tests.
 
 ---
 
-# Additional Gameplay Enhancements
+## Optimization and engine improvements
 
-GoldenEye 007 Plus includes other optional features beyond the major systems.
+Performance work covers character/guard processing, animation and model rendering, visibility/fog, explosion processing, collision and movement, multiplayer/Co-Op workloads, asset compression, memory, and physical-code execution. Changes are intended to be behavior-preserving rather than shortcuts that change GoldenEye's rules.
 
-These include:
-
-- Additional player death animations.
-- Staggering Backwards Death.
-- Damage Flash settings.
-- Damage Hitstun settings.
-- Damage Knockback settings.
-- Endless Death Cam.
-- Real-Time Collapse.
-- Enemy Bullet Holes.
-- Optional gameplay patches.
-- Micro-Optimizations.
-- Expanded screen-ratio options.
-- Customizable menu themes.
-- Additional menu and HUD improvements.
-
-These features are intended to expand customization while preserving the original game's fundamental behavior.
+Testing has included **Project64** with **GLideN64**. Some apparent graphics glitches are emulator/plugin behaviors rather than source regressions. For certain black-screen/black-world issues, **Force depth buffer clear = ON** may help. Include emulator/plugin version and configuration in bug reports; compare against unmodified GoldenEye behavior when possible.
 
 ---
 
-# Performance and Engine Improvements
+## Building GoldenEye 007 Plus
 
-Performance optimization is a major part of GoldenEye 007 Plus.
+This is a **source-only project**. Provide a legally obtained, unmodified **NTSC-U GoldenEye 007** ROM in the project root named `baserom.u.z64`. The ROM and generated `.z64` files are **not distributed** here. The physical-code build requires the appropriate **N64 Expansion Pak / 8 MiB RDRAM** environment.
 
-Development has included optimizations and investigations involving:
+### Standard gameplay configuration (Linux)
 
-- Character processing.
-- Guard processing.
-- Model animation.
-- Model rendering.
-- Visibility.
-- Fog calculations.
-- Explosion calculations.
-- Physics and collision.
-- Multiplayer and Co-Op performance.
-- Memory usage.
-- Physical-code execution.
-- Asset handling and compression.
-
-Performance improvements are intended to reduce unnecessary processing while maintaining the original gameplay behavior.
-
-The project prioritizes correctness and stability over changes that only improve performance by altering gameplay rules.
-
-Runtime verification remains important, particularly in split-screen configurations and on original Nintendo 64 hardware.
-
----
-
-# Building GoldenEye 007 Plus
-
-The recommended standard gameplay configuration uses:
-
-- NTSC-U / United States.
-- Physical-code execution.
-- Physical fastpaths.
-- Modded cheats and enhancements.
-- EEPROM16 saving.
-- LLVM-enabled build tools.
-- Map Maker disabled.
-- Four Make jobs.
-
-## Requirements
-
-The project is developed primarily using Linux.
-
-Linux Mint, Ubuntu, and other Debian-compatible distributions are suitable environments.
-
-A legally obtained, unmodified NTSC-U GoldenEye 007 ROM is required.
-
-Place the ROM in the project root as:
-
-`baserom.u.z64`
-
-The source repository does not include the game ROM.
-
-## Standard Gameplay Build
-
-Run the following from the project root.
+The established development configuration uses **EEPROM16**, LLVM, the physical-code fastpaths, modded cheats, **Map Maker disabled**, and **four Make jobs**. Recent local development builds support Turtledeflate compression through environment variables:
 
 ```bash
 GE_CDATA_TURTLE=1 \
@@ -888,11 +396,7 @@ make VERSION=US \
     -j4
 ```
 
-Replace `/absolute/path/to/turtledeflate_app` with the location of your Turtledeflate executable.
-
-The Turtledeflate environment variables are applicable to development trees containing that integration.
-
-For source revisions without the Turtledeflate integration, the ordinary gameplay configuration is:
+Replace `/absolute/path/to/turtledeflate_app` with your installed compressor's executable path. **The Turtledeflate variables apply only to source revisions with that integration**; older published trees may ignore them. Where Turtledeflate support is absent, use the ordinary build flags without the environment variables:
 
 ```bash
 make VERSION=US \
@@ -905,214 +409,84 @@ make VERSION=US \
     -j4
 ```
 
-### Build Configuration
+`-j4` sets up to four concurrent Make jobs; `GE_CDATA_TURTLE_WORKERS=4` sets the compressor's worker count where implemented. `MAP_MAKER=NO` is deliberate for the standard game. The usual gameplay build directory is `build/u-phys-opt-mod-eep16-nomap/`.
 
-| Flag | Purpose |
+The supplied `build_geplus.sh` helper may select **`MAP_MAKER=YES`** and a different number of jobs. Review that helper before using it: it is not necessarily equivalent to the standard command shown above. To develop the editor intentionally, compile with `MAP_MAKER=YES`.
+
+### Build configuration reference
+
+| Variable | Purpose |
 |---|---|
-| `VERSION=US` | Builds the NTSC-U version. |
-| `PHYSICAL_CODE=YES` | Enables the physical-code architecture. |
-| `PHYSICAL_FASTPATHS=YES` | Enables supported physical fastpaths. |
-| `MODDED_CHEATS=YES` | Includes GoldenEye 007 Plus gameplay enhancements. |
-| `MAP_MAKER=NO` | Excludes the experimental Map Maker from the normal build. |
-| `OPT_USE_LLVM=YES` | Enables the supported LLVM toolchain configuration. |
-| `COMPARE=0` | Disables retail ROM comparison for the modified build. |
-| `-j4` | Uses up to four concurrent Make jobs. |
-| `GE_CDATA_TURTLE_WORKERS=4` | Uses four Turtledeflate workers when supported. |
+| `VERSION=US` | Select NTSC-U. |
+| `PHYSICAL_CODE=YES` | Use the physical-code architecture. |
+| `PHYSICAL_FASTPATHS=YES` | Enable supported physical fastpaths. |
+| `MODDED_CHEATS=YES` | Compile the Plus gameplay and cheat features. |
+| `MAP_MAKER=NO` | Exclude the experimental editor. |
+| `OPT_USE_LLVM=YES` | Use the supported LLVM toolchain route. |
+| `COMPARE=0` | Do not compare the modified ROM against the retail ROM hash. |
+| `-j4` | Four concurrent Make jobs. |
+| `GE_CDATA_TURTLE_WORKERS=4` | Four compression workers on compatible source trees. |
 
-The standard gameplay configuration uses the Plus EEPROM16 save backend.
-
-The normal gameplay output is associated with:
-
-`build/u-phys-opt-mod-eep16-nomap/`
-
-Exact output filenames can vary between configurations.
-
-## Map Maker Build
-
-To build a version with the experimental Map Maker enabled, use:
-
-`MAP_MAKER=YES`
-
-The supplied `build_geplus.sh` helper may use a different configuration from the standard gameplay command.
-
-Review its selected build flags before using it.
-
-## Nintendo 64 Requirements
-
-The physical-code configuration requires the appropriate Nintendo 64 memory environment, including Expansion Pak support.
-
-Testing on emulators and original hardware should use the required memory configuration.
+No `make clean` is required just to perform an incremental build.
 
 ---
 
-# Repository Structure
+## Repository structure
 
-| Directory or File | Purpose |
+| Path | Contents |
 |---|---|
-| `src/` | Main game source code. |
-| `src/game/` | Gameplay, menus, AI, player systems, and collision logic. |
-| `src/game/mpbots.c` | Simulant implementation. |
-| `src/game/mpbots.h` | Simulant declarations. |
-| `assets/` | Asset definitions and build resources. |
-| `scripts/` | Build scripts, source audits, and utilities. |
-| `tools/` | Development and conversion tools. |
-| `include/` | Shared headers. |
-| `rsp/` | Nintendo 64 RSP-related components. |
-| `Makefile` | Main project build configuration. |
-| `README.md` | Main project documentation. |
-| `CURRENT_DEVELOPMENT_STATUS.md` | Development overview. |
-| `CREDITS.txt` | Credits and attribution. |
-| `REFERENCES.txt` | Research and technical references. |
-| `LICENSES_AND_NOTICES.txt` | Licensing and third-party notices. |
+| `src/`, `src/game/` | Engine, gameplay, menus, player state, AI, and collision code. |
+| `src/game/mpbots.c`, `src/game/mpbots.h` | Simulant implementation and declarations. |
+| `assets/` | Required asset definitions and build-time resources. |
+| `scripts/` | Build/extraction utilities and source/physical audits. |
+| `tools/` | Native development, conversion, and build tools. |
+| `include/`, `ld/`, `rsp/` | Headers, linker-related material, and RSP source. |
+| `Makefile`, `build_geplus.sh` | Build entry points. |
+| `README.md`, `CURRENT_DEVELOPMENT_STATUS.md` | User instructions and development status. |
+| `CREDITS.txt`, `REFERENCES.txt`, `LICENSES_AND_NOTICES.txt` | Attribution, research references, and licenses/notices. |
+| `docs/` | Additional focused project documentation and contributor provenance. |
 
-The repository is intended to contain the current project source and the materials necessary to understand and build it.
+The public repository should focus on current source, necessary assets/build tools, useful documentation, and attribution. Numerous old `R##` patches, dated addendums, temporary logs, backups, and duplicate root-level C copies are **historical workbench artifacts**, not independent current releases. Retain history in Git and local archives instead of cluttering the public project tree.
 
-Historical development snapshots, temporary logs, backup copies, and superseded revision patches are not required as separate files in the main project directory.
+## Development principles
 
----
+1. **Preserve the original game:** original GoldenEye behavior is the authoritative baseline for original systems.
+2. **Respect backport fidelity:** match Perfect Dark behavior where it is intentionally backported, with only necessary engine adaptations.
+3. **Preserve stable functionality:** make targeted corrections rather than unrelated code changes.
+4. **Do not sacrifice correctness for speed:** optimizations must not introduce movement, collision, rendering, or AI regressions.
+5. **Test all relevant modes:** Single-Player, Multiplayer, Co-Op, different player counts, emulators, and N64 hardware.
+6. **Treat experimental features as experimental:** a passing static audit or successful compile is not full runtime verification.
+7. **Preserve proper attribution and licensing:** credit creators of third-party code, levels, assets, and research.
 
-# Emulator Compatibility
+## Bug reports and testing
 
-Development and testing have included Project64 with GLideN64.
-
-Some visual issues may originate from the emulator or graphics plugin rather than the game's source code.
-
-For certain GLideN64 black-screen or black-world symptoms, a potentially useful configuration is:
-
-**Force depth buffer clear = ON**
-
-When reporting graphics issues, include:
-
-- Emulator name and version.
-- Graphics plugin and version.
-- Framebuffer-emulation settings.
-- Relevant depth-buffer settings.
-- The level and game mode.
-- Whether the problem also occurs on original hardware or another emulator.
-
-Source regressions and emulator-specific behavior should be investigated separately.
+Include the level/map, game mode, player count, Simulants, active cheats and modifiers, exact action that failed, expected versus actual behavior, emulator/hardware and plugin version, and relevant build configuration. Investigate whether the behavior exists in retail GoldenEye before attributing every visual symptom to this mod.
 
 ---
 
-# Development Principles
+## Credits and acknowledgments
 
-GoldenEye 007 Plus follows several core development principles.
+GoldenEye 007 Plus is possible because of original developers, reverse engineers, preservationists, community researchers, tool authors, modders, and testers.
 
-1. **Preserve the original game.** Maintain GoldenEye's established gameplay behavior wherever possible.
+- **Rare** — Original development team of GoldenEye 007 for Nintendo 64.
+- **GoldenEye 007 decompilation project and contributors** — Foundational source reconstruction and research: <https://gitlab.com/kholdfuzion/goldeneye_src>.
+- **Perfect Dark decompilation project and contributors, including Ryan Dwyer** — Essential reference for the adapted Simulant and Perfect Dark-derived systems.
+- **Krijy** — Discovery and early playable restoration of Citadel.
+- **Zoinkity** — Citadel STAN/clipping reconstruction and original community gameplay/modifier work, including the Cradle (MP) kill-plane behavior.
+- **BMW** — Creator of Courtyard and its pioneering Hammer Editor workflow.
+- **Goldfinger 64 developers and contributors** — Authorship of Goldfinger 64 content referenced or adapted by this project. See `docs/GOLDFINGER64_HALL_OF_FAMERS_PROVENANCE.md` and the source notices.
+- **GoldenEye and Perfect Dark community contributors** — Technical research, preservation, tooling, testing, and modding discoveries.
+- **Project64 and GLideN64 teams** — Emulator and graphics-plugin development enabling testing and investigation.
+- **OpenAI ChatGPT** — Development and research assistance.
 
-2. **Respect original source behavior.** Use the original GoldenEye implementation as the authoritative reference when investigating engine behavior.
+**Additional mod provenance:** The **Cradle (MP) Kill Plane** was originally developed by **Zoinkity**; GoldenEye 007 Plus ports its relevant Y-boundary behavior while preserving the stage's underlying Multiplayer setup. Additional historic GameShark-related modifier provenance is documented in `CREDITS.txt`.
 
-3. **Maintain backport fidelity.** Adapt features from Perfect Dark without introducing unnecessary gameplay deviations.
+For fuller attribution and applicable rights, consult **`CREDITS.txt`**, **`REFERENCES.txt`**, and **`LICENSES_AND_NOTICES.txt`**. This README does not relicense third-party material or claim ownership of community-created content. All applicable redistribution requirements remain in force.
 
-4. **Prioritize correctness.** Performance improvements must not compromise collision, AI behavior, player movement, or other gameplay systems.
+## Legal and trademark notice
 
-5. **Preserve working functionality.** Avoid unnecessary changes to stable systems while correcting unrelated problems.
+GoldenEye 007, James Bond, Nintendo 64, Rare, Nintendo, MGM, EON Productions, their characters, artwork, music, names, and trademarks belong to their respective rights holders.
 
-6. **Test multiple configurations.** Consider Single-Player, Multiplayer, Co-Op, player counts, and original hardware.
+GoldenEye 007 Plus is an **unofficial fan/community project** and is not affiliated with, sponsored by, or endorsed by those rights holders. It is intended for preservation, research, experimentation, and appreciation of the original game.
 
-7. **Preserve attribution.** Credit original developers, reverse engineers, modders, and third-party asset creators.
-
-8. **Distinguish finished features from experimental work.** Static checks and successful compilation are not substitutes for gameplay testing.
-
-9. **Avoid unnecessary development clutter.** The public repository should focus on the current working source, necessary assets, tools, and useful documentation.
-
----
-
-# Credits and Acknowledgments
-
-GoldenEye 007 Plus is made possible by the work of the original game's developers, decompilation contributors, reverse engineers, preservationists, modders, and the broader GoldenEye and Perfect Dark communities.
-
-Important foundations and contributions include:
-
-**Rare** — Original developers of GoldenEye 007 for Nintendo 64.
-
-**GoldenEye 007 Decompilation Project** — Source reconstruction and research forming the foundation of this project.
-
-Original project:
-
-https://gitlab.com/kholdfuzion/goldeneye_src
-
-**Perfect Dark Decompilation Project** — Source and technical reference for the adaptation of Perfect Dark-derived gameplay and Simulant features.
-
-**Ryan Dwyer and other Perfect Dark decompilation contributors** — Important research and source-development contributions.
-
-**Krijy** — Discovery of Citadel and early work making it playable.
-
-**Zoinkity** — Citadel STAN and clipping restoration, additional GoldenEye research, and original work behind certain Level Modifiers.
-
-**BMW** — Creator of Courtyard, including its pioneering use of Valve Hammer Editor for GoldenEye level creation.
-
-**Goldfinger 64 development community** — Original creators of the Goldfinger 64 project and associated resources referenced or adapted by GoldenEye 007 Plus.
-
-**GoldenEye and Perfect Dark modding communities** — Research, tools, discoveries, and preservation work.
-
-**Project64 and GLideN64 contributors** — Emulator and graphics-plugin development supporting investigation and testing.
-
-**OpenAI ChatGPT** — Development and research assistance.
-
-Additional credits, resource provenance, and third-party notices are maintained in:
-
-- `CREDITS.txt`
-- `REFERENCES.txt`
-- `LICENSES_AND_NOTICES.txt`
-
-## Additional Mod Provenance
-
-The Cradle Multiplayer Kill Plane Level Modifier was originally developed by **Zoinkity**.
-
-GoldenEye 007 Plus ports its relevant vertical-boundary behavior while preserving the underlying multiplayer setup.
-
-Additional historical GameShark-related Level Modifier provenance is documented in `CREDITS.txt`.
-
-The project does not claim authorship of assets, code, tools, or research originating from third-party contributors.
-
-All applicable licenses, attribution requirements, and redistribution restrictions must be respected.
-
----
-
-# Development Status and Contributions
-
-GoldenEye 007 Plus remains an ongoing community modification.
-
-Contributions involving:
-
-- Gameplay testing.
-- Bug reports.
-- Performance analysis.
-- Original engine research.
-- Nintendo 64 hardware compatibility.
-- Source improvements.
-- Documentation.
-- Properly credited community content.
-
-are valuable to the project's continued development.
-
-Please include enough information in bug reports to reproduce the problem.
-
-For example:
-
-- Level or multiplayer map.
-- Single-Player, Multiplayer, or Co-Op.
-- Number of human players and Simulants.
-- Enabled cheats and Level Modifiers.
-- Emulator or original hardware.
-- Steps leading to the issue.
-- Expected behavior and actual behavior.
-
-The project's current status is also documented in `CURRENT_DEVELOPMENT_STATUS.md`.
-
----
-
-# Legal and Trademark Notice
-
-GoldenEye 007, James Bond, Nintendo 64, Rare, Nintendo, MGM, EON Productions, and their respective characters, artwork, audio, names, and trademarks belong to their applicable rights holders.
-
-GoldenEye 007 Plus is an unofficial fan and community project.
-
-It is not affiliated with, endorsed by, or sponsored by Nintendo, Rare, MGM, EON Productions, or any other applicable rights holder.
-
-No original retail GoldenEye 007 ROM is distributed by this repository.
-
-Users must provide their own legally obtained game ROM for supported build and extraction processes.
-
-**GoldenEye 007 Plus is a community modification created for preservation, research, experimentation, and appreciation of the original game.**
+**No retail GoldenEye 007 ROM is included or distributed.** Users must supply their own legally obtained original game ROM for supported build/extraction operations.
